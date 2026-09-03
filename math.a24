@@ -1,0 +1,1030 @@
+/// Arithmetic over unbounded Integers and IEEE Doubles.
+///
+/// The selection is Turbo Pascal's, which is where the names come from, but the
+/// behaviour is decided here: where the two would differ, this unit follows
+/// what the language makes possible rather than what a 16-bit machine made
+/// necessary. `Trunc` answering an exact Integer for any finite Double is the
+/// clearest case.
+///
+/// Two shapes live here. The type-preserving routines are written untyped
+/// because their result follows their argument, and the transcendental ones are
+/// foreign declarations onto libm, where the declaration is the whole of the
+/// implementation. Nothing here is an operator anywhere else in the language:
+/// `div` and `mod` are operators and never appear as functions.
+unit math;
+
+uses testing;
+
+/// The ratio of a circle's circumference to its diameter.
+///
+/// The value is the nearest Double to pi, which is the same one C's `M_PI`
+/// names, so a computation that mixes this with a libm result stays consistent.
+///
+/// # Examples
+/// `Pi Is The Nearest Double To The Ratio`
+const Pi := 3.141592653589793;
+
+/// The positive infinity, as a Double.
+///
+/// Answered by an overflowing operation and by dividing a non-zero value by
+/// zero, and ordered above every finite Double, so a running minimum may be
+/// seeded with it. Its negation is the negative infinity, which no separate
+/// constant is needed for.
+///
+/// Unlike `NaN`, this compares usefully: `X = Infinity` is a sound test, though
+/// `IsInfinite` says it more plainly and catches both signs.
+///
+/// # Examples
+/// `Infinity Is Ordered Above Every Finite Double`
+const Infinity := 1.0 / 0.0;
+
+/// The quiet NaN, as a Double.
+///
+/// Useful for handing back a Double that means nothing, and for passing to a
+/// routine under test. It is not useful for comparison, which is the whole of
+/// what makes it awkward.
+///
+/// This constant is NOT equal to itself, and no value is equal to it. Writing
+/// `X = NaN` therefore always answers False, `X <> NaN` always answers True,
+/// and neither says what was meant. `IsNaN` is the only way to ask.
+///
+/// # Examples
+/// `NaN Is Not Equal To Itself Or To Anything Else`
+const NaN := 0.0 / 0.0;
+
+/// The magnitude of X, in X's own type.
+///
+/// An Integer answers an Integer and a Double answers a Double, which falls out
+/// of `0 - X` following its operand rather than being arranged. The comparison
+/// is `<=` rather than `<` so that negative zero is run through the subtraction
+/// and normalised: `-0.0 < 0` is false, so `<` would hand `-0.0` straight back.
+///
+/// Integers are unbounded, so the negation cannot overflow and the undefined
+/// behaviour C has for `abs(INT_MIN)` does not exist here.
+///
+/// # Raises
+/// `Operands must be numbers.` for a value the subtraction cannot take, from
+/// the subtraction rather than from a check of its own.
+///
+/// # Examples
+/// `Abs Answers The Magnitude In The Argument's Own Type`
+function Abs (X);
+begin
+    if X <= 0 then Exit 0 - X;
+
+    Exit X;
+end
+
+/// X multiplied by itself, in X's own type.
+///
+/// # Raises
+/// `Operands must be numbers.` for a value the multiplication cannot take.
+///
+/// # Examples
+/// `Sqr Answers The Square In The Argument's Own Type`
+function Sqr (X);
+begin
+    Exit X * X;
+end
+
+/// The smaller of A and B, in that operand's own type.
+///
+/// Ties answer B, which is visible only when the two differ in type: `Min (2,
+/// 2.0)` is `2.0` and `Min (2.0, 2)` is `2`.
+///
+/// # Raises
+/// `Operands must be numbers.` for values the comparison cannot take.
+///
+/// # Examples
+/// `Min Answers The Smaller Operand`
+function Min (A, B);
+begin
+    if A < B then Exit A;
+
+    Exit B;
+end
+
+/// The larger of A and B, in that operand's own type.
+///
+/// Ties answer B, on the same reasoning as `Min`.
+///
+/// # Raises
+/// `Operands must be numbers.` for values the comparison cannot take.
+///
+/// # Examples
+/// `Max Answers The Larger Operand`
+function Max (A, B);
+begin
+    if A > B then Exit A;
+
+    Exit B;
+end
+
+/// Whether N is odd.
+///
+/// The test is `<> 0` rather than `= 1` because `mod` keeps the sign of its
+/// left operand, so `-3 mod 2` is `-1`. Comparing against one would answer
+/// False for every negative odd number.
+///
+/// # Raises
+/// `Operands must be integers.` for a Double, which `mod` refuses rather than
+/// truncating.
+///
+/// # Examples
+/// `Odd Answers For Negative Numbers As Well As Positive`
+function Odd (N : Integer) : Boolean;
+begin
+    Exit N mod 2 <> 0;
+end
+
+/// The non-negative square root of X.
+///
+/// # Safety
+/// A negative X answers NaN rather than raising, which is libm's behaviour and
+/// not this unit's choice.
+///
+/// # Examples
+/// `Sqrt Answers The Non Negative Root`
+function Sqrt (X : Double) : Double; external 'sqrt';
+
+/// e raised to the power X.
+///
+/// # Examples
+/// `Exp Answers E To The Power Of Its Argument`
+function Exp (X : Double) : Double; external 'exp';
+
+/// The natural logarithm of X.
+///
+/// # Safety
+/// Zero answers negative Infinity and a negative X answers NaN, both from libm
+/// rather than from a check here.
+///
+/// # Examples
+/// `Ln Answers The Natural Logarithm`
+function Ln (X : Double) : Double; external 'log';
+
+/// The sine of X, where X is in radians.
+///
+/// # Examples
+/// `Sin Answers The Sine Of An Angle In Radians`
+function Sin (X : Double) : Double; external 'sin';
+
+/// The cosine of X, where X is in radians.
+///
+/// # Examples
+/// `Cos Answers The Cosine Of An Angle In Radians`
+function Cos (X : Double) : Double; external 'cos';
+
+/// The arctangent of X, in radians, between -pi/2 and pi/2.
+///
+/// # Examples
+/// `ArcTan Answers The Angle Whose Tangent Is X`
+function ArcTan (X : Double) : Double; external 'atan';
+
+/// Truncation toward zero, as a C primitive answering a 64-bit integer.
+///
+/// Private to this unit, and the fast path for a value that fits. `Trunc`
+/// handles the rest. The implementation is in `mathffi.c` because libm's
+/// `trunc` returns a Double, and a foreign declaration must name a C function
+/// whose real signature is the one wanted.
+function TruncTo64 (X : Double) : Integer; external 'alg_trunc' in 'libmathffi.dylib';
+
+/// The integral mantissa of a finite Double, below 2^53 in magnitude.
+///
+/// Private to this unit. With `FloatExponent` it gives the exact decomposition
+/// `X = Mantissa * 2^Exponent`, which is how a value too large for a 64-bit
+/// conversion is still answered exactly.
+function FloatMantissa (X : Double) : Integer; external 'alg_float_mantissa' in 'libmathffi.dylib';
+
+/// The exponent matching `FloatMantissa`.
+///
+/// Private to this unit.
+function FloatExponent (X : Double) : Integer; external 'alg_float_exponent' in 'libmathffi.dylib';
+
+/// Two raised to N, as an exact Integer, for N of zero or more.
+///
+/// Private to this unit. By squaring rather than by doubling, because the
+/// exponent reaches 971 for the largest Double and the products are unbounded
+/// Integers whose cost grows with their width.
+function PowerOfTwo (N : Integer) : Integer;
+begin
+    var Answer := 1;
+    var Base   := 2;
+    var Rest   := N;
+
+    while Rest > 0 do
+    begin
+        if Rest mod 2 = 1 then Answer := Answer * Base;
+
+        Rest := Rest div 2;
+
+        if Rest > 0 then Base := Base * Base;
+    end
+
+    Exit Answer;
+end
+
+/// Whether X is not a number.
+///
+/// The only test that works, because NaN is the one value not equal to itself
+/// and every comparison against it is false. `X = NaN` answers False even when
+/// X is NaN, and `X <> NaN` answers True for every X including NaN, so neither
+/// says what was meant.
+///
+/// A NaN arrives from an operation with no answer rather than no value --
+/// `Sqrt` of a negative, `Ln` of a negative, zero divided by zero, or one
+/// infinity subtracted from another.
+///
+/// # Examples
+/// `IsNaN Answers True For Every Way Of Arriving At A NaN`
+function IsNaN (X : Double) : Boolean;
+begin
+    Exit not (X = X);
+end
+
+/// Whether X is either infinity.
+///
+/// Both signs answer True. A NaN answers False: it is not a number, but it is
+/// not an infinity either, and conflating the two is what the separate
+/// predicates exist to prevent.
+///
+/// # Examples
+/// `IsInfinite Answers True For Either Sign And False For NaN`
+function IsInfinite (X : Double) : Boolean;
+begin
+    Exit X = Infinity or X = -Infinity;
+end
+
+/// Whether X is neither an infinity nor NaN.
+///
+/// Private to this unit, and written from the two public predicates rather than
+/// beside them so that the three cannot disagree.
+function IsFinite (X : Double) : Boolean;
+begin
+    Exit not IsNaN (X) and not IsInfinite (X);
+end
+
+/// The integer part of X, with any fractional part discarded.
+///
+/// Truncation is toward zero, so `Trunc (-3.7)` is `-3` rather than `-4`, which
+/// differs from flooring for a negative argument. Discarding toward zero is
+/// what makes `Trunc` and `Int` the same operation in two return types, and
+/// what keeps `Frac` carrying the sign of its argument.
+///
+/// The result is an Integer proper, not a Double carrying a whole number, which
+/// is what distinguishes this from `Int`.
+///
+/// Every finite Double is answered exactly, however large. C's conversion runs
+/// out at 2^63, but a Double that large is already a whole number, so the value
+/// is rebuilt there from its mantissa and exponent as an unbounded Integer:
+/// `Trunc (1.0E300)` is the exact 301-digit integer rather than a refusal or an
+/// approximation. An Integer here has no width to exceed, so refusing would be
+/// carrying a limit the language does not have.
+///
+/// # Raises
+/// `Trunc of NaN.` and `Trunc of an infinity.`, which are the only values it
+/// refuses, neither having an integer to answer with.
+///
+/// # Examples
+/// `Trunc Discards The Fractional Part`
+function Trunc (X : Double) : Integer;
+begin
+    if IsNaN (X) then raise 'Trunc of NaN.';
+    if IsInfinite (X) then raise 'Trunc of an infinity.';
+
+    // The fast path, and the only one that discards anything. The bounds are
+    // asymmetric because the range is: 2^63 is one past the largest value a
+    // 64-bit conversion holds, while -2^63 is itself representable. Writing
+    // -9223372036854775809.0 in the hope of a symmetric pair does not work --
+    // it is not a Double, and rounds to -2^63, which would divert a value that
+    // the fast path handles perfectly well.
+    if X < 9223372036854775808.0 and X >= -9223372036854775808.0 then
+        Exit TruncTo64 (X);
+
+    // Past that, every Double is already a whole number -- there are no
+    // fractional bits left above 2^52 -- so there is nothing to truncate and
+    // the exact value is what is wanted. The exponent is necessarily positive
+    // here, which is why PowerOfTwo need not answer for a negative one.
+    Exit FloatMantissa (X) * PowerOfTwo (FloatExponent (X));
+end
+
+/// The integer part of X, as a Double.
+///
+/// This is `Trunc` without the conversion: the same truncation toward zero, but
+/// the answer stays a Double. Since nothing is converted, the infinities and
+/// NaN each answer themselves rather than being refused, which is the whole of
+/// what remains of the difference in totality now that `Trunc` answers every
+/// finite Double.
+///
+/// libm's `trunc` is exactly this function, and declaring it with the return
+/// type C really gives it is all this takes.
+///
+/// # Examples
+/// `Int Answers The Integer Part As A Double`
+function Int (X : Double) : Double; external 'trunc';
+
+/// The fractional part of X, carrying X's sign.
+///
+/// `Frac (-3.7)` is `-0.7` rather than `0.3`, because the definition is
+/// `X - Int (X)` and `Int` truncates toward zero. The identity that holds is
+/// `Int (X) + Frac (X) = X`, not that the result is positive.
+///
+/// The subtraction is exact for values whose integer part is small, and loses
+/// the low bits as that part grows: above 2^52 a Double has no fractional part
+/// left to answer with, and `Frac` is zero from there on.
+///
+/// # Examples
+/// `Frac Answers The Fractional Part With The Sign Of Its Argument`
+function Frac (X : Double) : Double;
+begin
+    Exit X - Int (X);
+end
+
+/// X rounded to the nearest Integer, with a tie going to the even neighbour.
+///
+/// A value exactly halfway between two integers rounds to whichever of them is
+/// even, so `Round (2.5)` is `2` and `Round (3.5)` is `4`. This is not the
+/// schoolbook rule, which would answer `3` for `2.5`, and it is chosen for two
+/// reasons that have nothing to do with which language did it first.
+///
+/// The first is consistency downward. Ties-to-even is what IEEE 754 already
+/// does for every arithmetic result in this language, so a `Round` that broke
+/// ties the other way would be the one operation disagreeing with the
+/// arithmetic beneath it.
+///
+/// The second is bias. Rounding half away from zero pushes a column of figures
+/// upward on average, because it sends every tie away from the centre;
+/// ties-to-even sends half of them each way and does not drift.
+///
+/// The primitive is libm's `llrint`, which rounds by the current floating-point
+/// rounding direction. Nothing here changes that direction and its default is
+/// to-nearest-with-ties-to-even, which is the rule above.
+///
+/// # Raises
+/// `Round of NaN.` and `Round of an infinity.`, which are the only values it
+/// refuses. Every finite Double is answered exactly, on the same reasoning as
+/// `Trunc`: above 2^63 there is no nearest integer to look for, the value
+/// being one already.
+///
+/// # Examples
+/// `Round Answers The Nearest Integer`
+function RoundTo64 (X : Double) : Integer; external 'llrint';
+
+function Round (X : Double) : Integer;
+begin
+    if IsNaN (X) then raise 'Round of NaN.';
+    if IsInfinite (X) then raise 'Round of an infinity.';
+
+    if X < 9223372036854775808.0 and X >= -9223372036854775808.0 then
+        Exit RoundTo64 (X);
+
+    // Above the fast path every Double is whole, so there is no nearest
+    // integer to find -- the value is one.
+    Exit Trunc (X);
+end
+
+// ---------------------------------------------------------------- Abs
+
+test 'Abs Answers The Magnitude In The Argument''s Own Type';
+begin
+    AssertEqual (5, Abs (-5));
+    AssertEqual (5, Abs (5));
+    AssertEqual (2.5, Abs (-2.5));
+    AssertEqual (2.5, Abs (2.5));
+end
+
+test 'Abs Answers Zero For Zero In Either Type';
+begin
+    AssertEqual (0, Abs (0));
+    AssertEqual (0.0, Abs (0.0));
+end
+
+/// -0.0 = 0.0 is true, so only the rendering distinguishes them. '<' would hand
+/// -0.0 straight back, because -0.0 < 0 is false.
+test 'Abs Normalises Negative Zero';
+begin
+    AssertEqual ('0.0', Str (Abs (-0.0)));
+    AssertEqual ('-0.0', Str (-0.0));
+    AssertEqual ('Infinity', Str (1.0 / Abs (-0.0)));
+end
+
+/// The trap C has at INT_MIN does not exist over an unbounded Integer.
+test 'Abs Of A Number Past The Machine Width Does Not Overflow';
+begin
+    AssertEqual (170141183460469231731687303715884105728,
+                 Abs (-170141183460469231731687303715884105728));
+end
+
+test 'Abs Raises For A Value That Is Not A Number';
+begin
+    var Raised := False;
+
+    try Abs ('text'); except Raised := True; end
+    AssertTrue (Raised);
+
+    Raised := False;
+    try Abs (nil); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+// ---------------------------------------------------------------- NaN and Infinity
+
+/// Every route to a NaN the unit can reach, because the predicate must not be
+/// tied to the one that happened to be written first.
+test 'IsNaN Answers True For Every Way Of Arriving At A NaN';
+begin
+    AssertTrue (IsNaN (NaN));
+    AssertTrue (IsNaN (0.0 / 0.0));
+    AssertTrue (IsNaN (Sqrt (-1.0)));
+    AssertTrue (IsNaN (Ln (-1.0)));
+    AssertTrue (IsNaN (Infinity - Infinity));
+    AssertTrue (IsNaN (Infinity * 0.0));
+end
+
+test 'IsNaN Answers False For Numbers And For The Infinities';
+begin
+    AssertTrue (not IsNaN (0.0));
+    AssertTrue (not IsNaN (-0.0));
+    AssertTrue (not IsNaN (1.5));
+    AssertTrue (not IsNaN (-1.5));
+    AssertTrue (not IsNaN (1.7976931348623157E308));
+    AssertTrue (not IsNaN (Infinity));
+    AssertTrue (not IsNaN (-Infinity));
+    AssertTrue (not IsNaN (5));
+end
+
+/// The comparison a reader reaches for first, and why it cannot be used. Both
+/// of these hold for a NaN, and neither says what was meant.
+test 'NaN Is Not Equal To Itself Or To Anything Else';
+begin
+    AssertTrue (not (NaN = NaN));
+    AssertTrue (NaN <> NaN);
+    AssertTrue (not (NaN = 0.0));
+    AssertTrue (not (NaN = Infinity));
+    AssertTrue (not (NaN < 0.0));
+    AssertTrue (not (NaN > 0.0));
+    AssertEqual ('NaN', Str (NaN));
+end
+
+test 'IsInfinite Answers True For Either Sign And False For NaN';
+begin
+    AssertTrue (IsInfinite (Infinity));
+    AssertTrue (IsInfinite (-Infinity));
+    AssertTrue (IsInfinite (1.0 / 0.0));
+    AssertTrue (IsInfinite (-1.0 / 0.0));
+    AssertTrue (IsInfinite (1.0E300 * 1.0E300));
+
+    AssertTrue (not IsInfinite (NaN));
+    AssertTrue (not IsInfinite (0.0));
+    AssertTrue (not IsInfinite (1.7976931348623157E308));
+    AssertTrue (not IsInfinite (5));
+end
+
+test 'Infinity Is Ordered Above Every Finite Double';
+begin
+    AssertTrue (Infinity > 1.7976931348623157E308);
+    AssertTrue (-Infinity < -1.7976931348623157E308);
+    AssertTrue (Infinity > 0.0);
+    AssertTrue (-Infinity < 0.0);
+    AssertTrue (Infinity = Infinity);
+    AssertEqual ('Infinity', Str (Infinity));
+    AssertEqual ('-Infinity', Str (-Infinity));
+end
+
+/// Overflow reaches it rather than raising, so the constant is the value a
+/// computation can actually produce and not merely a spelling.
+test 'Infinity Is What An Overflowing Operation Answers';
+begin
+    AssertTrue (1.0E300 * 1.0E300 = Infinity);
+    AssertTrue (-1.0E300 * 1.0E300 = -Infinity);
+    AssertTrue (1.0 / 0.0 = Infinity);
+end
+
+/// The three cases are exclusive and exhaustive, which is the property that
+/// makes them safe to branch on.
+test 'Every Double Is Exactly One Of NaN Infinite Or Finite';
+begin
+    for var V in [0.0, -0.0, 1.5, -1.5, 1.7976931348623157E308, Infinity, -Infinity, NaN] do
+    begin
+        var Count := 0;
+
+        if IsNaN (V) then Count := Count + 1;
+        if IsInfinite (V) then Count := Count + 1;
+        if not IsNaN (V) and not IsInfinite (V) then Count := Count + 1;
+
+        AssertEqual (1, Count);
+    end
+end
+
+// ---------------------------------------------------------------- Sqr
+
+test 'Sqr Answers The Square In The Argument''s Own Type';
+begin
+    AssertEqual (9, Sqr (3));
+    AssertEqual (6.25, Sqr (2.5));
+end
+
+test 'Sqr Of A Negative Is Positive And Sqr Of Zero Is Zero';
+begin
+    AssertEqual (9, Sqr (-3));
+    AssertEqual (6.25, Sqr (-2.5));
+    AssertEqual (0, Sqr (0));
+    AssertEqual (0.0, Sqr (0.0));
+end
+
+/// Unbounded, so a square that would overflow a machine word simply grows.
+test 'Sqr Of A Large Integer Does Not Overflow';
+begin
+    AssertEqual (85070591730234615847396907784232501249,
+                 Sqr (9223372036854775807));
+end
+
+test 'Sqr Raises For A Value That Is Not A Number';
+begin
+    var Raised := False;
+
+    try Sqr ('text'); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+// ---------------------------------------------------------------- Min
+
+test 'Min Answers The Smaller Operand';
+begin
+    AssertEqual (3, Min (3, 7));
+    AssertEqual (3, Min (7, 3));
+    AssertEqual (-7, Min (3, -7));
+    AssertEqual (-7, Min (-7, 3));
+    AssertEqual (2.5, Min (2.5, 7));
+    AssertEqual (2.5, Min (7, 2.5));
+end
+
+/// A tie answers B, which only shows when the two differ in type.
+test 'Min Answers The Second Operand On A Tie';
+begin
+    AssertEqual ('2.0', Str (Min (2, 2.0)));
+    AssertEqual (Str ('2'), Str (Min (2.0, 2)));
+end
+
+test 'Min Raises For A Value That Is Not A Number';
+begin
+    var Raised := False;
+
+    try Min (1, 'text'); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+// ---------------------------------------------------------------- Max
+
+test 'Max Answers The Larger Operand';
+begin
+    AssertEqual (7, Max (3, 7));
+    AssertEqual (7, Max (7, 3));
+    AssertEqual (3, Max (3, -7));
+    AssertEqual (3, Max (-7, 3));
+    AssertEqual (7.5, Max (3, 7.5));
+    AssertEqual (7.5, Max (7.5, 3));
+end
+
+test 'Max Answers The Second Operand On A Tie';
+begin
+    AssertEqual ('2.0', Str (Max (2, 2.0)));
+    AssertEqual (Str ('2'), Str (Max (2.0, 2)));
+end
+
+test 'Max Raises For A Value That Is Not A Number';
+begin
+    var Raised := False;
+
+    try Max (1, 'text'); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+// ---------------------------------------------------------------- Odd
+
+test 'Odd Answers For Positive Numbers And Zero';
+begin
+    AssertTrue (Odd (1));
+    AssertTrue (Odd (3));
+    AssertTrue (not Odd (0));
+    AssertTrue (not Odd (2));
+    AssertTrue (not Odd (4));
+end
+
+/// 'mod' keeps the sign of its left operand, so -3 mod 2 is -1 rather than 1.
+/// A test written '= 1' would answer False for every negative odd number.
+test 'Odd Answers For Negative Numbers As Well As Positive';
+begin
+    AssertEqual (-1, -3 mod 2);
+    AssertTrue (Odd (-1));
+    AssertTrue (Odd (-3));
+    AssertTrue (not Odd (-2));
+    AssertTrue (not Odd (-4));
+end
+
+test 'Odd Answers For A Number Past The Machine Width';
+begin
+    AssertTrue (Odd (170141183460469231731687303715884105727));
+    AssertTrue (not Odd (170141183460469231731687303715884105728));
+end
+
+/// 'mod' refuses a Double rather than truncating it.
+test 'Odd Raises For A Double';
+begin
+    var Raised := False;
+
+    try Odd (2.5); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+// ---------------------------------------------------------------- Pi
+
+test 'Pi Is The Nearest Double To The Ratio';
+begin
+    AssertEqual ('3.141592653589793', Str (Pi));
+    AssertEqual (-1.0, Cos (Pi));
+    AssertEqual (1.0, Sin (Pi / 2));
+end
+
+// ---------------------------------------------------------------- Sqrt
+
+/// Left exact on purpose. IEEE 754 requires Sqrt to be correctly rounded, so
+/// unlike the transcendentals these hold to the last bit on any conforming
+/// platform and a tolerance would only weaken the test.
+test 'Sqrt Answers The Non Negative Root';
+begin
+    AssertEqual (0.0, Sqrt (0.0));
+    AssertEqual (2.0, Sqrt (4.0));
+    AssertEqual (3.0, Sqrt (9.0));
+    AssertEqual (1.4142135623730951, Sqrt (2.0));
+end
+
+/// libm answers NaN rather than raising, and NaN is not equal to itself.
+test 'Sqrt Of A Negative Answers NaN';
+begin
+    var N := Sqrt (-1.0);
+
+    AssertEqual ('NaN', Str (N));
+    AssertTrue (not (N = N));
+end
+
+// ---------------------------------------------------------------- Exp
+
+/// Exp (0.0) is exactly 1.0 on any conforming libm; the others are asserted to
+/// a tolerance because IEEE 754 requires correct rounding of the arithmetic
+/// operations and Sqrt, and requires nothing at all of the transcendentals.
+/// Their last bit may differ between one platform's libm and another's.
+test 'Exp Answers E To The Power Of Its Argument';
+begin
+    AssertEqual (1.0, Exp (0.0));
+    AssertNear (2.718281828459045, Exp (1.0), 1.0E-15);
+    AssertNear (7.38905609893065, Exp (2.0), 1.0E-14);
+end
+
+// ---------------------------------------------------------------- Ln
+
+test 'Ln Answers The Natural Logarithm';
+begin
+    AssertEqual (0.0, Ln (1.0));
+    AssertNear (1.0, Ln (2.718281828459045), 1.0E-15);
+    AssertNear (2.0, Ln (7.38905609893065), 1.0E-15);
+end
+
+test 'Ln Of Zero Answers Negative Infinity And Of A Negative Answers NaN';
+begin
+    AssertEqual ('-Infinity', Str (Ln (0.0)));
+    AssertEqual ('NaN', Str (Ln (-1.0)));
+end
+
+test 'Exp And Ln Are Inverses';
+begin
+    AssertNear (1.0, Ln (Exp (1.0)), 1.0E-15);
+    AssertNear (3.0, Ln (Exp (3.0)), 1.0E-15);
+    AssertNear (5.0, Ln (Exp (5.0)), 1.0E-15);
+end
+
+/// Only in that order. The reverse round trip is a Double away for 3 and for 5,
+/// which is ordinary floating-point rounding rather than anything this unit
+/// does, and is recorded so that a later change does not look like it caused it.
+test 'Exp Of Ln Does Not Round Trip Exactly For Every Value';
+begin
+    AssertEqual (2.0, Exp (Ln (2.0)));
+    AssertEqual (3.0000000000000004, Exp (Ln (3.0)));
+    AssertEqual (4.999999999999999, Exp (Ln (5.0)));
+end
+
+// ---------------------------------------------------------------- Sin
+
+/// Sin (0.0) is exactly zero by symmetry; the quarter turns are asserted to a
+/// tolerance for the reason given on Exp.
+test 'Sin Answers The Sine Of An Angle In Radians';
+begin
+    AssertEqual (0.0, Sin (0.0));
+    AssertNear (1.0, Sin (Pi / 2), 1.0E-15);
+    AssertNear (-1.0, Sin (-Pi / 2), 1.0E-15);
+end
+
+// ---------------------------------------------------------------- Cos
+
+test 'Cos Answers The Cosine Of An Angle In Radians';
+begin
+    AssertEqual (1.0, Cos (0.0));
+    AssertEqual (1.0, Cos (-0.0));
+    AssertNear (-1.0, Cos (Pi), 1.0E-15);
+end
+
+/// The identity holds to the last bit at these three angles, which is a
+/// stronger statement than it looks and would catch a wrong declaration.
+test 'Sin And Cos Satisfy The Pythagorean Identity';
+begin
+    AssertEqual (1.0, Sqr (Sin (0.0)) + Sqr (Cos (0.0)));
+    AssertNear (1.0, Sqr (Sin (Pi / 2)) + Sqr (Cos (Pi / 2)), 1.0E-15);
+    AssertNear (1.0, Sqr (Sin (1.0)) + Sqr (Cos (1.0)), 1.0E-15);
+end
+
+// ---------------------------------------------------------------- ArcTan
+
+test 'ArcTan Answers The Angle Whose Tangent Is X';
+begin
+    AssertEqual (0.0, ArcTan (0.0));
+    AssertNear (0.7853981633974483, ArcTan (1.0), 1.0E-15);
+    AssertNear (Pi / 4, ArcTan (1.0), 1.0E-15);
+end
+
+/// ArcTan is an odd function, so negating the argument negates the result.
+test 'ArcTan Of A Negative Is The Negated Angle';
+begin
+    AssertNear (-0.7853981633974483, ArcTan (-1.0), 1.0E-15);
+    AssertNear (-(Pi / 4), ArcTan (-1.0), 1.0E-15);
+end
+
+// ---------------------------------------------------------------- Trunc
+
+test 'Trunc Discards The Fractional Part';
+begin
+    AssertEqual (3, Trunc (3.0));
+    AssertEqual (3, Trunc (3.2));
+    AssertEqual (3, Trunc (3.7));
+    AssertEqual (3, Trunc (3.999999));
+end
+
+/// Toward zero, not toward negative infinity. Flooring would answer -4.
+test 'Trunc Of A Negative Truncates Toward Zero';
+begin
+    AssertEqual (-3, Trunc (-3.0));
+    AssertEqual (-3, Trunc (-3.2));
+    AssertEqual (-3, Trunc (-3.7));
+    AssertEqual (-3, Trunc (-3.999999));
+end
+
+test 'Trunc Answers Zero For Every Value Between The Units';
+begin
+    AssertEqual (0, Trunc (0.0));
+    AssertEqual (0, Trunc (0.9));
+    AssertEqual (0, Trunc (-0.9));
+    AssertEqual (0, Trunc (-0.0));
+end
+
+/// The result is an Integer proper, not a Double holding a whole number, which
+/// is the whole reason this routine needs C of its own.
+test 'Trunc Answers An Integer And Not A Double';
+begin
+    AssertEqual (Str ('3'), Str (Trunc (3.7)));
+    AssertEqual (7, Trunc (3.7) + 4);
+    AssertTrue (Odd (Trunc (3.7)));
+end
+
+test 'Trunc Takes An Integer Argument As Readily As A Double';
+begin
+    AssertEqual (5, Trunc (5));
+    AssertEqual (-5, Trunc (-5));
+end
+
+test 'Trunc Carries Large Values Exactly';
+begin
+    AssertEqual (1000000000000000000, Trunc (1.0E18));
+    AssertEqual (-1000000000000000000, Trunc (-1.0E18));
+    AssertEqual (9007199254740992, Trunc (9007199254740992.0));
+end
+
+/// The seam between the 64-bit conversion and the exact rebuilding above it.
+/// Both sides must agree, and the values either side of it are where a wrong
+/// bound would show.
+test 'Trunc Is Exact Across The Boundary Of Its Fast Path';
+begin
+    AssertEqual (9223372036854774784, Trunc (9223372036854774784.0));
+    AssertEqual (-9223372036854775808, Trunc (-9223372036854775808.0));
+    AssertEqual (9223372036854775808, Trunc (9223372036854775808.0));
+    AssertEqual (-9223372036854775808, Trunc (-9223372036854775808.0));
+end
+
+/// Rebuilt from the mantissa and exponent, and exact -- these are the values
+/// Python's arbitrary-precision int() gives for the same Doubles.
+test 'Trunc Answers Every Finite Double Exactly However Large';
+begin
+    AssertEqual (10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815104,
+                 Trunc (1.0E100));
+    AssertEqual (10000000000000000000, Trunc (1.0E19));
+    AssertEqual (12345678901234567168, Trunc (12345678901234567890.0));
+end
+
+/// The largest finite Double there is, and it has an exact integer value.
+test 'Trunc Answers The Largest Double';
+begin
+    AssertEqual (179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368,
+                 Trunc (1.7976931348623157E308));
+end
+
+test 'Trunc Raises For NaN';
+begin
+    var Message := '';
+
+    try Trunc (Sqrt (-1.0)); except on e : String do Message := e; end
+    AssertEqual ('Trunc of NaN.', Message);
+end
+
+/// The infinities are the only finite-valued refusal left; neither has an
+/// integer to answer with.
+test 'Trunc Raises For An Infinity';
+begin
+    var Message := '';
+
+    try Trunc (1.0 / 0.0); except on e : String do Message := e; end
+    AssertEqual ('Trunc of an infinity.', Message);
+
+    Message := '';
+    try Trunc (-1.0 / 0.0); except on e : String do Message := e; end
+    AssertEqual ('Trunc of an infinity.', Message);
+end
+
+// ---------------------------------------------------------------- Int
+
+test 'Int Answers The Integer Part As A Double';
+begin
+    AssertEqual (3.0, Int (3.0));
+    AssertEqual (3.0, Int (3.2));
+    AssertEqual (3.0, Int (3.7));
+    AssertEqual (0.0, Int (0.0));
+end
+
+/// Toward zero, as Trunc is. Flooring would answer -4.0.
+test 'Int Truncates Toward Zero Rather Than Flooring';
+begin
+    AssertEqual (-3.0, Int (-3.0));
+    AssertEqual (-3.0, Int (-3.2));
+    AssertEqual (-3.0, Int (-3.7));
+end
+
+/// A Double keeps the sign, so truncating a value in that interval answers
+/// negative zero rather than zero. Only the rendering tells them apart.
+test 'Int Of A Value Between Zero And Minus One Answers Negative Zero';
+begin
+    AssertEqual ('-0.0', Str (Int (-0.9)));
+    AssertEqual ('0.0', Str (Int (0.9)));
+end
+
+/// The distinction from Trunc, and the reason both exist.
+test 'Int Answers A Double Where Trunc Answers An Integer';
+begin
+    AssertEqual ('3.0', Str (Int (3.7)));
+    AssertEqual (Str ('3'), Str (Trunc (3.7)));
+end
+
+/// Nothing is converted, so the two values Trunc refuses are answered here.
+/// That is all the difference in totality that remains.
+test 'Int Answers The Infinities And NaN Where Trunc Refuses Them';
+begin
+    AssertEqual ('Infinity', Str (Int (1.0 / 0.0)));
+    AssertEqual ('-Infinity', Str (Int (-1.0 / 0.0)));
+    AssertEqual ('NaN', Str (Int (Sqrt (-1.0))));
+end
+
+/// Both answer the large finite values exactly now, in their own types.
+test 'Int And Trunc Agree On A Large Finite Value';
+begin
+    AssertEqual (1.0E300, Int (1.0E300));
+    AssertEqual (Str (Trunc (1.0E300)), Str (Trunc (Int (1.0E300))));
+end
+
+// ---------------------------------------------------------------- Frac
+
+test 'Frac Answers The Fractional Part With The Sign Of Its Argument';
+begin
+    AssertEqual (0.5, Frac (3.5));
+    AssertEqual (-0.5, Frac (-3.5));
+    AssertEqual (0.5, Frac (0.5));
+    AssertEqual (-0.5, Frac (-0.5));
+end
+
+test 'Frac Of A Whole Number Is Zero';
+begin
+    AssertEqual (0.0, Frac (3.0));
+    AssertEqual (0.0, Frac (-3.0));
+    AssertEqual (0.0, Frac (0.0));
+end
+
+/// The identity that holds, and the one worth stating: the parts sum to the
+/// whole. That the fractional part is positive is NOT one of them.
+test 'Int And Frac Sum To The Argument';
+begin
+    AssertEqual (3.5, Int (3.5) + Frac (3.5));
+    AssertEqual (-3.5, Int (-3.5) + Frac (-3.5));
+    AssertEqual (0.25, Int (0.25) + Frac (0.25));
+end
+
+/// The subtraction is exact only where the Double has bits to spare for it.
+/// 3.7 has no exact representation to begin with, so its fractional part is a
+/// Double away from 0.7 -- which is arithmetic, not this routine.
+test 'Frac Is As Exact As The Subtraction Beneath It';
+begin
+    AssertEqual (0.7000000000000002, Frac (3.7));
+    AssertEqual (-0.7000000000000002, Frac (-3.7));
+end
+
+/// Above 2^52 a Double has no fractional bits left, so every value is whole.
+test 'Frac Is Zero Above Two To The Fifty Second';
+begin
+    AssertEqual (0.0, Frac (4503599627370497.0));
+    AssertEqual (0.0, Frac (1.0E300));
+end
+
+// ---------------------------------------------------------------- Round
+
+test 'Round Answers The Nearest Integer';
+begin
+    AssertEqual (2, Round (2.4));
+    AssertEqual (3, Round (2.6));
+    AssertEqual (-2, Round (-2.4));
+    AssertEqual (-3, Round (-2.6));
+    AssertEqual (3, Round (3.0));
+end
+
+/// Ties-to-even is what IEEE 754 does for every arithmetic result in the
+/// language, and it does not accumulate a bias. Rounding half away from zero --
+/// the schoolbook rule -- would answer 3 for 2.5.
+test 'Round Sends A Tie To The Even Neighbour';
+begin
+    AssertEqual (0, Round (0.5));
+    AssertEqual (2, Round (1.5));
+    AssertEqual (2, Round (2.5));
+    AssertEqual (4, Round (3.5));
+    AssertEqual (0, Round (-0.5));
+    AssertEqual (-2, Round (-1.5));
+    AssertEqual (-2, Round (-2.5));
+    AssertEqual (-4, Round (-3.5));
+end
+
+test 'Round Answers An Integer And Not A Double';
+begin
+    AssertEqual (Str ('3'), Str (Round (2.6)));
+    AssertEqual (7, Round (2.6) + 4);
+    AssertTrue (Odd (Round (2.6)));
+end
+
+test 'Round Takes An Integer Argument As Readily As A Double';
+begin
+    AssertEqual (5, Round (5));
+    AssertEqual (-5, Round (-5));
+end
+
+/// Above the fast path a Double is whole, so Round and Trunc must agree there.
+test 'Round Is Exact Across The Boundary Of Its Fast Path';
+begin
+    AssertEqual (9223372036854774784, Round (9223372036854774784.0));
+    AssertEqual (-9223372036854775808, Round (-9223372036854775808.0));
+    AssertEqual (Trunc (1.0E300), Round (1.0E300));
+    AssertEqual (Trunc (1.0E100), Round (1.0E100));
+end
+
+test 'Round Raises For NaN';
+begin
+    var Message := '';
+
+    try Round (Sqrt (-1.0)); except on e : String do Message := e; end
+    AssertEqual ('Round of NaN.', Message);
+end
+
+test 'Round Raises For An Infinity';
+begin
+    var Message := '';
+
+    try Round (1.0 / 0.0); except on e : String do Message := e; end
+    AssertEqual ('Round of an infinity.', Message);
+
+    Message := '';
+    try Round (-1.0 / 0.0); except on e : String do Message := e; end
+    AssertEqual ('Round of an infinity.', Message);
+end
+
+/// The three conversions differ only in how they treat what they discard, and
+/// seeing them beside one another is the clearest statement of that.
+test 'Int Trunc And Round Differ Only In What They Do With The Remainder';
+begin
+    AssertEqual ('3.0', Str (Int (3.7)));
+    AssertEqual (Str ('3'), Str (Trunc (3.7)));
+    AssertEqual (Str ('4'), Str (Round (3.7)));
+
+    AssertEqual ('-3.0', Str (Int (-3.7)));
+    AssertEqual (Str ('-3'), Str (Trunc (-3.7)));
+    AssertEqual (Str ('-4'), Str (Round (-3.7)));
+end

@@ -1,0 +1,136 @@
+/// Assertions the built-in set does not carry.
+///
+/// `AssertEqual`, `AssertTrue` and `Fail` are built in and are what most tests
+/// want. This unit adds the one thing they cannot express: agreement to within a
+/// tolerance, which is what a test of a floating-point result needs when the
+/// exact bits are not guaranteed.
+///
+/// The unit deliberately depends on nothing, `math` included, so that a test of
+/// `math` may use it without the two units importing one another.
+unit testing;
+
+/// Fails unless Actual is within Tolerance of Expected.
+///
+/// For a result whose exact bits are not guaranteed. IEEE 754 requires the
+/// arithmetic operations and `Sqrt` to be correctly rounded, so those may be
+/// asserted exactly and should be; it requires nothing of `Sin`, `Cos`, `Exp`,
+/// `Ln` or `ArcTan`, whose last bit may differ between one platform's libm and
+/// another's. Those are what this is for.
+///
+/// The comparison is written as the negation of `<=` rather than as `>` so that
+/// a NaN fails. Every comparison against NaN is false, so `>` would pass it and
+/// `not (… <= …)` refuses it, which is the answer wanted: a routine that
+/// answered NaN did not land near anything.
+///
+/// A tolerance of zero is legitimate and asks for exact agreement, which is a
+/// clearer way of saying so than `AssertEqual` when the value is a Double.
+///
+/// # Raises
+/// Nothing. A failure is reported through `Fail`, as an assertion is.
+///
+/// # Examples
+/// `AssertNear Passes When The Difference Is Within The Tolerance`
+procedure AssertNear (Expected : Double, Actual : Double, Tolerance : Double);
+begin
+    var Difference := Expected - Actual;
+
+    if Difference < 0 then Difference := 0 - Difference;
+
+    if not (Difference <= Tolerance) then
+        Fail ('Expected ' + Str (Expected) + ' to within ' + Str (Tolerance)
+              + ' but got ' + Str (Actual) + '.');
+end
+
+test 'AssertNear Passes When The Difference Is Within The Tolerance';
+begin
+    AssertNear (1.0, 1.0, 0.001);
+    AssertNear (1.22, 1.2201, 0.001);
+    AssertNear (1.22, 1.2199, 0.001);
+end
+
+/// The tolerance is inclusive, and symmetric in the two arguments.
+test 'AssertNear Accepts A Difference Exactly Equal To The Tolerance';
+begin
+    AssertNear (1.0, 1.5, 0.5);
+    AssertNear (1.5, 1.0, 0.5);
+end
+
+test 'AssertNear Accepts A Difference In Either Direction';
+begin
+    AssertNear (-1.22, -1.2201, 0.001);
+    AssertNear (0.0, -0.0005, 0.001);
+    AssertNear (-0.0005, 0.0, 0.001);
+end
+
+/// A tolerance of zero asks for exact agreement, and gets it.
+test 'AssertNear With A Zero Tolerance Demands Exactness';
+begin
+    AssertNear (1.5, 1.5, 0.0);
+    AssertNear (0.0, -0.0, 0.0);
+end
+
+/// An assertion helper whose failing path is untested is worth nothing, and a
+/// Fail turns out to be catchable, so the path can be exercised directly.
+test 'AssertNear Fails When The Difference Exceeds The Tolerance';
+begin
+    var Failed := False;
+
+    try AssertNear (1.0, 2.0, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+
+    Failed := False;
+    try AssertNear (1.22, 1.23, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+end
+
+/// Every comparison against NaN is false, so a test written with '>' would let
+/// a NaN through. A routine that answered NaN did not land near anything.
+test 'AssertNear Fails For NaN In Either Position';
+begin
+    var Failed := False;
+
+    try AssertNear (1.0, 0.0 / 0.0, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+
+    Failed := False;
+    try AssertNear (0.0 / 0.0, 1.0, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+
+    Failed := False;
+    try AssertNear (0.0 / 0.0, 0.0 / 0.0, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+end
+
+test 'AssertNear Fails For An Infinity';
+begin
+    var Failed := False;
+
+    try AssertNear (1.0, 1.0 / 0.0, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+
+    Failed := False;
+    try AssertNear (1.0, -1.0 / 0.0, 0.001); except Failed := True; end
+    AssertTrue (Failed);
+end
+
+/// An infinite tolerance accepts any two finite values, and still refuses NaN.
+test 'AssertNear With An Infinite Tolerance Still Refuses NaN';
+begin
+    AssertNear (1.0, 1.0E300, 1.0 / 0.0);
+
+    var Failed := False;
+    try AssertNear (1.0, 0.0 / 0.0, 1.0 / 0.0); except Failed := True; end
+    AssertTrue (Failed);
+end
+
+/// The message has to name all three numbers, or a failure cannot be read.
+/// `Fail` puts 'Failed.' and two spaces in front of whatever it is given, which
+/// is pinned here rather than worked around because it is what a reader of a
+/// failing run actually sees.
+test 'AssertNear Reports What It Expected And What It Got';
+begin
+    var Message := '';
+
+    try AssertNear (1.22, 1.5, 0.001); except on e : String do Message := e; end
+    AssertEqual ('Failed.  Expected 1.22 to within 0.001 but got 1.5.', Message);
+end

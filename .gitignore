@@ -1,0 +1,17 @@
+# The library's own C, built by ./build.sh. Generated, and platform-specific.
+lib*ffi.dylib
+lib*ffi.so
+
+# The example application, built by examples/build.sh.
+examples/build/
+
+# A local convenience, not a build product: the VS Code extension hardcodes
+# <workspaceRoot>/bootstrap/algc with no setting to override it, so this holds a
+# symlink to wherever algc is installed. That path is this machine's alone.
+bootstrap/
+
+# Anything `algc --compile --out=…` was pointed at by hand.
+out/
+
+__pycache__/
+.DS_Store

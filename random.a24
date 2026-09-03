@@ -1,0 +1,335 @@
+/// Pseudo-random numbers.
+///
+/// Separate from `math` because everything here has state. A `math` routine is
+/// a pure function of its arguments and may be called anywhere without
+/// consequence; a generator has a seed, answers differently on each call, and
+/// two programs that share it interfere. Keeping the two apart is what lets
+/// `uses math` stay free of that.
+///
+/// The generator is C's `drand48`, a 48-bit linear congruential generator. It
+/// is reproducible from a seed, which is what a test needs, and it is adequate
+/// for a simulation, a game or a sample. It is not adequate for cryptography
+/// and no amount of reseeding would make it so.
+///
+/// The sequence is the same on every run until something seeds it, which is
+/// deliberate: a program is reproducible by default and becomes unpredictable
+/// only where it asks to be, by calling `Randomize`.
+unit random;
+
+uses math;
+
+/// Seeds the generator from Seed, so that the sequence following is repeatable.
+///
+/// The same seed always yields the same sequence, which is what makes a program
+/// using this unit testable. Every bit of Seed contributes: `srand48` beneath
+/// keeps only 32 bits of its argument, so the C wrapper folds the other half
+/// onto it rather than discarding it silently.
+///
+/// # Examples
+/// `SetSeed Makes The Sequence Repeatable`
+procedure SetSeed (Seed : Integer); external 'alg_random_seed' in 'librandomffi.dylib';
+
+/// A seed taken from the clock and the process.
+///
+/// Private to this unit; `Randomize` is the routine to call.
+function ClockSeed () : Integer; external 'alg_random_clock_seed' in 'librandomffi.dylib';
+
+/// Seeds the generator unpredictably, from the clock and the process id.
+///
+/// Call it once, at the start of a program that wants a different sequence on
+/// each run. A program that does not call it gets the same sequence every time,
+/// which is usually what a test wants and occasionally what a user does not
+/// expect.
+///
+/// The source is nanosecond time mixed with the process id, not the whole
+/// second `time` answers, so two runs a moment apart differ and two processes
+/// started together differ.
+///
+/// # Examples
+/// `Randomize Leaves The Generator Usable`
+procedure Randomize ();
+begin
+    SetSeed (ClockSeed ());
+end
+
+/// The next value in the sequence, at least zero and below one.
+///
+/// One is never answered and zero may be. The generator has 48 bits, so the
+/// result is a Double with 48 bits of entropy rather than the 53 it could hold.
+///
+/// # Examples
+/// `RandomReal Answers A Value At Least Zero And Below One`
+function RandomReal () : Double; external 'drand48';
+
+/// The next value in the sequence, at least zero and below Bound.
+///
+/// `RandomInteger (6)` answers one of 0, 1, 2, 3, 4 or 5, so a die is
+/// `RandomInteger (6) + 1`. The upper bound is excluded, which is what makes it
+/// compose with a `Length`: `L[RandomInteger (L.Length)]` is an element of L.
+///
+/// The distribution is as even as 48 bits allow. For a Bound beyond 2^48 the
+/// values thin out — there are only 2^48 sequences to draw from, whatever the
+/// bound — and beyond 2^53 the multiplication itself loses precision. Neither
+/// limit is reached by any ordinary use, and neither is checked.
+///
+/// # Raises
+/// `RandomInteger needs a bound above zero.` for a bound of zero or less, which
+/// has no value to answer with.
+///
+/// # Examples
+/// `RandomInteger Answers Values Within Its Bound`
+function RandomInteger (Bound : Integer) : Integer;
+begin
+    if Bound <= 0 then raise 'RandomInteger needs a bound above zero.';
+
+    Exit Trunc (RandomReal () * Bound);
+end
+
+/// The next value in the sequence, at least zero and below Bound.
+///
+/// The short name for `RandomInteger`, which is the one reached for most:
+/// picking an element, rolling a die and choosing a case all want a bounded
+/// Integer rather than a fraction. `RandomReal` has no short spelling for the
+/// same reason.
+///
+/// It is a pass-through rather than a second overload of one name. Overload
+/// selection here happens at run time and warns at every call site, so a single
+/// `Random` answering both shapes would make the commonest call in the unit the
+/// noisiest.
+///
+/// # Raises
+/// `RandomInteger needs a bound above zero.`, from the routine beneath.
+///
+/// # Examples
+/// `Random Is A Pass Through To RandomInteger`
+function Random (Bound : Integer) : Integer;
+begin
+    Exit RandomInteger (Bound);
+end
+
+// ---------------------------------------------------------------- seeding
+
+/// The property the whole unit is testable through.
+test 'SetSeed Makes The Sequence Repeatable';
+begin
+    SetSeed (42);
+    var First := [RandomReal (), RandomReal (), RandomReal ()];
+
+    SetSeed (42);
+    var Again := [RandomReal (), RandomReal (), RandomReal ()];
+
+    AssertEqual (First[0], Again[0]);
+    AssertEqual (First[1], Again[1]);
+    AssertEqual (First[2], Again[2]);
+end
+
+test 'A Different Seed Gives A Different Sequence';
+begin
+    SetSeed (42);
+    var FromForty2 := RandomReal ();
+
+    SetSeed (43);
+    var FromForty3 := RandomReal ();
+
+    AssertTrue (FromForty2 <> FromForty3);
+end
+
+/// srand48 keeps only 32 bits of its argument, so these three seeds would be
+/// one seed without the fold in randomffi.c. This is the test that pins it.
+test 'A Seed Differing Only Above Thirty Two Bits Still Differs';
+begin
+    SetSeed (42);
+    var Small := RandomReal ();
+
+    SetSeed (4294967338);
+    var Big := RandomReal ();
+
+    SetSeed (8589934634);
+    var Bigger := RandomReal ();
+
+    AssertTrue (Small <> Big);
+    AssertTrue (Small <> Bigger);
+    AssertTrue (Big <> Bigger);
+end
+
+test 'A Negative Seed Is Accepted';
+begin
+    SetSeed (-1);
+    var First := RandomReal ();
+
+    SetSeed (-1);
+    AssertEqual (First, RandomReal ());
+
+    AssertTrue (First >= 0.0 and First < 1.0);
+end
+
+/// Nothing is asserted about which sequence it chose, because that is the
+/// point of it. What must hold is that the generator still works afterward.
+test 'Randomize Leaves The Generator Usable';
+begin
+    Randomize ();
+
+    for var I := 0; I < 20; I := I + 1 do
+    begin
+        var V := RandomReal ();
+
+        AssertTrue (V >= 0.0 and V < 1.0);
+    end
+end
+
+test 'Seeding After Randomize Restores A Repeatable Sequence';
+begin
+    Randomize ();
+    RandomReal ();
+
+    SetSeed (7);
+    var First := RandomReal ();
+
+    Randomize ();
+    RandomReal ();
+
+    SetSeed (7);
+    AssertEqual (First, RandomReal ());
+end
+
+// ---------------------------------------------------------------- RandomReal
+
+test 'RandomReal Answers A Value At Least Zero And Below One';
+begin
+    SetSeed (12345);
+
+    for var I := 0; I < 1000; I := I + 1 do
+    begin
+        var V := RandomReal ();
+
+        AssertTrue (V >= 0.0);
+        AssertTrue (V < 1.0);
+    end
+end
+
+/// A generator answering one value forever would pass every bound check above.
+test 'RandomReal Does Not Answer The Same Value Twice Running';
+begin
+    SetSeed (12345);
+
+    var Seen := Set ();
+
+    for var I := 0; I < 100; I := I + 1 do
+        Seen.Add (RandomReal ());
+
+    AssertEqual (100, Seen.Length);
+end
+
+/// Loose bounds, but they would catch a generator stuck in one half of its
+/// range, which the distinctness test above would not.
+test 'RandomReal Covers Both Halves Of Its Range';
+begin
+    SetSeed (999);
+
+    var Low  := 0;
+    var High := 0;
+
+    for var I := 0; I < 1000; I := I + 1 do
+        if RandomReal () < 0.5 then Low := Low + 1; else High := High + 1;
+
+    AssertTrue (Low > 400);
+    AssertTrue (High > 400);
+end
+
+// ---------------------------------------------------------------- RandomInteger
+
+test 'RandomInteger Answers Values Within Its Bound';
+begin
+    SetSeed (2024);
+
+    for var I := 0; I < 1000; I := I + 1 do
+    begin
+        var V := RandomInteger (6);
+
+        AssertTrue (V >= 0);
+        AssertTrue (V < 6);
+    end
+end
+
+/// The bound is excluded, so a bound of one leaves only zero.
+test 'RandomInteger With A Bound Of One Always Answers Zero';
+begin
+    SetSeed (5);
+
+    for var I := 0; I < 50; I := I + 1 do
+        AssertEqual (0, RandomInteger (1));
+end
+
+/// Every face of a die must appear, or the bound is being applied wrongly.
+test 'RandomInteger Reaches Every Value Below Its Bound';
+begin
+    SetSeed (77);
+
+    var Seen := Set ();
+
+    for var I := 0; I < 500; I := I + 1 do
+        Seen.Add (RandomInteger (6));
+
+    AssertEqual (6, Seen.Length);
+    AssertTrue (Seen.Contains (0));
+    AssertTrue (Seen.Contains (5));
+end
+
+test 'RandomInteger Answers An Integer And Not A Double';
+begin
+    SetSeed (1);
+
+    AssertTrue (not IsNaN (RandomInteger (10) * 1.0));
+    AssertEqual (Str ('0'), Str (RandomInteger (1)));
+end
+
+test 'RandomInteger Raises For A Bound Of Zero Or Less';
+begin
+    var Message := '';
+
+    try RandomInteger (0); except on e : String do Message := e; end
+    AssertEqual ('RandomInteger needs a bound above zero.', Message);
+
+    Message := '';
+    try RandomInteger (-1); except on e : String do Message := e; end
+    AssertEqual ('RandomInteger needs a bound above zero.', Message);
+end
+
+/// A large bound is answered without complaint, well past a machine word.
+test 'RandomInteger Takes A Large Bound';
+begin
+    SetSeed (3);
+
+    for var I := 0; I < 20; I := I + 1 do
+    begin
+        var V := RandomInteger (1000000000000);
+
+        AssertTrue (V >= 0);
+        AssertTrue (V < 1000000000000);
+    end
+end
+
+// ---------------------------------------------------------------- Random
+
+/// The alias must be the same draw, not merely a similar one -- so the two are
+/// compared from the same seed rather than against a range.
+test 'Random Is A Pass Through To RandomInteger';
+begin
+    SetSeed (2024);
+    var ViaAlias := [Random (100), Random (100), Random (100)];
+
+    SetSeed (2024);
+    var ViaFull := [RandomInteger (100), RandomInteger (100), RandomInteger (100)];
+
+    AssertEqual (ViaAlias[0], ViaFull[0]);
+    AssertEqual (ViaAlias[1], ViaFull[1]);
+    AssertEqual (ViaAlias[2], ViaFull[2]);
+end
+
+test 'Random Raises For A Bound Of Zero Or Less';
+begin
+    var Message := '';
+
+    try Random (0); except on e : String do Message := e; end
+    AssertEqual ('RandomInteger needs a bound above zero.', Message);
+end

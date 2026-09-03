@@ -1,0 +1,139 @@
+/// A demonstration of the library, built as a standalone application.
+///
+/// Estimates pi by throwing darts and then rolls two dice ten thousand times,
+/// which between them reach most of `math` and all of `random`.
+///
+/// The generator is seeded rather than randomized, so every run prints the same
+/// numbers. That is what lets `./check-reference.py` verify the output in
+/// `REFERENCE.md`, and it is the behaviour a program gets by default -- a call
+/// to `Randomize` is what buys a different sequence.
+unit statistics;
+
+uses math;
+uses random;
+
+/// A line of Count copies of Mark.
+function Bar (Mark : Char, Count : Integer) : String;
+begin
+    var B := Buffer ();
+
+    for var I := 0; I < Count; I := I + 1 do
+        B.Append (Mark);
+
+    Exit B.Text;
+end
+
+/// X rendered to Places decimal places.
+///
+/// Built from Round rather than from any formatting the language has, because
+/// it does not have any -- Str answers every digit a Double carries.
+function Fixed (X : Double, Places : Integer) : String;
+begin
+    var Scale := 1;
+
+    for var I := 0; I < Places; I := I + 1 do
+        Scale := Scale * 10;
+
+    var Scaled := Round (Abs (X) * Scale);
+    var Whole  := Scaled div Scale;
+    var Part   := Str (Scaled mod Scale);
+
+    // A fractional part of 7 in two places is '07', not '7'.
+    while Length (Part) < Places do
+        Part := '0' + Part;
+
+    var Sign := '';
+
+    if X < 0 then Sign := '-';
+
+    Exit Sign + Str (Whole) + '.' + Part;
+end
+
+/// Text padded with leading spaces to Width.
+function Pad (Text : String, Width : Integer) : String;
+begin
+    if Length (Text) >= Width then Exit Text;
+
+    Exit Bar (' ', Width - Length (Text)) + Text;
+end
+
+/// Estimates pi by throwing Darts at a quarter circle.
+///
+/// The fraction landing within one unit of the origin approaches a quarter of
+/// pi, so four times it approaches pi. The convergence is slow -- the error
+/// falls with the square root of the count -- which is why the table below
+/// gains roughly one digit for every hundredfold.
+function EstimatePi (Darts : Integer) : Double;
+begin
+    var Inside := 0;
+
+    for var I := 0; I < Darts; I := I + 1 do
+    begin
+        var X := RandomReal ();
+        var Y := RandomReal ();
+
+        if Sqrt (Sqr (X) + Sqr (Y)) <= 1.0 then Inside := Inside + 1;
+    end
+
+    Exit 4.0 * Inside / Darts;
+end
+
+procedure ShowDarts ();
+begin
+    WriteLn ('Estimating pi by throwing darts');
+    WriteLn ('');
+    WriteLn ('    darts   estimate      error');
+
+    for var Darts in [100, 1000, 10000, 100000] do
+    begin
+        var Estimate := EstimatePi (Darts);
+
+        WriteLn (Pad (Str (Darts), 9)
+                 + Pad (Fixed (Estimate, 5), 11)
+                 + Pad (Fixed (Abs (Estimate - Pi), 5), 11));
+    end
+end
+
+procedure ShowDice ();
+begin
+    var Rolls  := 10000;
+    var Counts := Array (13);
+
+    for var Face := 0; Face < 13; Face := Face + 1 do
+        Counts[Face] := 0;
+
+    for var I := 0; I < Rolls; I := I + 1 do
+    begin
+        var Total := Random (6) + Random (6) + 2;
+
+        Counts[Total] := Counts[Total] + 1;
+    end
+
+    WriteLn ('');
+    WriteLn ('Rolling two dice ' + Str (Rolls) + ' times');
+    WriteLn ('');
+
+    var Tallest := 0;
+
+    for var Total := 2; Total <= 12; Total := Total + 1 do
+        Tallest := Max (Tallest, Counts[Total]);
+
+    for var Total := 2; Total <= 12; Total := Total + 1 do
+    begin
+        var Width := Round (40.0 * Counts[Total] / Tallest);
+
+        WriteLn (Pad (Str (Total), 4) + '  ' + Pad (Str (Counts[Total]), 5)
+                 + '  ' + Bar ('#', Width));
+    end
+end
+
+begin
+    SetSeed (20240902);
+
+    WriteLn ('Algol-24 library demonstration');
+    WriteLn ('==============================');
+    WriteLn ('');
+
+    ShowDarts ();
+    ShowDice ();
+end
