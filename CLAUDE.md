@@ -244,6 +244,11 @@ which this repository has no reason to carry.
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
 | `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; SDL2 declared directly; `graphffi.c` carries one hex decoder | 22 | complete |
 
+⚠️ **`graph` has a design document, `DESIGN.md`, and it governs.** The unit is
+one world — celled text on a grid at Order 0, Canvas objects above and below
+it — not Turbo Pascal's Crt/Graph split. Read it before adding any `graph`
+method; a method that fights it is wrong until the document says otherwise.
+
 `graph` notes: SDL2 comes from Homebrew (`brew install sdl2`) and every
 declaration names `/opt/homebrew/lib/libSDL2.dylib` literally, because `in`
 takes a string literal — an SDL elsewhere means substituting the path
