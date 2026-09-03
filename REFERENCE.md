@@ -17,10 +17,15 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Abs`](#abs) | function | `math` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
+| [`CloseGraph`](#closegraph) | procedure | `graph` |
 | [`Cos`](#cos) | function | `math` |
 | [`Exp`](#exp) | function | `math` |
 | [`Frac`](#frac) | function | `math` |
+| [`GetMaxX`](#getmaxx) | function | `graph` |
+| [`GetMaxY`](#getmaxy) | function | `graph` |
 | [`Infinity`](#infinity) | constant | `math` |
+| [`InitGraph`](#initgraph) | procedure | `graph` |
+| [`InstallUserFont`](#installuserfont) | procedure | `graph` |
 | [`Int`](#int) | function | `math` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
@@ -29,12 +34,16 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Min`](#min) | function | `math` |
 | [`NaN`](#nan) | constant | `math` |
 | [`Odd`](#odd) | function | `math` |
+| [`OutText`](#outtext) | procedure | `graph` |
+| [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`Pi`](#pi) | constant | `math` |
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
 | [`RandomReal`](#randomreal) | function | `random` |
 | [`Round`](#round) | function | `math` |
+| [`ScreenHeight`](#screenheight) | function | `graph` |
+| [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`Sin`](#sin) | function | `math` |
 | [`Sqr`](#sqr) | function | `math` |
@@ -210,6 +219,54 @@ end
 
 ---
 
+## CloseGraph
+
+*procedure* — unit `graph`
+
+**Function**
+
+Closes the graphics window.
+
+**Declaration**
+
+```algol24
+procedure CloseGraph ();
+```
+
+**Remarks**
+
+Total: closing when nothing is open does nothing, so a handler or a test may
+call it unconditionally to reach a known state. The window may be reopened
+afterward with [`InitGraph`](#initgraph).
+
+Only the window and its renderer are released. SDL's video subsystem stays up
+for the life of the process, which is why [`ScreenWidth`](#screenwidth) still
+answers after a close.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph)
+
+**Example**
+
+```algol24
+uses graph;
+
+CloseGraph ();                       // nothing open: does nothing
+
+InitGraph (320, 200, 'brief', False);
+CloseGraph ();
+CloseGraph ();                       // already closed: does nothing
+
+WriteLn ('closed without complaint');
+```
+
+```console
+closed without complaint
+```
+
+---
+
 ## Cos
 
 *function* — unit `math`
@@ -357,6 +414,96 @@ WriteLn (Frac (3.7));
 
 ---
 
+## GetMaxX
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the highest X a program can draw to — the window's width minus one.
+
+**Declaration**
+
+```algol24
+function GetMaxX () : Integer;
+```
+
+**Remarks**
+
+The minus one is the point of the routine: `for var X := 0; X <= GetMaxX ();`
+visits every column exactly, which is the idiom drawing code is written in.
+
+⚠️ **The answer describes the window that actually opened**, not the request.
+Under a fullscreen [`InitGraph`](#initgraph) it is the desktop's width minus
+one, whatever size was asked for.
+
+Raises `Graph is not open.` before `InitGraph` or after
+[`CloseGraph`](#closegraph), when there is no window to measure.
+
+For how big a window *could* be, before opening one, see
+[`ScreenWidth`](#screenwidth) — that is a different question, and it has its
+own name so that this one can keep meaning what drawing code needs.
+
+**See also**
+
+[`GetMaxY`](#getmaxy), [`InitGraph`](#initgraph), [`ScreenWidth`](#screenwidth)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (100, 50, 'grid', False);
+
+var Columns := 0;
+
+for var X := 0; X <= GetMaxX (); X := X + 1 do
+    Columns := Columns + 1;
+
+WriteLn (Columns);
+
+CloseGraph ();
+```
+
+```console
+100
+```
+
+---
+
+## GetMaxY
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the highest Y a program can draw to — the window's height minus one.
+
+**Declaration**
+
+```algol24
+function GetMaxY () : Integer;
+```
+
+**Remarks**
+
+Everything said of [`GetMaxX`](#getmaxx) holds here, for rows — including that
+the answer is the opened window's, which matters most under fullscreen on
+macOS, where the menu bar stays and the window is short of the desktop's full
+height.
+
+Raises `Graph is not open.` when there is no window.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph), [`ScreenHeight`](#screenheight)
+
+**Example**
+
+See [`GetMaxX`](#getmaxx) and [`InitGraph`](#initgraph), which show both.
+
+---
+
 ## Infinity
 
 *constant* — unit `math`
@@ -415,6 +562,141 @@ Infinity
 -Infinity
 true
 -1.25
+```
+
+---
+
+## InitGraph
+
+*procedure* — unit `graph`
+
+**Function**
+
+Opens the graphics window.
+
+**Declaration**
+
+```algol24
+procedure InitGraph (Width : Integer, Height : Integer, Title : String, Fullscreen : Boolean);
+```
+
+**Remarks**
+
+The window is `Width` by `Height` pixels, centred on the desktop, with `Title`
+in its title bar — Unicode included. It opens cleared to black.
+
+With `Fullscreen` true the window instead covers the desktop at the desktop's
+own resolution, and `Width` and `Height` are not used. This is the borderless
+kind of fullscreen: it changes no display mode, and cannot leave the screen in
+one if the program dies. On macOS the menu bar stays, so the fullscreen window
+is the desktop's width but can be short of its height.
+
+The size asked for and the size received can differ — fullscreen is the obvious
+case — so [`GetMaxX`](#getmaxx) and [`GetMaxY`](#getmaxy) report what actually
+opened rather than echoing the request.
+
+Turbo Pascal's `InitGraph` took a driver, a mode and a path to BGI files; all
+three existed to pick a video card and are gone. Failure **raises**, carrying
+SDL's own message, rather than setting a result code for `GraphResult` to fetch
+— there is no `GraphResult`.
+
+Raises `Graph is already open.` for a second call before
+[`CloseGraph`](#closegraph), and `InitGraph needs a positive size.` for a
+`Width` or `Height` of zero or less.
+
+The unit reaches SDL2 by its Homebrew path, so as written it wants
+`brew install sdl2`.
+
+**See also**
+
+[`CloseGraph`](#closegraph), [`GetMaxX`](#getmaxx), [`GetMaxY`](#getmaxy), [`ScreenWidth`](#screenwidth)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'My Program', False);
+
+WriteLn (GetMaxX ());
+WriteLn (GetMaxY ());
+
+CloseGraph ();
+```
+
+```console
+639
+479
+```
+
+---
+
+## InstallUserFont
+
+*procedure* — unit `graph`
+
+**Function**
+
+Installs a glyph file as the font all text draws with.
+
+**Declaration**
+
+```algol24
+procedure InstallUserFont (Path : String);
+```
+
+**Remarks**
+
+The format is a cell font, one glyph per line: a codepoint, a separator, and
+hex rows. A `:` separator carries ink — one bit per pixel, or one byte of
+coverage per pixel when the file opens with a `# gray8` header — and a `+`
+separator carries a **picture**, RRGGBBAA per pixel, which is how emoji arrive
+in their own colors. A glyph's width is the length of its row data, so a CJK
+glyph is simply twice as wide as a Latin one and the format needs no width
+table.
+
+The library ships two:
+
+| | |
+| --- | --- |
+| `graphfont.hex` | antialiased coverage with emoji; installed by default the first time text draws |
+| `romfont.hex` | one bit per pixel — what a 1980s character ROM held |
+
+The default's coverage is all printable ASCII plus a set of Turkish, Greek,
+Chinese, Korean and Spanish glyphs and a handful of emoji. The example
+repository's `makefont.py` generates files in this format from any font the
+machine has, which is how coverage grows.
+
+A path resolves against the working directory, as any data file does. A new
+font replaces the old entirely; a font that cannot be opened **leaves the old
+one installed** and raises `InstallUserFont: cannot open '...'.`
+
+In Turbo Pascal this registered a `.CHR` stroked-font file for `SetTextStyle`
+to select later; here the glyph file itself is the font, so installing is
+selecting.
+
+**See also**
+
+[`OutText`](#outtext), [`OutTextXY`](#outtextxy)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (400, 200, 'fonts', False);
+
+OutTextXY (10, 10, 'antialiased, with emoji');
+
+InstallUserFont ('romfont.hex');
+OutTextXY (10, 60, 'one bit per pixel');
+
+CloseGraph ();
+WriteLn ('two fonts, one window');
+```
+
+```console
+two fonts, one window
 ```
 
 ---
@@ -817,6 +1099,108 @@ for var N := 1; N <= 5; N := N + 1 do
 
 ---
 
+## OutText
+
+*procedure* — unit `graph`
+
+**Function**
+
+Draws text at the current position and advances it by the text's width.
+
+**Declaration**
+
+```algol24
+procedure OutText (Text : String);
+```
+
+**Remarks**
+
+Successive calls continue one line, which is what the current position exists
+for. The position starts at the window's top-left corner when `InitGraph`
+opens it; [`OutTextXY`](#outtextxy) neither consults nor moves it.
+
+Nothing wraps: text past the window's edge is clipped, not folded.
+
+Any codepoint the installed font carries will draw — see
+[`InstallUserFont`](#installuserfont) for what the shipped default covers.
+Emoji arrive in their own colors. A codepoint the font lacks advances a blank
+half-cell rather than raising, so a text with one exotic character still
+lands. Ink is white, until the unit grows a way to choose a color.
+
+`WriteLn` cannot serve here, and it was tried: a unit-defined `WriteLn`
+**replaces** the built-in rather than overloading it, so a program using such
+a unit would lose console output entirely — `WriteLn ('x')` answers
+`Expected 2 arguments but got 1.` The Turbo Pascal names avoid breaking the
+console to reach the window.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`InstallUserFont`](#installuserfont), [`OutTextXY`](#outtextxy)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (400, 200, 'text', False);
+
+OutTextXY (10, 10, 'Hello 你好 🙂');
+OutText ('one ');
+OutText ('line, ');
+OutText ('in pieces');
+
+CloseGraph ();
+WriteLn ('drawn');
+```
+
+```console
+drawn
+```
+
+---
+
+## OutTextXY
+
+*procedure* — unit `graph`
+
+**Function**
+
+Draws text with its top-left corner at X, Y.
+
+**Declaration**
+
+```algol24
+procedure OutTextXY (X : Integer, Y : Integer, Text : String);
+```
+
+**Remarks**
+
+The current position is neither consulted nor moved, which is Turbo Pascal's
+rule and the useful one: placed text is placed, and a following
+[`OutText`](#outtext) carries on from wherever it was.
+
+Coordinates may land partly or wholly outside the window; what falls outside
+is clipped pixel by pixel rather than raising, so a label may slide off an
+edge gracefully.
+
+Everything said of [`OutText`](#outtext) about fonts, emoji, missing glyphs
+and ink holds here.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`InstallUserFont`](#installuserfont), [`OutText`](#outtext)
+
+**Example**
+
+See [`OutText`](#outtext) and [`InstallUserFont`](#installuserfont), which
+place text with it.
+
+---
+
 ## Pi
 
 *constant* — unit `math`
@@ -1146,6 +1530,85 @@ for var V in [0.5, 1.5, 2.5, 3.5] do
 1.5 rounds to 2
 2.5 rounds to 2
 3.5 rounds to 4
+```
+
+---
+
+## ScreenHeight
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the desktop's height in pixels.
+
+**Declaration**
+
+```algol24
+function ScreenHeight () : Integer;
+```
+
+**Remarks**
+
+Everything said of [`ScreenWidth`](#screenwidth) holds here, for rows. Note
+that on macOS a fullscreen window's height can be slightly less than this,
+because the menu bar stays — [`GetMaxY`](#getmaxy) is the truth about the
+window, this is the truth about the desktop.
+
+**See also**
+
+[`GetMaxY`](#getmaxy), [`InitGraph`](#initgraph), [`ScreenWidth`](#screenwidth)
+
+**Example**
+
+See [`ScreenWidth`](#screenwidth), which shows both.
+
+---
+
+## ScreenWidth
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the desktop's width in pixels.
+
+**Declaration**
+
+```algol24
+function ScreenWidth () : Integer;
+```
+
+**Remarks**
+
+Usable **before** [`InitGraph`](#initgraph), which is its purpose: it answers
+how much room the desktop has, so a program can choose a window size to fit.
+It is unchanged by windows opening and closing.
+
+This and [`GetMaxX`](#getmaxx) answer different questions — how big a window
+could be, versus how big this one is — and keeping the names apart is what
+lets the `GetMaxX` drawing idiom stay safe in a window smaller than the
+screen.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph), [`ScreenHeight`](#screenheight)
+
+**Example**
+
+```algol24
+uses graph;
+
+// The desktop's size is the machine's, so only its soundness can be shown.
+WriteLn (ScreenWidth () > 0);
+WriteLn (ScreenHeight () > 0);
+WriteLn (ScreenWidth () >= 640);
+```
+
+```console
+true
+true
+true
 ```
 
 ---

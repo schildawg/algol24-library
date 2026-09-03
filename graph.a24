@@ -1,0 +1,990 @@
+/// A graphics window, over SDL2.
+///
+/// The shape is Turbo Pascal's Graph unit; the machinery underneath is a real
+/// windowing system, and where the two disagree the window wins. `InitGraph`
+/// carries a size and a title rather than a driver and a mode, because there is
+/// no video card to pick, and failure raises rather than setting a result code.
+///
+/// The unit carries state -- the window, and what size it turned out to be --
+/// which is why it lives apart from `math` for the same reason `random` does.
+///
+/// Every SDL declaration names the library by its Homebrew path, because a
+/// foreign declaration's `in` clause takes a string literal and cannot fall
+/// back to a second spelling. An SDL installed elsewhere means substituting the
+/// path throughout.
+unit graph;
+
+// ------------------------------------------------------------------ SDL --
+//
+// Private. Each declaration copies the C signature exactly, which is the whole
+// of what keeps a foreign call honest -- see DEFECTS.md H-1.
+
+function SDL_Init (Flags : Integer) : Integer;
+    external 'SDL_Init' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_GetError () : String;
+    external 'SDL_GetError' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_CreateWindow (Title : String, X : Integer, Y : Integer,
+                           W : Integer, H : Integer, Flags : Integer) : Pointer;
+    external 'SDL_CreateWindow' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_DestroyWindow (Win : Pointer);
+    external 'SDL_DestroyWindow' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_CreateRenderer (Win : Pointer, Index : Integer, Flags : Integer) : Pointer;
+    external 'SDL_CreateRenderer' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_DestroyRenderer (Ren : Pointer);
+    external 'SDL_DestroyRenderer' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_SetRenderDrawColor (Ren : Pointer, R : Integer, G : Integer,
+                                 B : Integer, A : Integer) : Integer;
+    external 'SDL_SetRenderDrawColor' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_RenderClear (Ren : Pointer) : Integer;
+    external 'SDL_RenderClear' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_RenderPresent (Ren : Pointer);
+    external 'SDL_RenderPresent' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_GetWindowSize (Win : Pointer, W : Pointer, H : Pointer);
+    external 'SDL_GetWindowSize' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_GetWindowTitle (Win : Pointer) : String;
+    external 'SDL_GetWindowTitle' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_GetDesktopDisplayMode (Index : Integer, Mode : Pointer) : Integer;
+    external 'SDL_GetDesktopDisplayMode' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_PumpEvents ();
+    external 'SDL_PumpEvents' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_CreateTexture (Ren : Pointer, Format : Integer, Access : Integer,
+                            W : Integer, H : Integer) : Pointer;
+    external 'SDL_CreateTexture' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_DestroyTexture (Tex : Pointer);
+    external 'SDL_DestroyTexture' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_UpdateTexture (Tex : Pointer, Rect : Pointer, Pixels : Pointer,
+                            Pitch : Integer) : Integer;
+    external 'SDL_UpdateTexture' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_RenderCopy (Ren : Pointer, Tex : Pointer, Src : Pointer, Dst : Pointer) : Integer;
+    external 'SDL_RenderCopy' in '/opt/homebrew/lib/libSDL2.dylib';
+
+/// Decodes hex text in groups of Group digits, one four-byte word per group,
+/// into Out. Answers how many words were written.
+///
+/// Private to this unit, and its one C primitive of its own: decoding is
+/// transcoding rather than logic, and the interpreter doing it a digit at a
+/// time cost eight seconds per font load. A junk digit counts as zero and a
+/// trailing partial group is ignored, both matching the decoding this
+/// replaced.
+function UnhexWords (Hex : String, Group : Integer, Out : Pointer) : Integer;
+    external 'alg_unhex_words' in 'libgraphffi.dylib';
+
+const SDL_INIT_VIDEO             := 32;
+const WINDOWPOS_CENTERED         := 805240832;
+const WINDOW_SHOWN               := 4;
+const WINDOW_FULLSCREEN_DESKTOP  := 4097;
+const PIXELFORMAT_RGB            := 370546692;   // SDL_PIXELFORMAT_RGB888: 0xRRGGBB, always positive
+const TEXTURE_STREAMING          := 1;
+
+// ---------------------------------------------------------------- state --
+//
+// Declared above every routine that reads them, which DEF-35 makes a rule
+// rather than a taste: a module-level variable is invisible to a body written
+// above it.
+
+var VideoReady   := False;
+var Window       := nil;
+var Renderer     := nil;
+var Texture      := nil;
+var Pixels       := nil;
+var WindowWidth  := 0;
+var WindowHeight := 0;
+
+// The current position text advances through, in pixels. Turbo Pascal called
+// it the CP: OutText draws there and moves it; OutTextXY touches neither.
+var CurrentX := 0;
+var CurrentY := 0;
+
+// The installed font. One map from codepoint to a Buffer of four-byte words,
+// one to widths, one marking the glyphs that are pictures (emoji) rather than
+// ink. A grey or picture glyph holds one word per pixel, row-major; a 1-bit
+// glyph holds one word per row, the row's pixels packed as bits.
+var FontLoaded   := False;
+var FontGrey     := False;
+var FontHeight   := 16;
+var FontGlyphs   := [:];
+var FontWidths   := [:];
+var FontPictures := [:];
+
+/// Starts SDL's video subsystem once, on first need.
+///
+/// Private to this unit. Video stays up for the life of the process; only the
+/// window comes and goes.
+procedure EnsureVideo ();
+begin
+    if VideoReady then Exit;
+
+    if SDL_Init (SDL_INIT_VIDEO) <> 0 then
+        raise 'Graph could not start: ' + SDL_GetError ();
+
+    VideoReady := True;
+end
+
+/// Hands the framebuffer to the window.
+///
+/// Private to this unit, and the one place pixels become visible: everything
+/// draws into `Pixels`, and this uploads the lot and presents it.
+procedure Present ();
+begin
+    SDL_UpdateTexture (Texture, nil, Pixels.Address, WindowWidth * 4);
+    SDL_RenderClear (Renderer);
+    SDL_RenderCopy (Renderer, Texture, nil, nil);
+    SDL_RenderPresent (Renderer);
+    SDL_PumpEvents ();
+end
+
+/// The value of one hex digit; anything else is zero.
+function HexDigit (C : Char) : Integer;
+begin
+    if C >= '0' then if C <= '9' then Exit Ord (C) - Ord ('0');
+    if C >= 'A' then if C <= 'F' then Exit Ord (C) - Ord ('A') + 10;
+    if C >= 'a' then if C <= 'f' then Exit Ord (C) - Ord ('a') + 10;
+
+    Exit 0;
+end
+
+/// Count hex digits of Text starting at At, as one number.
+function HexAt (Text : String, At : Integer, Count : Integer) : Integer;
+begin
+    var Value := 0;
+
+    for var I := 0; I < Count; I := I + 1 do
+        Value := Value * 16 + HexDigit (Text[At + I]);
+
+    Exit Value;
+end
+
+/// Installs the glyph file at Path as the font all text draws with.
+///
+/// The format is the example font's, one glyph per line as `codepoint`, a
+/// separator, and hex rows. A `:` separator carries ink -- one bit per pixel,
+/// or one byte of coverage when the file opens with a `# gray8` header -- and
+/// a `+` separator carries a picture, RRGGBBAA per pixel, which is how emoji
+/// arrive in their own colors. Width is the length of the row data, so a CJK
+/// glyph is simply twice as wide as a Latin one.
+///
+/// The library ships two: `graphfont.hex`, antialiased with emoji, installed
+/// by default the first time text draws; and `romfont.hex`, one bit per pixel,
+/// which is what a 1980s character ROM held. Either resolves against the
+/// working directory, as any data file does. A new font replaces the old one
+/// entirely; a font that cannot be opened leaves the old one installed.
+///
+/// # Raises
+/// `InstallUserFont: cannot open '...'.` when there is no file to read.
+///
+/// # Examples
+/// `InstallUserFont Selects Another Glyph File`
+procedure InstallUserFont (Path : String);
+begin
+    var F := TextFile ();
+
+    F.Assign (Path);
+
+    try
+        F.Reset ();
+    except
+        raise 'InstallUserFont: cannot open ''' + Path + '''.';
+    end
+
+    FontGlyphs   := [:];
+    FontWidths   := [:];
+    FontPictures := [:];
+    FontGrey     := False;
+    FontHeight   := 16;
+
+    while not F.Eof do
+    begin
+        var Line := F.ReadLn ();
+
+        // The separator IS the format: ':' is ink, '+' is a picture.
+        var Sep     := Pos (Line, ':');
+        var Painted := False;
+
+        if Sep < 0 then
+        begin
+            Sep := Pos (Line, '+');
+            if Sep >= 0 then Painted := True;
+        end
+
+        // '# gray8 32' -- the header a grey font opens with, and the only
+        // line in either format that is not a glyph.
+        if Length (Line) > 0 then
+          if Line[0] = '#' then
+          begin
+              FontGrey   := True;
+              FontHeight := 0;
+
+              var I := Pos (Line, '8') + 1;
+              while I < Length (Line) do
+              begin
+                  if Line[I] >= '0' then
+                    if Line[I] <= '9' then
+                        FontHeight := FontHeight * 10 + Ord (Line[I]) - Ord ('0');
+                  I := I + 1;
+              end
+          end
+
+        if Sep >= 0 then
+        begin
+            var Code := HexAt (Line, 0, Sep);
+            var Bits := Copy (Line, Sep + 1, Length (Line) - Sep - 1);
+
+            // One decoder call per glyph. The group size is the format:
+            // eight digits to a picture pixel, two to a grey one, and a whole
+            // row at once for 1-bit ink.
+            var Group := 2;
+
+            if Painted then Group := 8;
+            if not Painted then if not FontGrey then Group := Length (Bits) div FontHeight;
+
+            var Words := Buffer ((Length (Bits) div Group) * 4);
+
+            UnhexWords (Bits, Group, Words.Address);
+
+            if Painted then
+            begin
+                FontWidths[Code]   := Length (Bits) div 8 div FontHeight;
+                FontPictures[Code] := True;
+            end
+            else if FontGrey then
+                FontWidths[Code] := Length (Bits) div 2 div FontHeight;
+            else
+                FontWidths[Code] := (Length (Bits) div FontHeight) * 4;
+
+            FontGlyphs[Code] := Words;
+        end
+    end
+
+    F.Close ();
+
+    FontLoaded := True;
+end
+
+/// Loads the default font the first time text draws.
+///
+/// Private to this unit.
+procedure EnsureFont ();
+begin
+    if FontLoaded then Exit;
+
+    try
+        InstallUserFont ('graphfont.hex');
+    except
+        raise 'No font is installed: ''graphfont.hex'' is not in the working '
+            + 'directory, and InstallUserFont has not named another.';
+    end
+end
+
+/// Mixes Ink into the ground at a coverage of 0 .. 255, channel by channel.
+///
+/// Private to this unit, and the whole difference between text that looks
+/// drawn and text that looks thresholded: a stem falling between two pixels
+/// lands on both, each at the weight it actually covers.
+function Mix (Ground : Integer, Ink : Integer, Cover : Integer) : Integer;
+begin
+    if Cover >= 255 then Exit Ink;
+    if Cover <= 0   then Exit Ground;
+
+    var GR := Ground div 65536;
+    var GG := Ground div 256 mod 256;
+    var GB := Ground mod 256;
+
+    var IR := Ink div 65536;
+    var IG := Ink div 256 mod 256;
+    var IB := Ink mod 256;
+
+    var R := GR + (IR - GR) * Cover div 255;
+    var G := GG + (IG - GG) * Cover div 255;
+    var B := GB + (IB - GB) * Cover div 255;
+
+    Exit R * 65536 + G * 256 + B;
+end
+
+/// Blends one pixel into the framebuffer, clipped at the window's edge.
+procedure Wash (X : Integer, Y : Integer, Ink : Integer, Cover : Integer);
+begin
+    if X >= 0 then
+      if Y >= 0 then
+        if X < WindowWidth then
+          if Y < WindowHeight then
+          begin
+              var At := (Y * WindowWidth + X) * 4;
+
+              Pixels.PutInt (At, Mix (Pixels.GetInt (At), Ink, Cover));
+          end
+end
+
+/// Draws one glyph and answers how far to advance.
+///
+/// Private to this unit. A codepoint the font does not carry advances half the
+/// font's height -- a blank of about one narrow cell -- rather than raising,
+/// so a text with one exotic character still lands.
+function DrawGlyph (Code : Integer, X : Integer, Y : Integer, Ink : Integer) : Integer;
+begin
+    if not (Code in FontGlyphs) then Exit FontHeight div 2;
+
+    var Words := FontGlyphs[Code];
+    var Wide  := FontWidths[Code];
+
+    for var R := 0; R < FontHeight; R := R + 1 do
+    begin
+        for var C := 0; C < Wide; C := C + 1 do
+        begin
+            if Code in FontPictures then
+            begin
+                // RRGGBBAA: the pixel brings its own color, and only the
+                // alpha decides how much of it lands. GetInt reads the word
+                // signed, so a pixel past the sign bit comes back negative
+                // and its bit pattern is restored by adding 2^32.
+                var Pixel := Words.GetInt ((R * Wide + C) * 4);
+
+                if Pixel < 0 then Pixel := Pixel + 4294967296;
+
+                var Alpha := Pixel mod 256;
+
+                if Alpha > 0 then Wash (X + C, Y + R, Pixel div 256, Alpha);
+            end
+            else if FontGrey then
+            begin
+                var Cover := Words.GetInt ((R * Wide + C) * 4);
+
+                if Cover > 0 then Wash (X + C, Y + R, Ink, Cover);
+            end
+            else
+            begin
+                // One word per row, the pixels packed as bits; the high bit
+                // is the leftmost pixel. No shift operator, so the bit is
+                // divided down to the ones place.
+                var Row   := Words.GetInt (R * 4);
+                var Place := 1;
+
+                for var K := 0; K < Wide - 1 - C; K := K + 1 do
+                    Place := Place * 2;
+
+                if Row div Place mod 2 = 1 then Wash (X + C, Y + R, Ink, 255);
+            end
+        end
+    end
+
+    Exit Wide;
+end
+
+/// Lit pixels in a rectangle of the framebuffer.
+///
+/// Private to this unit; what the tests measure the drawing by.
+function LitPixels (Left : Integer, Top : Integer, Wide : Integer, High : Integer) : Integer;
+begin
+    var Count := 0;
+
+    for var Y := Top; Y < Top + High; Y := Y + 1 do
+        for var X := Left; X < Left + Wide; X := X + 1 do
+            if Pixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then
+                Count := Count + 1;
+
+    Exit Count;
+end
+
+/// Opens the graphics window.
+///
+/// The window is Width by Height pixels, centred, with Title in its title bar.
+/// With Fullscreen true it instead covers the whole desktop at the desktop's
+/// own resolution -- the borderless kind of fullscreen, which changes no
+/// display mode and cannot leave the screen in one if the program dies -- and
+/// Width and Height are not used. On macOS the menu bar stays, so the
+/// fullscreen window is the desktop's width but can be short of its height.
+///
+/// The size asked for and the size received can differ, fullscreen being the
+/// obvious case, so `GetMaxX` and `GetMaxY` report what was actually opened
+/// rather than echoing the request.
+///
+/// Turbo Pascal's driver, mode and path parameters are gone; they existed to
+/// pick a video card. Failure raises, carrying SDL's own message, rather than
+/// setting a result code to be fetched afterward.
+///
+/// # Raises
+/// `Graph is already open.` for a second call before `CloseGraph`;
+/// `InitGraph needs a positive size.` for a Width or Height of zero or less;
+/// and the message SDL gives when the window or its renderer cannot be made.
+///
+/// # Examples
+/// `InitGraph Opens A Window Of The Size Asked For`
+procedure InitGraph (Width : Integer, Height : Integer, Title : String, Fullscreen : Boolean);
+begin
+    if Window <> nil then raise 'Graph is already open.';
+    if Width <= 0 or Height <= 0 then raise 'InitGraph needs a positive size.';
+
+    EnsureVideo ();
+
+    var Flags := WINDOW_SHOWN;
+
+    if Fullscreen then Flags := WINDOW_SHOWN + WINDOW_FULLSCREEN_DESKTOP;
+
+    Window := SDL_CreateWindow (Title, WINDOWPOS_CENTERED, WINDOWPOS_CENTERED,
+                                Width, Height, Flags);
+
+    if Window = nil then raise 'InitGraph: ' + SDL_GetError ();
+
+    Renderer := SDL_CreateRenderer (Window, -1, 0);
+
+    if Renderer = nil then
+    begin
+        var Message := SDL_GetError ();
+
+        SDL_DestroyWindow (Window);
+        Window := nil;
+
+        raise 'InitGraph: ' + Message;
+    end
+
+    // What was actually opened, which under fullscreen is the desktop's size
+    // and not the request. Two one-int buffers, because SDL answers through
+    // two out-pointers and a Pointer here cannot be offset.
+    var W := Buffer (4);
+    var H := Buffer (4);
+
+    SDL_GetWindowSize (Window, W.Address, H.Address);
+
+    WindowWidth  := W.GetInt (0);
+    WindowHeight := H.GetInt (0);
+
+    Texture := SDL_CreateTexture (Renderer, PIXELFORMAT_RGB, TEXTURE_STREAMING,
+                                  WindowWidth, WindowHeight);
+
+    if Texture = nil then
+    begin
+        var Reason := SDL_GetError ();
+
+        CloseGraph ();
+
+        raise 'InitGraph: ' + Reason;
+    end
+
+    // The framebuffer every routine draws into. A fresh Buffer is zeroed, and
+    // zero is black, so the window opens clean.
+    Pixels := Buffer (WindowWidth * WindowHeight * 4);
+
+    CurrentX := 0;
+    CurrentY := 0;
+
+    SDL_SetRenderDrawColor (Renderer, 0, 0, 0, 255);
+    Present ();
+end
+
+/// Closes the graphics window.
+///
+/// Total: closing when nothing is open does nothing, so a handler may call it
+/// unconditionally. The window may be reopened afterward with `InitGraph`.
+/// SDL's video subsystem stays up for the life of the process; only the window
+/// is released.
+///
+/// # Examples
+/// `CloseGraph Does Nothing When The Window Is Not Open`
+procedure CloseGraph ();
+begin
+    if Window = nil then Exit;
+
+    if Texture <> nil then SDL_DestroyTexture (Texture);
+
+    SDL_DestroyRenderer (Renderer);
+    SDL_DestroyWindow (Window);
+
+    Texture      := nil;
+    Pixels       := nil;
+    Renderer     := nil;
+    Window       := nil;
+    WindowWidth  := 0;
+    WindowHeight := 0;
+    CurrentX     := 0;
+    CurrentY     := 0;
+end
+
+/// The highest X a program can draw to, which is the window's width minus one.
+///
+/// The answer describes the window that actually opened, so under fullscreen it
+/// is the desktop's width minus one whatever `InitGraph` was asked for. The
+/// minus one is the point of the routine: `for var X := 0; X <= GetMaxX (); …`
+/// visits every column exactly.
+///
+/// For how big a window *could* be, before opening one, see `ScreenWidth`.
+///
+/// # Raises
+/// `Graph is not open.` before `InitGraph` or after `CloseGraph`, when there is
+/// no window to measure.
+///
+/// # Examples
+/// `InitGraph Opens A Window Of The Size Asked For`
+function GetMaxX () : Integer;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    Exit WindowWidth - 1;
+end
+
+/// The highest Y a program can draw to, which is the window's height minus one.
+///
+/// Everything said of `GetMaxX` holds here, for rows.
+///
+/// # Raises
+/// `Graph is not open.` before `InitGraph` or after `CloseGraph`.
+///
+/// # Examples
+/// `InitGraph Opens A Window Of The Size Asked For`
+function GetMaxY () : Integer;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    Exit WindowHeight - 1;
+end
+
+/// The desktop's width in pixels.
+///
+/// Usable before `InitGraph`, which is its purpose: it answers how much room
+/// the desktop has, so a program can choose a window size to fit. After a
+/// fullscreen `InitGraph` it is what `GetMaxX () + 1` will equal.
+///
+/// # Raises
+/// The message SDL gives when the desktop cannot be asked.
+///
+/// # Examples
+/// `ScreenWidth And ScreenHeight Answer Before A Window Opens`
+function ScreenWidth () : Integer;
+begin
+    EnsureVideo ();
+
+    // SDL_DisplayMode: format, w, h, refresh rate, then a pointer.
+    var Mode := Buffer (32);
+
+    if SDL_GetDesktopDisplayMode (0, Mode.Address) <> 0 then
+        raise 'ScreenWidth: ' + SDL_GetError ();
+
+    Exit Mode.GetInt (4);
+end
+
+/// The desktop's height in pixels.
+///
+/// Everything said of `ScreenWidth` holds here, for rows.
+///
+/// # Raises
+/// The message SDL gives when the desktop cannot be asked.
+///
+/// # Examples
+/// `ScreenWidth And ScreenHeight Answer Before A Window Opens`
+function ScreenHeight () : Integer;
+begin
+    EnsureVideo ();
+
+    var Mode := Buffer (32);
+
+    if SDL_GetDesktopDisplayMode (0, Mode.Address) <> 0 then
+        raise 'ScreenHeight: ' + SDL_GetError ();
+
+    Exit Mode.GetInt (8);
+end
+
+/// Draws Text at the current position and advances it by the text's width.
+///
+/// Successive calls therefore continue one line, which is what the current
+/// position exists for. Nothing wraps: text past the window's edge is clipped,
+/// not folded. The ink is white until the unit grows a way to choose a color.
+///
+/// Any codepoint the installed font carries will draw -- the shipped default
+/// covers ASCII, several scripts and a handful of emoji, which arrive in
+/// their own colors. One the font lacks advances a blank half-cell.
+///
+/// # Raises
+/// `Graph is not open.` without a window, and `EnsureFont`'s message when no
+/// font can be found.
+///
+/// # Examples
+/// `OutText Advances The Current Position By The Text's Width`
+procedure OutText (Text : String);
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    for var I := 0; I < Length (Text); I := I + 1 do
+        CurrentX := CurrentX + DrawGlyph (Ord (Text[I]), CurrentX, CurrentY, 16777215);
+
+    Present ();
+end
+
+/// Draws Text with its top-left corner at X, Y.
+///
+/// The current position is not consulted and not moved, which is Turbo
+/// Pascal's rule and the useful one: placed text is placed, and a following
+/// `OutText` carries on from wherever it was. Everything else said of
+/// `OutText` holds here.
+///
+/// # Raises
+/// `Graph is not open.` without a window, and `EnsureFont`'s message when no
+/// font can be found.
+///
+/// # Examples
+/// `OutTextXY Draws Where It Is Told And Leaves The Position Alone`
+procedure OutTextXY (X : Integer, Y : Integer, Text : String);
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    var At := X;
+
+    for var I := 0; I < Length (Text); I := I + 1 do
+        At := At + DrawGlyph (Ord (Text[I]), At, Y, 16777215);
+
+    Present ();
+end
+
+// ---------------------------------------------------------------- tests --
+//
+// Run under SDL's dummy video driver by ./test.sh, so no window reaches the
+// desktop. Run directly -- `algc --test graph.a24` -- they open real windows
+// for a moment, which is harmless and occasionally worth seeing. Nothing
+// asserted depends on which driver answered.
+
+test 'InitGraph Opens A Window Of The Size Asked For';
+begin
+    CloseGraph ();
+
+    InitGraph (320, 200, 'sized', False);
+
+    AssertEqual (319, GetMaxX ());
+    AssertEqual (199, GetMaxY ());
+
+    CloseGraph ();
+end
+
+test 'InitGraph Carries The Title Through, Unicode Included';
+begin
+    CloseGraph ();
+
+    InitGraph (100, 100, 'Algol-24 ✓', False);
+
+    AssertEqual ('Algol-24 ✓', SDL_GetWindowTitle (Window));
+
+    CloseGraph ();
+end
+
+test 'InitGraph Raises When The Window Is Already Open';
+begin
+    CloseGraph ();
+
+    InitGraph (100, 100, 'first', False);
+
+    var Message := '';
+
+    try InitGraph (100, 100, 'second', False); except on e : String do Message := e; end
+    AssertEqual ('Graph is already open.', Message);
+
+    // And the first window survived the refusal.
+    AssertEqual (99, GetMaxX ());
+
+    CloseGraph ();
+end
+
+test 'InitGraph Raises For A Size That Is Not Positive';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try InitGraph (0, 100, 'x', False); except on e : String do Message := e; end
+    AssertEqual ('InitGraph needs a positive size.', Message);
+
+    Message := '';
+    try InitGraph (100, -1, 'x', False); except on e : String do Message := e; end
+    AssertEqual ('InitGraph needs a positive size.', Message);
+
+    // A refused init opened nothing.
+    Message := '';
+    try GetMaxX (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+/// Borderless fullscreen takes the desktop's size, not the request's. The
+/// height is asserted as a range rather than an equality because macOS keeps
+/// its menu bar: there the fullscreen window is the desktop's width but
+/// slightly less than its height, and both facts are the windowing system's
+/// truth rather than anyone's bug.
+test 'InitGraph Fullscreen Fills The Desktop';
+begin
+    CloseGraph ();
+
+    InitGraph (100, 100, 'full', True);
+
+    AssertEqual (ScreenWidth () - 1, GetMaxX ());
+    AssertTrue (GetMaxY () + 1 > 100);
+    AssertTrue (GetMaxY () + 1 <= ScreenHeight ());
+
+    CloseGraph ();
+end
+
+test 'CloseGraph Does Nothing When The Window Is Not Open';
+begin
+    CloseGraph ();
+    CloseGraph ();
+
+    AssertTrue (True);
+end
+
+test 'CloseGraph Releases The Window So Another May Open';
+begin
+    CloseGraph ();
+
+    InitGraph (320, 200, 'first', False);
+    CloseGraph ();
+
+    InitGraph (640, 480, 'second', False);
+
+    AssertEqual (639, GetMaxX ());
+    AssertEqual (479, GetMaxY ());
+
+    CloseGraph ();
+end
+
+test 'GetMaxX And GetMaxY Raise When The Window Is Not Open';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try GetMaxX (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try GetMaxY (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'GetMaxX And GetMaxY Raise Again After The Window Closes';
+begin
+    CloseGraph ();
+
+    InitGraph (100, 100, 'brief', False);
+    CloseGraph ();
+
+    var Message := '';
+
+    try GetMaxX (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+/// The values are the machine's, so only their soundness can be asserted.
+test 'ScreenWidth And ScreenHeight Answer Before A Window Opens';
+begin
+    AssertTrue (ScreenWidth () > 0);
+    AssertTrue (ScreenHeight () > 0);
+end
+
+test 'ScreenWidth Is Unchanged By A Window Opening And Closing';
+begin
+    CloseGraph ();
+
+    var Before := ScreenWidth ();
+
+    InitGraph (100, 100, 'x', False);
+    AssertEqual (Before, ScreenWidth ());
+
+    CloseGraph ();
+    AssertEqual (Before, ScreenWidth ());
+end
+
+// ------------------------------------------------------- OutText and fonts --
+
+test 'OutTextXY Draws Where It Is Told And Leaves The Position Alone';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'text', False);
+
+    AssertEqual (0, LitPixels (10, 10, 40, 40));
+
+    OutTextXY (10, 10, 'A');
+
+    AssertTrue (LitPixels (10, 10, 40, 40) > 0);
+    AssertEqual (0, CurrentX);
+    AssertEqual (0, CurrentY);
+
+    CloseGraph ();
+end
+
+test 'OutText Advances The Current Position By The Text''s Width';
+begin
+    CloseGraph ();
+    InitGraph (400, 100, 'advance', False);
+
+    OutText ('AB');
+
+    AssertEqual (FontWidths[Ord ('A')] + FontWidths[Ord ('B')], CurrentX);
+    AssertEqual (0, CurrentY);
+
+    // And the next call carries on from there rather than overprinting.
+    var Before := CurrentX;
+
+    OutText ('C');
+
+    AssertEqual (Before + FontWidths[Ord ('C')], CurrentX);
+
+    CloseGraph ();
+end
+
+test 'OutText And OutTextXY Raise When The Window Is Not Open';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try OutText ('x'); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try OutTextXY (0, 0, 'x'); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+/// The shipped default is a cell font: a CJK glyph takes two cells, which is
+/// what makes columns line up, and the reason width lives per glyph at all.
+test 'A Wide Glyph Advances Twice A Narrow One';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'wide', False);
+
+    OutText ('你');
+    var Wide := CurrentX;
+
+    CurrentX := 0;
+    OutText ('A');
+
+    AssertEqual (2 * CurrentX, Wide);
+
+    CloseGraph ();
+end
+
+/// A picture glyph brings its own colors, so at least one of its pixels must
+/// have unequal channels -- ink from the grey font never does.
+test 'An Emoji Glyph Arrives In Its Own Colors';
+begin
+    CloseGraph ();
+    InitGraph (100, 100, 'emoji', False);
+
+    OutTextXY (0, 0, '🙂');
+
+    var Colored := False;
+
+    for var Y := 0; Y < 40; Y := Y + 1 do
+        for var X := 0; X < 40; X := X + 1 do
+        begin
+            var P := Pixels.GetInt ((Y * WindowWidth + X) * 4);
+
+            if P div 65536 mod 256 <> P mod 256 then Colored := True;
+        end
+
+    AssertTrue (Colored);
+
+    CloseGraph ();
+end
+
+/// Rather than raising over one exotic character, a codepoint the font lacks
+/// advances a blank half-cell and the rest of the text lands.
+test 'A Glyph The Font Lacks Advances A Blank Half Cell';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'gap', False);
+
+    OutText ('ʣ');
+
+    AssertEqual (FontHeight div 2, CurrentX);
+
+    CloseGraph ();
+end
+
+test 'Text Past The Window''s Edge Is Clipped Rather Than Raising';
+begin
+    CloseGraph ();
+    InitGraph (64, 64, 'clip', False);
+
+    OutTextXY (60, 60, 'well beyond the edge');
+    OutTextXY (-10, -10, 'and before it');
+
+    AssertTrue (True);
+
+    CloseGraph ();
+end
+
+test 'InstallUserFont Selects Another Glyph File';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'rom', False);
+
+    InstallUserFont ('romfont.hex');
+
+    // The character-ROM font is one bit per pixel: 16 tall, 8 to a narrow cell.
+    AssertEqual (16, FontHeight);
+    AssertEqual (8, FontWidths[Ord ('A')]);
+
+    OutTextXY (10, 10, 'A');
+    AssertTrue (LitPixels (10, 10, 20, 20) > 0);
+
+    // Put the default back so no later test inherits the ROM look.
+    InstallUserFont ('graphfont.hex');
+    AssertEqual (32, FontHeight);
+
+    CloseGraph ();
+end
+
+test 'InstallUserFont Raises For A File That Is Not There';
+begin
+    var Message := '';
+
+    try InstallUserFont ('no-such-font.hex'); except on e : String do Message := e; end
+    AssertEqual ('InstallUserFont: cannot open ''no-such-font.hex''.', Message);
+end
+
+/// A font that cannot be opened must leave the installed one untouched --
+/// clearing first would trade a good font for an error message.
+test 'A Failed InstallUserFont Leaves The Old Font Installed';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'keep', False);
+
+    OutText ('A');
+    var Before := CurrentX;
+
+    try InstallUserFont ('no-such-font.hex'); except end
+
+    CurrentX := 0;
+    OutText ('A');
+
+    AssertEqual (Before, CurrentX);
+
+    CloseGraph ();
+end
+
+/// The decoder is the unit's one C primitive, so its exact values are pinned:
+/// grey pairs, a whole 1-bit row, a picture pixel past the sign bit, junk
+/// digits, and the ignored trailing partial group.
+test 'The Hex Decoder Answers Known Values';
+begin
+    var Out := Buffer (64);
+
+    AssertEqual (3, UnhexWords ('FF1000', 2, Out.Address));
+    AssertEqual (255, Out.GetInt (0));
+    AssertEqual (16, Out.GetInt (4));
+    AssertEqual (0, Out.GetInt (8));
+
+    AssertEqual (1, UnhexWords ('0180', 4, Out.Address));
+    AssertEqual (384, Out.GetInt (0));
+
+    // FFFFFFFF is stored as its bit pattern and reads back signed.
+    AssertEqual (1, UnhexWords ('FFFFFFFF', 8, Out.Address));
+    AssertEqual (-1, Out.GetInt (0));
+    AssertEqual (4294967295, Out.GetInt (0) + 4294967296);
+
+    // A junk digit counts as zero, as the old decoding had it.
+    AssertEqual (1, UnhexWords ('ZF', 2, Out.Address));
+    AssertEqual (15, Out.GetInt (0));
+
+    // A trailing partial group is ignored, not half-decoded.
+    AssertEqual (1, UnhexWords ('ABC', 2, Out.Address));
+    AssertEqual (171, Out.GetInt (0));
+end

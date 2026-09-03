@@ -240,7 +240,29 @@ which this repository has no reason to carry.
 | Unit | Members | Tests | Reference |
 | --- | --- | --- | --- |
 | `testing` | `AssertNear` | 9 | complete |
+| `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
+| `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; SDL2 declared directly; `graphffi.c` carries one hex decoder | 22 | complete |
+
+`graph` notes: SDL2 comes from Homebrew (`brew install sdl2`) and every
+declaration names `/opt/homebrew/lib/libSDL2.dylib` literally, because `in`
+takes a string literal — an SDL elsewhere means substituting the path
+throughout. `./test.sh` and `./check-reference.py` set `SDL_VIDEODRIVER=dummy`
+so tests and examples open no real windows; running `algc --test graph.a24`
+directly uses the real display, which is harmless and occasionally worth
+watching. On macOS, fullscreen keeps the menu bar, so a fullscreen window is
+the desktop's width but short of its height — `GetMaxX`/`GetMaxY` report the
+window that actually opened. Text draws through glyph files —
+`graphfont.hex` (antialiased, with emoji) is the default and `romfont.hex` the
+1-bit alternative; both resolve against the working directory, and
+`InstallUserFont` selects any other. A unit-defined `WriteLn` **replaces** the
+built-in rather than overloading it, which is why the text routines are
+`OutText`/`OutTextXY` and not a window-bound `WriteLn`. Glyph hex is decoded by
+`alg_unhex_words` in `graphffi.c` — transcoding, not logic — because the
+interpreter doing it a digit at a time cost eight seconds per font load; the
+format knowledge and the blending stay in the unit. Per-glyph blending is still
+interpreter-priced (~18 ms), which is fine for labels and is what `--compile`
+is for otherwise.
 
 `examples/statistics.a24` is the worked application — built by
 `examples/build.sh`, verified by `examples/check.sh`, explained in
@@ -248,5 +270,4 @@ which this repository has no reason to carry.
 than one unit, so it is the one to run when anything about linking changes.
 
 Build artifacts — `lib*ffi.dylib` and `examples/build/` — are generated and
-should not be committed if this becomes a git repository.
-| `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 (+9) | complete |
+should not be committed.

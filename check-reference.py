@@ -61,7 +61,7 @@ def main():
     work = tempfile.mkdtemp()
     try:
         for name in os.listdir(ROOT):
-            if name.endswith('.a24') or '.dylib' in name or name.endswith('.so'):
+            if name.endswith(('.a24', '.hex')) or '.dylib' in name or name.endswith('.so'):
                 shutil.copy(os.path.join(ROOT, name), work)
 
         failed = 0
@@ -75,7 +75,10 @@ def main():
             in_test_mode = re.search(r"^test '", program, re.M) is not None
             argv = ['algc', '--test', path] if in_test_mode else ['algc', path]
 
-            result = subprocess.run(argv, capture_output=True, text=True, cwd=work)
+            # graph examples open windows; the dummy driver opens them nowhere.
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            result = subprocess.run(argv, capture_output=True, text=True,
+                                    cwd=work, env=env)
 
             got = result.stdout
             if in_test_mode:

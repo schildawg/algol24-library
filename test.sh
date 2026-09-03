@@ -9,6 +9,12 @@
 
 set -eu
 
+# graph's tests open windows. Under SDL's dummy video driver they open them
+# nowhere, so a test run does not flash windows across the desktop. Running a
+# unit directly -- `algc --test graph.a24` -- uses the real driver, which is
+# harmless and occasionally worth watching.
+export SDL_VIDEODRIVER=dummy
+
 # The units reach the library's own C through a shared library, so a stale one
 # would be tested instead of the source beside it.
 ./build.sh > /dev/null
