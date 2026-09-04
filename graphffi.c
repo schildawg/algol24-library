@@ -46,3 +46,121 @@ int64_t alg_unhex_words (const char *hex, int64_t group, int32_t *out)
         hex += group;
     }
 }
+
+/* ------------------------------------------------------------ the grid -- */
+/*
+ * Stamping one glyph into a text cell is the hot path of text mode: a full
+ * 80 x 25 screen is two thousand cells, and the interpreted blend loop was
+ * measured at ~18ms per glyph -- half a minute per screenful.  So the cell
+ * blit lives here.  The unit still owns the format knowledge and the layout:
+ * it says which glyph, which mode, what ink, what background, and where.
+ *
+ * A foreign call takes at most eight arguments, so the target framebuffer is
+ * set once rather than passed each time.
+ */
+
+static int32_t *target       = 0;
+static int64_t  target_w     = 0;
+static int64_t  target_h     = 0;
+
+void alg_stamp_target (void *pixels, int64_t w, int64_t h)
+{
+    target   = (int32_t *) pixels;
+    target_w = w > 0 ? w : 0;
+    target_h = h > 0 ? h : 0;
+}
+
+static int32_t mixed (int64_t ground, int64_t color, int64_t cover)
+{
+    int64_t gr = (ground >> 16) & 255, gg = (ground >> 8) & 255, gb = ground & 255;
+    int64_t ir = (color  >> 16) & 255, ig = (color  >> 8) & 255, ib = color  & 255;
+
+    int64_t r = gr + (ir - gr) * cover / 255;
+    int64_t g = gg + (ig - gg) * cover / 255;
+    int64_t b = gb + (ib - gb) * cover / 255;
+
+    return (int32_t) (0xFF000000u | (r << 16) | (g << 8) | b);
+}
+
+/* Stamp one glyph's cell at pixel x, y.
+ *
+ * glyph is the unit's decoded word Buffer -- one word per row for mode 0
+ * (bits, high bit leftmost), one coverage word per pixel for mode 1, one
+ * RRGGBBAA word per pixel for mode 2 -- or NULL for a blank cell.  A bg of
+ * -1 leaves uncovered pixels transparent; any other bg paints the whole cell
+ * opaque and blends the ink into it, which is what a text-mode cell is.
+ *
+ * Total: no target, a senseless size, or a wholly off-target cell writes
+ * nothing.
+ */
+void alg_stamp_cell (int64_t x, int64_t y, void *glyph,
+                     int64_t gw, int64_t gh,
+                     int64_t mode, int64_t ink, int64_t bg)
+{
+    const int32_t *words = (const int32_t *) glyph;
+
+    if (target == 0 || gw <= 0 || gh <= 0) return;
+
+    for (int64_t r = 0; r < gh; r++)
+    {
+        int64_t ty = y + r;
+
+        if (ty < 0 || ty >= target_h) continue;
+
+        for (int64_t c = 0; c < gw; c++)
+        {
+            int64_t tx = x + c;
+
+            if (tx < 0 || tx >= target_w) continue;
+
+            int64_t cover = 0;
+            int64_t color = ink;
+
+            if (words != 0)
+            {
+                if (mode == 0)
+                    cover = ((uint32_t) words[r] >> (gw - 1 - c)) & 1 ? 255 : 0;
+                else if (mode == 1)
+                    cover = (uint32_t) words[r * gw + c];
+                else
+                {
+                    uint32_t px = (uint32_t) words[r * gw + c];
+
+                    cover = px & 255;
+                    color = px >> 8;
+                }
+            }
+
+            int32_t *out = target + ty * target_w + tx;
+
+            if (bg >= 0)
+                *out = mixed (bg, color, cover);
+            else if (cover >= 255)
+                *out = (int32_t) (0xFF000000u | (uint32_t) color);
+            else if (cover > 0)
+                *out = (int32_t) (((uint32_t) cover << 24) | (uint32_t) color);
+            else
+                *out = 0;
+        }
+    }
+}
+
+/* Scroll the target up by dy pixel rows, filling the vacated band.
+ *
+ * fill is a whole ARGB word, passed as int64 because the sign bit of an
+ * int32 would mangle an opaque color.  Total: a dy past the height clears
+ * the whole target; zero or less does nothing.
+ */
+void alg_scroll_up (int64_t dy, int64_t fill)
+{
+    if (target == 0 || dy <= 0) return;
+    if (dy > target_h) dy = target_h;
+
+    int64_t keep = (target_h - dy) * target_w;
+
+    for (int64_t i = 0; i < keep; i++)
+        target[i] = target[i + dy * target_w];
+
+    for (int64_t i = keep; i < target_h * target_w; i++)
+        target[i] = (int32_t) (uint32_t) fill;
+}

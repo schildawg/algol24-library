@@ -32,7 +32,10 @@ begin
     OutTextXY (24, 324, 'Hello from the character ROM.');
     InstallUserFont ('graphfont.hex');
 
-    OutTextXY (24, 420, 'close the window, or press any key, to finish.');
+    OutTextXY (24, 372, '╔═══════════╤═══[■]═╗  ░░▒▒▓▓██  ◄ ▲ ▼ ►');
+    OutTextXY (24, 404, '╚═══════════╧═══════╝  the frames now connect');
+
+    OutTextXY (24, 444, 'close the window, or press any key, to finish.');
 
     WriteLn ('window:  ' + Str (GetMaxX () + 1) + ' x ' + Str (GetMaxY () + 1));
     WriteLn ('desktop: ' + Str (ScreenWidth ()) + ' x ' + Str (ScreenHeight ()));

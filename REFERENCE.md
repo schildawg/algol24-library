@@ -17,12 +17,16 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Abs`](#abs) | function | `math` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
+| [`Black` … `White`](#colors) | constants | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
+| [`ClrEol`](#clreol) | procedure | `graph` |
+| [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Cos`](#cos) | function | `math` |
 | [`Exp`](#exp) | function | `math` |
 | [`Frac`](#frac) | function | `math` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
+| [`GotoXY`](#gotoxy) | procedure | `graph` |
 | [`Infinity`](#infinity) | constant | `math` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
@@ -37,6 +41,8 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`Pi`](#pi) | constant | `math` |
+| [`Print`](#print) | procedure | `graph` |
+| [`PrintLn`](#println) | procedure | `graph` |
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
@@ -45,10 +51,17 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
+| [`TextBackground`](#textbackground) | procedure | `graph` |
+| [`TextColor`](#textcolor) | procedure | `graph` |
+| [`TextCols`](#textcols) | function | `graph` |
+| [`TextRows`](#textrows) | function | `graph` |
+| [`Transparent`](#colors) | constant | `graph` |
 | [`Sin`](#sin) | function | `math` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
 | [`Trunc`](#trunc) | function | `math` |
+| [`WhereX`](#wherex) | function | `graph` |
+| [`WhereY`](#wherey) | function | `graph` |
 
 ---
 
@@ -263,6 +276,166 @@ WriteLn ('closed without complaint');
 
 ```console
 closed without complaint
+```
+
+---
+
+## ClrEol
+
+*procedure* — unit `graph`
+
+**Function**
+
+Clears the grid from the cursor to the end of its row.
+
+**Declaration**
+
+```algol24
+procedure ClrEol ();
+```
+
+**Remarks**
+
+The cleared cells take the current [`TextBackground`](#textbackground), and
+the cursor does not move.
+
+⚠️ **Only the grid is touched.** A graphic beneath the cleared cells — a
+chart a window was sitting on — shows through, intact. Erasing a graphic is a
+graphics act; this is a text verb, and text verbs act on text. That is the
+design's one rule, and this routine is where it is most visible.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`ClrScr`](#clrscr), [`Print`](#print), [`TextBackground`](#textbackground)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (320, 200, 'eol', False);
+
+Print ('doomed text');
+GotoXY (0, 0);
+ClrEol ();
+
+WriteLn (WhereX ());
+
+CloseGraph ();
+```
+
+```console
+0
+```
+
+---
+
+## ClrScr
+
+*procedure* — unit `graph`
+
+**Function**
+
+Clears the whole grid and homes the cursor.
+
+**Declaration**
+
+```algol24
+procedure ClrScr ();
+```
+
+**Remarks**
+
+Every cell takes the current [`TextBackground`](#textbackground) —
+`TextBackground (Blue); ClrScr;` is how a classic screen paints its field in
+two lines. With the background `Transparent` the grid becomes wholly
+invisible and everything beneath shows.
+
+Graphics are not touched, on the same rule as [`ClrEol`](#clreol).
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`ClrEol`](#clreol), [`TextBackground`](#textbackground)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (320, 200, 'scr', False);
+
+GotoXY (5, 3);
+TextBackground (Blue);
+ClrScr ();
+
+WriteLn (WhereX ());
+WriteLn (WhereY ());
+
+CloseGraph ();
+```
+
+```console
+0
+0
+```
+
+---
+
+## Colors
+
+*constants* — unit `graph`
+
+**Function**
+
+The sixteen colors of a CGA text screen, and `Transparent`.
+
+**Declaration**
+
+```algol24
+const Black        := 0;          const DarkGray     := 5592405;
+const Blue         := 170;        const LightBlue    := 5592575;
+const Green        := 43520;      const LightGreen   := 5635925;
+const Cyan         := 43690;      const LightCyan    := 5636095;
+const Red          := 11141120;   const LightRed     := 16733525;
+const Magenta      := 11141290;   const LightMagenta := 16733695;
+const Brown        := 11162880;   const Yellow       := 16777045;
+const LightGray    := 11184810;   const White        := 16777215;
+
+const Transparent  := -1;
+```
+
+**Remarks**
+
+Named 24-bit values, so `TextColor (Yellow)` reads like 1989 while being RGB
+underneath — and any other RGB Integer is just as welcome wherever these are.
+The names and shades are the classic CGA palette, `Brown` and all.
+
+`Transparent` is not a color but the absence of one, which needs its own
+spelling because `0` is a legitimate black. Only
+[`TextBackground`](#textbackground) accepts it; as an ink it raises.
+
+**See also**
+
+[`TextBackground`](#textbackground), [`TextColor`](#textcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+WriteLn (White);
+WriteLn (Blue);
+WriteLn (Transparent);
+```
+
+```console
+16777215
+170
+-1
 ```
 
 ---
@@ -501,6 +674,59 @@ Raises `Graph is not open.` when there is no window.
 **Example**
 
 See [`GetMaxX`](#getmaxx) and [`InitGraph`](#initgraph), which show both.
+
+---
+
+## GotoXY
+
+*procedure* — unit `graph`
+
+**Function**
+
+Moves the cursor to a column and row of the grid.
+
+**Declaration**
+
+```algol24
+procedure GotoXY (Col : Integer, Row : Integer);
+```
+
+**Remarks**
+
+⚠️ **Zero-based**: the top-left cell is `0, 0`, matching the language's
+strings and the window's pixels. Turbo Pascal counted from 1, and that habit
+is the one to unlearn here.
+
+A position off the grid raises `GotoXY is off the grid.` rather than being
+clamped or ignored — the cursor is always somewhere real, and a wrong
+computation is caught where it happened.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`Print`](#print), [`WhereX`](#wherex), [`WhereY`](#wherey)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (320, 200, 'goto', False);
+
+GotoXY (10, 5);
+
+WriteLn (WhereX ());
+WriteLn (WhereY ());
+
+CloseGraph ();
+```
+
+```console
+10
+5
+```
+
 
 ---
 
@@ -1249,6 +1475,111 @@ area:          28.274333882308138
 
 ---
 
+## Print
+
+*procedure* — unit `graph`
+
+**Function**
+
+Writes text at the cursor, in the current colors, advancing it.
+
+**Declaration**
+
+```algol24
+procedure Print (Text : String);
+```
+
+**Remarks**
+
+This is **celled** text: it lands on the grid, wraps at the last column,
+scrolls the grid — and only the grid — at the bottom row, and is what
+[`ClrEol`](#clreol) and [`ClrScr`](#clrscr) erase. Free, pixel-placed text is
+[`OutTextXY`](#outtextxy)'s job, and the two never meet.
+
+A `#10` in the text starts a new row. A wide (CJK) glyph takes two cells,
+an emoji likewise, and a codepoint the font lacks takes one blank cell.
+
+The name is a placeholder with a settled future: when the compiler learns to
+overload built-ins, `Write` and `WriteLn` absorb `Print` and
+[`PrintLn`](#println).
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`GotoXY`](#gotoxy), [`PrintLn`](#println), [`TextColor`](#textcolor)
+
+**Example**
+
+Three narrow glyphs, then two wide ones at two cells each.
+
+```algol24
+uses graph;
+
+InitGraph (320, 200, 'print', False);
+
+Print ('Hi 你好');
+
+WriteLn (WhereX ());
+
+CloseGraph ();
+```
+
+```console
+7
+```
+
+---
+
+## PrintLn
+
+*procedure* — unit `graph`
+
+**Function**
+
+Writes text and moves the cursor to the start of the next row.
+
+**Declaration**
+
+```algol24
+procedure PrintLn (Text : String);
+```
+
+**Remarks**
+
+`PrintLn ('')` is a bare newline. At the bottom row the grid scrolls, taking
+the current background into the vacated band; graphics stay put.
+
+Everything said of [`Print`](#print) holds here, the placeholder name
+included.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`Print`](#print)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (320, 200, 'lines', False);
+
+PrintLn ('one');
+PrintLn ('two');
+
+WriteLn (WhereY ());
+
+CloseGraph ();
+```
+
+```console
+2
+```
+
+---
+
 ## Random
 
 *function* — unit `random`
@@ -1804,6 +2135,170 @@ WriteLn (Sqrt (Sqr (A) + Sqr (B)));
 
 ---
 
+## TextBackground
+
+*procedure* — unit `graph`
+
+**Function**
+
+Sets the background cells are painted with.
+
+**Declaration**
+
+```algol24
+procedure TextBackground (Color : Integer);
+```
+
+**Remarks**
+
+`Transparent` — the default — leaves everything beneath the glyph visible,
+which is the merged world's natural state. Any RGB color makes the cell
+opaque, which is what a menu bar or a readable HUD over a busy scene wants.
+
+The setting applies to cells painted from now on; nothing already on the
+grid changes.
+
+Raises `TextBackground wants a color or Transparent.` for a negative that is
+not `Transparent`.
+
+**See also**
+
+[`Colors`](#colors), [`ClrScr`](#clrscr), [`TextColor`](#textcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (320, 200, 'bg', False);
+
+TextBackground (Blue);
+TextColor (Yellow);
+Print ('classic');
+
+WriteLn ('painted');
+
+CloseGraph ();
+```
+
+```console
+painted
+```
+
+---
+
+## TextColor
+
+*procedure* — unit `graph`
+
+**Function**
+
+Sets the ink celled text draws with.
+
+**Declaration**
+
+```algol24
+procedure TextColor (Color : Integer);
+```
+
+**Remarks**
+
+Any RGB Integer; the sixteen [color constants](#colors) are the classic
+vocabulary. The default is `LightGray`, which is what a text mode woke up in.
+
+Ink is the one thing a cell always has, so `Transparent` raises
+`TextColor cannot be transparent.`
+
+**See also**
+
+[`Colors`](#colors), [`Print`](#print), [`TextBackground`](#textbackground)
+
+**Example**
+
+See [`TextBackground`](#textbackground), which sets both.
+
+---
+
+## TextCols
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the grid's width in cells.
+
+**Declaration**
+
+```algol24
+function TextCols () : Integer;
+```
+
+**Remarks**
+
+The window's width divided by the cell's. A cell is half the font's height
+wide, so a 1280 × 800 window with the default font is the classic 80 × 25
+screen. A wide (CJK) glyph occupies two cells.
+
+The grid derives from the installed font: `InstallUserFont` of a different
+cell height changes the answer.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`InstallUserFont`](#installuserfont), [`TextRows`](#textrows)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (1280, 800, 'classic', False);
+
+WriteLn (TextCols ());
+WriteLn (TextRows ());
+
+CloseGraph ();
+```
+
+```console
+80
+25
+```
+
+---
+
+## TextRows
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the grid's height in cells.
+
+**Declaration**
+
+```algol24
+function TextRows () : Integer;
+```
+
+**Remarks**
+
+The window's height divided by the font's, on the same reasoning as
+[`TextCols`](#textcols), which shows both.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`TextCols`](#textcols)
+
+**Example**
+
+See [`TextCols`](#textcols).
+
+---
+
 ## Trunc
 
 *function* — unit `math`
@@ -1887,3 +2382,61 @@ end
 1000000000000000019884624838656
 Trunc of an infinity.
 ```
+
+---
+
+## WhereX
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the cursor's column.
+
+**Declaration**
+
+```algol24
+function WhereX () : Integer;
+```
+
+**Remarks**
+
+Zero-based, like [`GotoXY`](#gotoxy), which shows it read back.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`GotoXY`](#gotoxy), [`WhereY`](#wherey)
+
+**Example**
+
+See [`GotoXY`](#gotoxy) and [`Print`](#print).
+
+---
+
+## WhereY
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the cursor's row.
+
+**Declaration**
+
+```algol24
+function WhereY () : Integer;
+```
+
+**Remarks**
+
+Zero-based. Everything said of [`WhereX`](#wherex) holds here.
+
+**See also**
+
+[`GotoXY`](#gotoxy), [`WhereX`](#wherex)
+
+**Example**
+
+See [`GotoXY`](#gotoxy) and [`PrintLn`](#println).

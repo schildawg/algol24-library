@@ -131,7 +131,9 @@ Nothing below is designed yet; nothing above blocks any of it.
   today's global `OutText` / `OutTextXY` either delegate to it or retire.
   Decided when the Canvas class lands.
 - **`WriteLn` onto the grid** waits on the compiler growing overloading for
-  built-ins; `OutText` carries free text until then.
+  built-ins. Until it lands, the celled writers are named **`Print` and
+  `PrintLn`**, which `Write`/`WriteLn` absorb when the fix arrives; `OutText`
+  carries free text throughout.
 - **A per-canvas text grid** — a window that scrolls its own celled contents.
   The grid stays singular until something needs otherwise.
 - **Canvas scaling** — a texture can be presented at other than 1:1, which is

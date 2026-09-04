@@ -242,7 +242,7 @@ which this repository has no reason to carry.
 | `testing` | `AssertNear` | 9 | complete |
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
-| `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; SDL2 declared directly; `graphffi.c` carries one hex decoder | 22 | complete |
+| `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Print`, `PrintLn`, `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `ClrScr`, `ClrEol`, `TextCols/Rows`, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 39 | complete |
 
 ⚠️ **`graph` has a design document, `DESIGN.md`, and it governs.** The unit is
 one world — celled text on a grid at Order 0, Canvas objects above and below
@@ -262,12 +262,15 @@ window that actually opened. Text draws through glyph files —
 1-bit alternative; both resolve against the working directory, and
 `InstallUserFont` selects any other. A unit-defined `WriteLn` **replaces** the
 built-in rather than overloading it, which is why the text routines are
-`OutText`/`OutTextXY` and not a window-bound `WriteLn`. Glyph hex is decoded by
-`alg_unhex_words` in `graphffi.c` — transcoding, not logic — because the
-interpreter doing it a digit at a time cost eight seconds per font load; the
-format knowledge and the blending stay in the unit. Per-glyph blending is still
-interpreter-priced (~18 ms), which is fine for labels and is what `--compile`
-is for otherwise.
+`OutText`/`OutTextXY` and not a window-bound `WriteLn`. `graphffi.c` carries the hex
+decoder, the grid's cell stamper and its scroller — transcoding and blitting,
+not logic; the unit says which glyph, what mode, what ink, where. The stamper
+exists because a full 80×25 screen is 2,000 cells and the interpreted blend
+loop (~18 ms/glyph) would have taken half a minute per screenful; with it a
+whole IDE screen paints in ~0.4 s interpreted. Free text (`OutTextXY`) still
+blends in Algol-24. The grid is 0-based like the language, TP's 1-based habit
+notwithstanding, and `examples/ide.a24` is the acceptance piece — the Turbo
+C++ screen rebuilt from the vocabulary.
 
 `examples/statistics.a24` is the worked application — built by
 `examples/build.sh`, verified by `examples/check.sh`, explained in

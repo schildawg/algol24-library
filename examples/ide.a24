@@ -1,0 +1,142 @@
+// The Turbo-era IDE screen, rebuilt from the graph unit's text mode: an 80
+// by 25 grid, sixteen colors, and every visual element -- menu bar, double
+// frame, scrollbars, status line -- celled text.
+//
+//     algc examples/ide.a24
+//
+// Close the window, or press any key in it, to finish.
+
+uses graph;
+
+function SDL_PollEvent (E : Pointer) : Integer;
+    external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_Delay (Ms : Integer);
+    external 'SDL_Delay' in '/opt/homebrew/lib/libSDL2.dylib';
+
+/// N copies of Ch, joined.
+function Fill (Ch : Char, N : Integer) : String;
+begin
+    var B := Buffer ();
+
+    for var I := 0; I < N; I := I + 1 do
+        B.Append (Ch);
+
+    Exit B.Text;
+end
+
+/// One menu item: hotkey letter red, the rest black.
+procedure MenuItem (Text : String);
+begin
+    TextColor (Red);
+    Print (Str (Text[0]));
+    TextColor (Black);
+    Print (Copy (Text, 1, Length (Text) - 1) + '  ');
+end
+
+/// One status key: the key red, its label black.
+procedure StatusKey (Key : String, Label : String);
+begin
+    TextColor (Red);
+    Print (Key);
+    TextColor (Black);
+    Print (' ' + Label + '  ');
+end
+
+begin
+    InitGraph (1280, 800, 'Turbo Algol-24', False);
+
+    // The desktop: every cell blue.
+    TextBackground (Blue);
+    ClrScr ();
+
+    // ------------------------------------------------------- the menu bar --
+    TextBackground (LightGray);
+    GotoXY (0, 0);
+    Print (Fill (' ', 79));
+    GotoXY (1, 0);
+    TextColor (Red);
+    Print ('≡');
+    GotoXY (4, 0);
+
+    for var Item in ['File', 'Edit', 'Search', 'Run', 'Compile',
+                     'Debug', 'Project', 'Options', 'Window', 'Help'] do
+        MenuItem (Item);
+
+    // ---------------------------------------------------- the editor frame --
+    TextBackground (Blue);
+    TextColor (White);
+
+    var Title := ' NONAME00.CPP ';
+    var Side  := (68 - Length (Title)) div 2;
+
+    GotoXY (0, 1);
+    Print ('╔═[');
+    TextColor (LightGreen);
+    Print ('■');
+    TextColor (White);
+    Print (']' + Fill ('═', Side) + Title + Fill ('═', 68 - Side - Length (Title))
+           + '1═[');
+    TextColor (LightGreen);
+    Print ('↕');
+    TextColor (White);
+    Print (']═╗');
+
+    for var Row := 2; Row <= 22; Row := Row + 1 do
+    begin
+        GotoXY (0, Row);
+        Print ('║');
+        GotoXY (79, Row);
+
+        TextColor (Cyan);
+
+        if Row = 2 then Print ('▲');
+        else if Row = 22 then Print ('▼');
+        else Print ('▒');
+
+        TextColor (White);
+    end
+
+    GotoXY (0, 23);
+    Print ('╚═ 1:1 ' + Fill ('═', 10));
+    TextColor (Cyan);
+    Print ('◄' + Fill ('▒', 52) + '►');
+    TextColor (White);
+    Print (Fill ('═', 8) + '╝');
+
+    // The editing cursor, waiting at the top of the empty file.
+    GotoXY (1, 2);
+    TextColor (Yellow);
+    Print ('▄');
+
+    // ----------------------------------------------------- the status line --
+    TextBackground (LightGray);
+    GotoXY (0, 24);
+    Print (Fill (' ', 79));
+    GotoXY (1, 24);
+
+    StatusKey ('F1', 'Help');
+    StatusKey ('F2', 'Save');
+    StatusKey ('F3', 'Open');
+    StatusKey ('Alt-F9', 'Compile');
+    StatusKey ('F9', 'Make');
+    StatusKey ('F10', 'Menu');
+
+    // ------------------------------------------------------------- wait --
+    var Event   := Buffer (64);
+    var Running := True;
+
+    while Running do
+    begin
+        while SDL_PollEvent (Event.Address) <> 0 do
+        begin
+            var Kind := Event.GetInt (0);
+
+            if Kind = 256 then Running := False;
+            if Kind = 768 then Running := False;
+        end
+
+        SDL_Delay (16);
+    end
+
+    CloseGraph ();
+end

@@ -57,6 +57,34 @@ function SDL_UpdateTexture (Tex : Pointer, Rect : Pointer, Pixels : Pointer,
     external 'SDL_UpdateTexture' in '/opt/homebrew/lib/libSDL2.dylib';
 function SDL_RenderCopy (Ren : Pointer, Tex : Pointer, Src : Pointer, Dst : Pointer) : Integer;
     external 'SDL_RenderCopy' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_SetTextureBlendMode (Tex : Pointer, Mode : Integer) : Integer;
+    external 'SDL_SetTextureBlendMode' in '/opt/homebrew/lib/libSDL2.dylib';
+
+/// Aims the C cell-stamper at a framebuffer.
+///
+/// Private to this unit. Set once per window rather than passed per stamp,
+/// because a foreign call takes at most eight arguments and the stamp needs
+/// all eight for its own work.
+procedure StampTarget (Pixels : Pointer, W : Integer, H : Integer);
+    external 'alg_stamp_target' in 'libgraphffi.dylib';
+
+/// Stamps one glyph's cell at pixel X, Y into the stamp target.
+///
+/// Private to this unit, and the hot path of text mode: a full 80 by 25
+/// screen is two thousand cells, and the interpreted blend loop was measured
+/// at ~18ms per glyph -- half a minute per screenful. The unit still says
+/// which glyph, what mode, what ink and what background; the C only blends.
+/// A nil Glyph stamps a blank cell, which is how clearing is spelled.
+procedure StampCell (X : Integer, Y : Integer, Glyph : Pointer,
+                     GW : Integer, GH : Integer,
+                     Mode : Integer, Ink : Integer, Back : Integer);
+    external 'alg_stamp_cell' in 'libgraphffi.dylib';
+
+/// Scrolls the stamp target up by DY pixel rows, filling the vacated band.
+///
+/// Private to this unit.
+procedure ScrollTarget (DY : Integer, Fill : Integer);
+    external 'alg_scroll_up' in 'libgraphffi.dylib';
 
 /// Decodes hex text in groups of Group digits, one four-byte word per group,
 /// into Out. Answers how many words were written.
@@ -74,7 +102,37 @@ const WINDOWPOS_CENTERED         := 805240832;
 const WINDOW_SHOWN               := 4;
 const WINDOW_FULLSCREEN_DESKTOP  := 4097;
 const PIXELFORMAT_RGB            := 370546692;   // SDL_PIXELFORMAT_RGB888: 0xRRGGBB, always positive
+const PIXELFORMAT_ARGB           := 372645892;   // SDL_PIXELFORMAT_ARGB8888 -- the text grid needs alpha
 const TEXTURE_STREAMING          := 1;
+const BLENDMODE_BLEND            := 1;
+
+/// The background of a cell that has none: the grid shows what is beneath it.
+///
+/// A named value rather than a color, because 0 is a legitimate black. Only
+/// `TextBackground` accepts it; as an ink it raises.
+const Transparent := -1;
+
+/// The sixteen colors of a CGA text screen, by their Turbo Pascal names.
+///
+/// Named constants over 24-bit values, so `TextColor (Yellow)` reads like
+/// 1989 while being RGB underneath. Any other RGB Integer is just as welcome
+/// wherever these are.
+const Black        := 0;
+const Blue         := 170;
+const Green        := 43520;
+const Cyan         := 43690;
+const Red          := 11141120;
+const Magenta      := 11141290;
+const Brown        := 11162880;
+const LightGray    := 11184810;
+const DarkGray     := 5592405;
+const LightBlue    := 5592575;
+const LightGreen   := 5635925;
+const LightCyan    := 5636095;
+const LightRed     := 16733525;
+const LightMagenta := 16733695;
+const Yellow       := 16777045;
+const White        := 16777215;
 
 // ---------------------------------------------------------------- state --
 //
@@ -94,6 +152,16 @@ var WindowHeight := 0;
 // it the CP: OutText draws there and moves it; OutTextXY touches neither.
 var CurrentX := 0;
 var CurrentY := 0;
+
+// The text grid: its own framebuffer and texture, alpha over the background,
+// per DESIGN.md. The cursor is in cells, 0-based like everything else in
+// this language; the colors are the grid's current ink and cell background.
+var TextPixels  := nil;
+var TextTexture := nil;
+var CursorCol   := 0;
+var CursorRow   := 0;
+var TextInk     := 11184810;      // LightGray, the text-mode default
+var TextBack    := -1;            // Transparent
 
 // The installed font. One map from codepoint to a Buffer of four-byte words,
 // one to widths, one marking the glyphs that are pictures (emoji) rather than
@@ -127,8 +195,10 @@ end
 procedure Present ();
 begin
     SDL_UpdateTexture (Texture, nil, Pixels.Address, WindowWidth * 4);
+    SDL_UpdateTexture (TextTexture, nil, TextPixels.Address, WindowWidth * 4);
     SDL_RenderClear (Renderer);
     SDL_RenderCopy (Renderer, Texture, nil, nil);
+    SDL_RenderCopy (Renderer, TextTexture, nil, nil);
     SDL_RenderPresent (Renderer);
     SDL_PumpEvents ();
 end
@@ -463,8 +533,32 @@ begin
     // zero is black, so the window opens clean.
     Pixels := Buffer (WindowWidth * WindowHeight * 4);
 
-    CurrentX := 0;
-    CurrentY := 0;
+    // The text grid above it: zeroed means every cell transparent, and the
+    // GPU blends it over the background at present time.
+    TextTexture := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
+                                      WindowWidth, WindowHeight);
+
+    if TextTexture = nil then
+    begin
+        var Cause := SDL_GetError ();
+
+        CloseGraph ();
+
+        raise 'InitGraph: ' + Cause;
+    end
+
+    SDL_SetTextureBlendMode (TextTexture, BLENDMODE_BLEND);
+
+    TextPixels := Buffer (WindowWidth * WindowHeight * 4);
+
+    StampTarget (TextPixels.Address, WindowWidth, WindowHeight);
+
+    CurrentX  := 0;
+    CurrentY  := 0;
+    CursorCol := 0;
+    CursorRow := 0;
+    TextInk   := LightGray;
+    TextBack  := Transparent;
 
     SDL_SetRenderDrawColor (Renderer, 0, 0, 0, 255);
     Present ();
@@ -484,12 +578,15 @@ begin
     if Window = nil then Exit;
 
     if Texture <> nil then SDL_DestroyTexture (Texture);
+    if TextTexture <> nil then SDL_DestroyTexture (TextTexture);
 
     SDL_DestroyRenderer (Renderer);
     SDL_DestroyWindow (Window);
 
     Texture      := nil;
     Pixels       := nil;
+    TextTexture  := nil;
+    TextPixels   := nil;
     Renderer     := nil;
     Window       := nil;
     WindowWidth  := 0;
@@ -632,6 +729,300 @@ begin
 
     for var I := 0; I < Length (Text); I := I + 1 do
         At := At + DrawGlyph (Ord (Text[I]), At, Y, 16777215);
+
+    Present ();
+end
+
+
+// ------------------------------------------------------------- text mode --
+
+/// The width of one text cell, in pixels.
+///
+/// Private to this unit; half the font's height, which is the cell shape the
+/// shipped fonts are drawn for.
+function CellWidth () : Integer;
+begin
+    Exit FontHeight div 2;
+end
+
+/// The grid's width in cells.
+///
+/// The window's width divided by the cell's, so a 1280-pixel window with the
+/// default font is 80 columns -- the classic screen. A wide (CJK) glyph
+/// occupies two of them.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Grid Is The Window Divided Into Cells`
+function TextCols () : Integer;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    Exit WindowWidth div CellWidth ();
+end
+
+/// The grid's height in cells.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Grid Is The Window Divided Into Cells`
+function TextRows () : Integer;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    Exit WindowHeight div FontHeight;
+end
+
+/// Moves the cursor to column Col, row Row.
+///
+/// Zero-based, like the language's strings and the window's pixels: the
+/// top-left cell is 0, 0. Turbo Pascal counted from 1, and that habit is the
+/// one to unlearn here.
+///
+/// # Raises
+/// `Graph is not open.` without a window, and `GotoXY is off the grid.` for
+/// a position outside it -- the cursor is always somewhere real.
+///
+/// # Examples
+/// `GotoXY Places The Cursor And WhereX Reads It Back`
+procedure GotoXY (Col : Integer, Row : Integer);
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    if Col < 0 or Row < 0 or Col >= TextCols () or Row >= TextRows () then
+        raise 'GotoXY is off the grid.';
+
+    CursorCol := Col;
+    CursorRow := Row;
+end
+
+/// The cursor's column.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `GotoXY Places The Cursor And WhereX Reads It Back`
+function WhereX () : Integer;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    Exit CursorCol;
+end
+
+/// The cursor's row.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `GotoXY Places The Cursor And WhereX Reads It Back`
+function WhereY () : Integer;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    Exit CursorRow;
+end
+
+/// Sets the ink celled text draws with.
+///
+/// Any RGB Integer; the sixteen CGA constants are the classic vocabulary.
+/// The default is LightGray, which is what a text mode woke up in.
+///
+/// # Raises
+/// `TextColor cannot be transparent.` -- ink is the one thing a cell always
+/// has.
+///
+/// # Examples
+/// `TextColor And TextBackground Color The Cell`
+procedure TextColor (Color : Integer);
+begin
+    if Color < 0 then raise 'TextColor cannot be transparent.';
+
+    TextInk := Color;
+end
+
+/// Sets the background cells are painted with.
+///
+/// `Transparent` -- the default -- leaves everything beneath the glyph
+/// visible, which is the merged world's natural state. Any RGB color makes
+/// the cell opaque, which is what a menu bar or a readable HUD wants.
+///
+/// # Raises
+/// `TextBackground wants a color or Transparent.` for any other negative.
+///
+/// # Examples
+/// `TextColor And TextBackground Color The Cell`
+procedure TextBackground (Color : Integer);
+begin
+    if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
+
+    TextBack := Color;
+end
+
+/// Moves the cursor to the start of the next row, scrolling at the bottom.
+///
+/// Private to this unit; the newline both PrintLn and a #10 in Print spell.
+procedure NewLine ();
+begin
+    CursorCol := 0;
+
+    if CursorRow + 1 < TextRows () then
+    begin
+        CursorRow := CursorRow + 1;
+
+        Exit;
+    end
+
+    // The grid scrolls; the graphics stay put, per DESIGN.md. The vacated
+    // band takes the current background.
+    var Fill := 0;
+
+    if TextBack >= 0 then Fill := TextBack - 16777216;   // 0xFF000000 | bg, signed
+
+    ScrollTarget (FontHeight, Fill);
+end
+
+/// Stamps one codepoint at the cursor and advances it, wrapping first when
+/// the glyph does not fit the row.
+///
+/// Private to this unit.
+procedure StampAtCursor (Code : Integer);
+begin
+    var Wide  := CellWidth ();
+    var Mode  := 1;
+    var Words := nil;
+
+    if Code in FontGlyphs then
+    begin
+        Words := FontGlyphs[Code];
+        Wide  := FontWidths[Code];
+
+        if Code in FontPictures then Mode := 2;
+        if not FontGrey then if not (Code in FontPictures) then Mode := 0;
+    end
+
+    var Cells := Wide div CellWidth ();
+
+    if Cells < 1 then Cells := 1;
+    if CursorCol + Cells > TextCols () then NewLine ();
+
+    if Words = nil then
+        StampCell (CursorCol * CellWidth (), CursorRow * FontHeight, nil,
+                   CellWidth (), FontHeight, 1, TextInk, TextBack);
+    else
+        StampCell (CursorCol * CellWidth (), CursorRow * FontHeight, Words.Address,
+                   Wide, FontHeight, Mode, TextInk, TextBack);
+
+    CursorCol := CursorCol + Cells;
+
+    if CursorCol >= TextCols () then NewLine ();
+end
+
+/// Writes Text at the cursor, in the current colors, advancing it.
+///
+/// This is celled text: it lands on the grid, wraps at the last column,
+/// scrolls the grid -- and only the grid -- at the bottom, and is what
+/// `ClrEol` and `ClrScr` erase. A #10 in the text starts a new row. A wide
+/// glyph takes two cells; one the font lacks takes one blank cell.
+///
+/// The name is a placeholder with a settled future: when the compiler learns
+/// to overload built-ins, `Write` and `WriteLn` absorb Print and PrintLn --
+/// see DESIGN.md.
+///
+/// # Raises
+/// `Graph is not open.` without a window, and `EnsureFont`'s message when no
+/// font can be found.
+///
+/// # Examples
+/// `Print Stamps Cells And Advances The Cursor`
+procedure Print (Text : String);
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    for var I := 0; I < Length (Text); I := I + 1 do
+    begin
+        if Text[I] = #10 then NewLine ();
+        else StampAtCursor (Ord (Text[I]));
+    end
+
+    Present ();
+end
+
+/// Writes Text and moves to the start of the next row.
+///
+/// `PrintLn ('')` is a bare newline. Everything said of `Print` holds here.
+///
+/// # Raises
+/// As `Print`.
+///
+/// # Examples
+/// `PrintLn Moves To The Start Of The Next Row`
+procedure PrintLn (Text : String);
+begin
+    Print (Text);
+    NewLine ();
+    Present ();
+end
+
+/// Clears the grid from the cursor to the end of its row.
+///
+/// The cells take the current background, and the cursor does not move. Only
+/// the grid is touched: a graphic beneath the cleared cells shows through,
+/// intact, which is the design's one rule doing its work.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `ClrEol Erases The Prose And Never The Chart`
+procedure ClrEol ();
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    for var Col := CursorCol; Col < TextCols (); Col := Col + 1 do
+        StampCell (Col * CellWidth (), CursorRow * FontHeight, nil,
+                   CellWidth (), FontHeight, 1, TextInk, TextBack);
+
+    Present ();
+end
+
+/// Clears the whole grid and homes the cursor.
+///
+/// Every cell takes the current background -- `TextBackground (Blue);
+/// ClrScr;` is how a classic screen paints its field. With the background
+/// Transparent the grid becomes wholly invisible. Graphics are not touched.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `ClrScr Fills The Grid With The Background And Homes The Cursor`
+procedure ClrScr ();
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    for var Row := 0; Row < TextRows (); Row := Row + 1 do
+        for var Col := 0; Col < TextCols (); Col := Col + 1 do
+            StampCell (Col * CellWidth (), Row * FontHeight, nil,
+                       CellWidth (), FontHeight, 1, TextInk, TextBack);
+
+    CursorCol := 0;
+    CursorRow := 0;
 
     Present ();
 end
@@ -987,4 +1378,345 @@ begin
     // A trailing partial group is ignored, not half-decoded.
     AssertEqual (1, UnhexWords ('ABC', 2, Out.Address));
     AssertEqual (171, Out.GetInt (0));
+end
+
+/// The default font must carry the machinery of a text UI -- frames, shades,
+/// scrollbar arrows -- and its frame glyphs are synthesized to touch their
+/// cell edges, which is what lets adjacent cells connect without seams.
+test 'The Default Font Carries The Frame Glyphs Edge To Edge';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'frame', False);
+
+    OutTextXY (0, 0, '╔═╗');
+
+    AssertEqual (16, FontWidths[Ord ('═')]);
+    AssertEqual (16, FontWidths[Ord ('║')]);
+    AssertEqual (16, FontWidths[Ord ('░')]);
+    AssertEqual (16, FontWidths[Ord ('►')]);
+
+    // A vertical double line reaches its cell's first and last rows, at the
+    // same columns -- the property a frame stands on. The rails sit one
+    // line-thickness apart, the same absolute gap the horizontal pair keeps,
+    // so corners join square instead of reading as vertically stretched.
+    var Words := FontGlyphs[Ord ('║')];
+
+    AssertTrue (Words.GetInt ((0 * 16 + 5) * 4) > 0);
+    AssertTrue (Words.GetInt ((31 * 16 + 5) * 4) > 0);
+    AssertTrue (Words.GetInt ((0 * 16 + 9) * 4) > 0);
+    AssertTrue (Words.GetInt ((31 * 16 + 9) * 4) > 0);
+    AssertEqual (0, Words.GetInt ((0 * 16 + 2) * 4));
+    AssertEqual (0, Words.GetInt ((0 * 16 + 13) * 4));
+
+    CloseGraph ();
+end
+
+// -------------------------------------------------------- text mode tests --
+
+test 'The Grid Is The Window Divided Into Cells';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'grid', False);
+
+    AssertEqual (80, TextCols ());
+    AssertEqual (25, TextRows ());
+
+    CloseGraph ();
+end
+
+test 'The Grid Metrics Raise When The Window Is Not Open';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try TextCols (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try Print ('x'); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'GotoXY Places The Cursor And WhereX Reads It Back';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'cursor', False);
+
+    AssertEqual (0, WhereX ());
+    AssertEqual (0, WhereY ());
+
+    GotoXY (10, 5);
+
+    AssertEqual (10, WhereX ());
+    AssertEqual (5, WhereY ());
+
+    CloseGraph ();
+end
+
+test 'GotoXY Refuses A Position Off The Grid';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'edge', False);
+
+    var Message := '';
+
+    try GotoXY (TextCols (), 0); except on e : String do Message := e; end
+    AssertEqual ('GotoXY is off the grid.', Message);
+
+    Message := '';
+    try GotoXY (0, -1); except on e : String do Message := e; end
+    AssertEqual ('GotoXY is off the grid.', Message);
+
+    CloseGraph ();
+end
+
+test 'Print Stamps Cells And Advances The Cursor';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'print', False);
+
+    Print ('AB');
+
+    AssertEqual (2, WhereX ());
+    AssertEqual (0, WhereY ());
+
+    // Something landed in the first cell of the text layer.
+    var Lit := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 16; X := X + 1 do
+            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then Lit := Lit + 1;
+
+    AssertTrue (Lit > 0);
+
+    CloseGraph ();
+end
+
+/// A 64-pixel window with the 32-high font is a 4 by 2 grid, which makes the
+/// wrap reachable in one short string.
+test 'Print Wraps At The Last Column';
+begin
+    CloseGraph ();
+    InitGraph (64, 64, 'wrap', False);
+
+    AssertEqual (4, TextCols ());
+
+    Print ('ABCDE');
+
+    AssertEqual (1, WhereX ());
+    AssertEqual (1, WhereY ());
+
+    CloseGraph ();
+end
+
+test 'PrintLn Moves To The Start Of The Next Row';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'line', False);
+
+    PrintLn ('AB');
+
+    AssertEqual (0, WhereX ());
+    AssertEqual (1, WhereY ());
+
+    PrintLn ('');
+
+    AssertEqual (2, WhereY ());
+
+    CloseGraph ();
+end
+
+test 'A Wide Glyph Takes Two Cells On The Grid';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'wide', False);
+
+    Print ('你');
+
+    AssertEqual (2, WhereX ());
+
+    CloseGraph ();
+end
+
+/// Opaque white over blue: the block's core is pure ink, a spaced cell is
+/// pure background, and both exact values are pinned. GetInt reads signed,
+/// so an opaque pixel is its RGB minus 2^24... minus nothing else: alpha FF
+/// shifts the word past the sign bit, and RGB - 16777216 is what comes back.
+test 'TextColor And TextBackground Color The Cell';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'color', False);
+
+    TextColor (White);
+    TextBackground (Blue);
+    Print ('█ ');
+
+    // The block's centre pixel is opaque white.
+    AssertEqual (-1, TextPixels.GetInt ((16 * WindowWidth + 8) * 4));
+
+    // The space's centre pixel is opaque blue: 0xFF0000AA.
+    AssertEqual (Blue - 16777216, TextPixels.GetInt ((16 * WindowWidth + 24) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Transparent Background Leaves The Cell Unpainted Around The Ink';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'clear', False);
+
+    Print (' ');
+
+    var Painted := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 16; X := X + 1 do
+            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then
+                Painted := Painted + 1;
+
+    AssertEqual (0, Painted);
+
+    CloseGraph ();
+end
+
+test 'TextColor Refuses Transparent And TextBackground Refuses Nonsense';
+begin
+    var Message := '';
+
+    try TextColor (Transparent); except on e : String do Message := e; end
+    AssertEqual ('TextColor cannot be transparent.', Message);
+
+    Message := '';
+    try TextBackground (-2); except on e : String do Message := e; end
+    AssertEqual ('TextBackground wants a color or Transparent.', Message);
+end
+
+/// The design's one rule, as a test: text verbs touch the grid and never the
+/// graphics beneath it.
+test 'ClrEol Erases The Prose And Never The Chart';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'rule', False);
+
+    // A graphic on the background, and prose on the grid above it.
+    OutTextXY (0, 0, '████');
+    var Chart := LitPixels (0, 0, 64, 32);
+
+    AssertTrue (Chart > 0);
+
+    Print ('ABCD');
+    GotoXY (0, 0);
+    ClrEol ();
+
+    // The prose is gone from the grid...
+    var Prose := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 64; X := X + 1 do
+            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then
+                Prose := Prose + 1;
+
+    AssertEqual (0, Prose);
+
+    // ... and the chart beneath is untouched.
+    AssertEqual (Chart, LitPixels (0, 0, 64, 32));
+
+    CloseGraph ();
+end
+
+test 'ClrScr Fills The Grid With The Background And Homes The Cursor';
+begin
+    CloseGraph ();
+    InitGraph (128, 96, 'fill', False);
+
+    GotoXY (2, 1);
+    TextBackground (Blue);
+    ClrScr ();
+
+    AssertEqual (0, WhereX ());
+    AssertEqual (0, WhereY ());
+    AssertEqual (Blue - 16777216, TextPixels.GetInt ((50 * WindowWidth + 50) * 4));
+
+    CloseGraph ();
+end
+
+/// The grid scrolls and the graphics stay put. B is printed on the last row;
+/// its newline scrolls the grid, so B's pixels move up a cell while the
+/// background keeps every one of its own.
+test 'The Grid Scrolls And The Graphics Stay Put';
+begin
+    CloseGraph ();
+    InitGraph (64, 64, 'scroll', False);
+
+    OutTextXY (0, 0, '██');
+    var Chart := LitPixels (0, 0, 64, 64);
+
+    PrintLn ('A');
+    PrintLn ('B');
+
+    var TopHalf := 0;
+    var LowHalf := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 64; X := X + 1 do
+        begin
+            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then TopHalf := TopHalf + 1;
+            if TextPixels.GetInt (((Y + 32) * WindowWidth + X) * 4) <> 0 then LowHalf := LowHalf + 1;
+        end
+
+    AssertTrue (TopHalf > 0);
+    AssertEqual (0, LowHalf);
+    AssertEqual (Chart, LitPixels (0, 0, 64, 64));
+
+    CloseGraph ();
+end
+
+/// The stamper is an external, so its exact values are pinned: full cover is
+/// opaque ink, half cover keeps its coverage as alpha, a background paints
+/// even where cover is none, and a nil glyph is a blank cell.
+test 'The Cell Stamper Answers Known Values';
+begin
+    CloseGraph ();
+
+    var T := Buffer (16);
+    var G := Buffer (4);
+
+    StampTarget (T.Address, 2, 2);
+
+    G.PutInt (0, 255);
+    StampCell (0, 0, G.Address, 1, 1, 1, Red, -1);
+    AssertEqual (Red - 16777216, T.GetInt (0));
+
+    G.PutInt (0, 128);
+    StampCell (1, 0, G.Address, 1, 1, 1, Red, -1);
+    AssertEqual (128 * 16777216 + Red - 4294967296, T.GetInt (4));
+
+    G.PutInt (0, 0);
+    StampCell (0, 1, G.Address, 1, 1, 1, Red, Blue);
+    AssertEqual (Blue - 16777216, T.GetInt (8));
+
+    StampCell (1, 1, nil, 1, 1, 1, Red, -1);
+    AssertEqual (0, T.GetInt (12));
+end
+
+test 'The Scroller Answers Known Values';
+begin
+    CloseGraph ();
+
+    var T := Buffer (16);
+
+    StampTarget (T.Address, 1, 4);
+
+    T.PutInt (0, 1);
+    T.PutInt (4, 2);
+    T.PutInt (8, 3);
+    T.PutInt (12, 4);
+
+    ScrollTarget (1, 9);
+
+    AssertEqual (2, T.GetInt (0));
+    AssertEqual (3, T.GetInt (4));
+    AssertEqual (4, T.GetInt (8));
+    AssertEqual (9, T.GetInt (12));
 end
