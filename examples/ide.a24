@@ -43,7 +43,14 @@ begin
 end
 
 begin
-    InitGraph (1280, 800, 'Turbo Algol-24', False);
+    InitGraph (640, 480, 'Turbo Algol-24', False);
+
+    // Every position below derives from the grid, so the screen paints
+    // correctly at any window size -- 1280x800 is the classic 80x25, and
+    // 640x480 is the same IDE at 40x15.
+    var Cols   := TextCols ();
+    var Rows   := TextRows ();
+    var Bottom := Rows - 2;
 
     // The desktop: every cell blue.
     TextBackground (Blue);
@@ -52,7 +59,7 @@ begin
     // ------------------------------------------------------- the menu bar --
     TextBackground (LightGray);
     GotoXY (0, 0);
-    Print (Fill (' ', 79));
+    Print (Fill (' ', Cols - 1));
     GotoXY (1, 0);
     TextColor (Red);
     Print ('≡');
@@ -60,48 +67,51 @@ begin
 
     for var Item in ['File', 'Edit', 'Search', 'Run', 'Compile',
                      'Debug', 'Project', 'Options', 'Window', 'Help'] do
-        MenuItem (Item);
+        if WhereY () = 0 then
+          if WhereX () + Length (Item) + 2 < Cols then MenuItem (Item);
 
     // ---------------------------------------------------- the editor frame --
     TextBackground (Blue);
     TextColor (White);
 
     var Title := ' NONAME00.CPP ';
-    var Side  := (68 - Length (Title)) div 2;
+    var Inner := Cols - 12 - Length (Title);   // between '╔═[■]' and '1═[↕]═╗'
+    var Side  := Inner div 2;
 
     GotoXY (0, 1);
     Print ('╔═[');
     TextColor (LightGreen);
     Print ('■');
     TextColor (White);
-    Print (']' + Fill ('═', Side) + Title + Fill ('═', 68 - Side - Length (Title))
-           + '1═[');
+    Print (']' + Fill ('═', Side) + Title + Fill ('═', Inner - Side) + '1═[');
     TextColor (LightGreen);
     Print ('↕');
     TextColor (White);
     Print (']═╗');
 
-    for var Row := 2; Row <= 22; Row := Row + 1 do
+    for var Row := 2; Row < Bottom; Row := Row + 1 do
     begin
         GotoXY (0, Row);
         Print ('║');
-        GotoXY (79, Row);
+        GotoXY (Cols - 1, Row);
 
         TextColor (Cyan);
 
         if Row = 2 then Print ('▲');
-        else if Row = 22 then Print ('▼');
+        else if Row = Bottom - 1 then Print ('▼');
         else Print ('▒');
 
         TextColor (White);
     end
 
-    GotoXY (0, 23);
-    Print ('╚═ 1:1 ' + Fill ('═', 10));
+    var HBar := Cols - 17;                     // between the fixed ends
+
+    GotoXY (0, Bottom);
+    Print ('╚═ 1:1 ' + Fill ('═', 4));
     TextColor (Cyan);
-    Print ('◄' + Fill ('▒', 52) + '►');
+    Print ('◄' + Fill ('▒', HBar) + '►');
     TextColor (White);
-    Print (Fill ('═', 8) + '╝');
+    Print (Fill ('═', 2) + '╝');
 
     // The editing cursor, waiting at the top of the empty file.
     GotoXY (1, 2);
@@ -110,16 +120,15 @@ begin
 
     // ----------------------------------------------------- the status line --
     TextBackground (LightGray);
-    GotoXY (0, 24);
-    Print (Fill (' ', 79));
-    GotoXY (1, 24);
+    GotoXY (0, Rows - 1);
+    Print (Fill (' ', Cols - 1));
+    GotoXY (1, Rows - 1);
 
-    StatusKey ('F1', 'Help');
-    StatusKey ('F2', 'Save');
-    StatusKey ('F3', 'Open');
-    StatusKey ('Alt-F9', 'Compile');
-    StatusKey ('F9', 'Make');
-    StatusKey ('F10', 'Menu');
+    for var Pair in [['F1', 'Help'], ['F2', 'Save'], ['F3', 'Open'],
+                     ['Alt-F9', 'Compile'], ['F9', 'Make'], ['F10', 'Menu']] do
+        if WhereY () = Rows - 1 then
+          if WhereX () + Length (Pair[0]) + Length (Pair[1]) + 3 < Cols then
+              StatusKey (Pair[0], Pair[1]);
 
     // ------------------------------------------------------------- wait --
     var Event   := Buffer (64);

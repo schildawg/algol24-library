@@ -53,6 +53,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`TextBackground`](#textbackground) | procedure | `graph` |
 | [`TextColor`](#textcolor) | procedure | `graph` |
+| [`TextMode`](#textmode) | procedure | `graph` |
 | [`TextCols`](#textcols) | function | `graph` |
 | [`TextRows`](#textrows) | function | `graph` |
 | [`Transparent`](#colors) | constant | `graph` |
@@ -2235,18 +2236,15 @@ function TextCols () : Integer;
 
 **Remarks**
 
-The window's width divided by the cell's. A cell is half the font's height
-wide, so a 1280 × 800 window with the default font is the classic 80 × 25
-screen. A wide (CJK) glyph occupies two cells.
-
-The grid derives from the installed font: `InstallUserFont` of a different
-cell height changes the answer.
+80, until [`TextMode`](#textmode) says otherwise. The grid is **logical**,
+not a division of the window: an 80 × 25 screen is 80 × 25 in every window,
+scaled to fit at present time. A wide (CJK) glyph occupies two of its cells.
 
 Raises `Graph is not open.` without a window.
 
 **See also**
 
-[`GetMaxX`](#getmaxx), [`InstallUserFont`](#installuserfont), [`TextRows`](#textrows)
+[`GetMaxX`](#getmaxx), [`TextMode`](#textmode), [`TextRows`](#textrows)
 
 **Example**
 
@@ -2268,6 +2266,68 @@ CloseGraph ();
 
 ---
 
+## TextMode
+
+*procedure* — unit `graph`
+
+**Function**
+
+Chooses the grid: columns by rows of cells, whatever the window's size.
+
+**Declaration**
+
+```algol24
+procedure TextMode (Cols : Integer, Rows : Integer);
+```
+
+**Remarks**
+
+The screen clears, the cursor homes, and the colors return to their defaults
+— which is what Turbo Pascal's `TextMode` did on a mode change, and the
+behaviour a program switching modes wants.
+
+Turbo Pascal's argument was a video-card mode — `CO80`, `CO40`, `Font8x8` —
+because the grid was a register setting. Here the grid is logical, so the
+argument is simply the grid: the two classics are `TextMode (80, 25)` and
+`TextMode (40, 25)`, and nothing stops `TextMode (132, 50)`.
+
+⚠️ **The window does not change; the grid is scaled to it.** A side effect
+worth having: an 80 × 25 grid shown in a 4:3 window — 640 × 480, say —
+displays its cells at 1:2.4, which is exactly how real text mode looked on a
+4:3 tube, whose pixels were not square.
+
+Raises `Graph is not open.` without a window, and `TextMode needs a positive
+grid.` for a Cols or Rows of zero or less.
+
+**See also**
+
+[`ClrScr`](#clrscr), [`TextCols`](#textcols), [`TextRows`](#textrows)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'modes', False);
+
+WriteLn (TextCols ());
+
+TextMode (40, 25);
+
+WriteLn (TextCols ());
+WriteLn (TextRows ());
+
+CloseGraph ();
+```
+
+```console
+80
+40
+25
+```
+
+---
+
 ## TextRows
 
 *function* — unit `graph`
@@ -2284,14 +2344,14 @@ function TextRows () : Integer;
 
 **Remarks**
 
-The window's height divided by the font's, on the same reasoning as
+25, until [`TextMode`](#textmode) says otherwise, on the same reasoning as
 [`TextCols`](#textcols), which shows both.
 
 Raises `Graph is not open.` without a window.
 
 **See also**
 
-[`TextCols`](#textcols)
+[`TextCols`](#textcols), [`TextMode`](#textmode)
 
 **Example**
 

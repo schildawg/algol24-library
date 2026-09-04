@@ -30,8 +30,11 @@ One window, composed from bottom to top:
 ```
 
 - **The text grid** is the celled surface `WriteLn` will write to. There is
-  exactly one, it spans the window, and it sits at Order 0, which no canvas
-  may claim.
+  exactly one and it sits at Order 0, which no canvas may claim. It is
+  **logical** — 80 × 25 by default whatever the window, chosen by `TextMode`,
+  and scaled to the window by the GPU at present time. A happy consequence:
+  in a 4:3 window the cells display at 1:2.4, the authentic aspect of a text
+  mode on a 4:3 tube.
 - **A Canvas** is a class: a positioned, sized drawing surface with its own
   pixels, its own transparency, and a place in the stack. Every drawing verb
   is a method on it.

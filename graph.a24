@@ -59,6 +59,8 @@ function SDL_RenderCopy (Ren : Pointer, Tex : Pointer, Src : Pointer, Dst : Poin
     external 'SDL_RenderCopy' in '/opt/homebrew/lib/libSDL2.dylib';
 function SDL_SetTextureBlendMode (Tex : Pointer, Mode : Integer) : Integer;
     external 'SDL_SetTextureBlendMode' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_SetHint (Name : String, Value : String) : Integer;
+    external 'SDL_SetHint' in '/opt/homebrew/lib/libSDL2.dylib';
 
 /// Aims the C cell-stamper at a framebuffer.
 ///
@@ -154,10 +156,20 @@ var CurrentX := 0;
 var CurrentY := 0;
 
 // The text grid: its own framebuffer and texture, alpha over the background,
-// per DESIGN.md. The cursor is in cells, 0-based like everything else in
-// this language; the colors are the grid's current ink and cell background.
+// per DESIGN.md. The grid is LOGICAL -- 80 by 25 cells by default whatever
+// the window, scaled to it by the GPU at present time -- so the same program
+// paints the same screen at every window size. TextMode chooses another
+// grid. The buffer is allocated lazily, on the first verb that stamps, so a
+// program that never touches the grid never needs a font.
+//
+// The cursor is in cells, 0-based like everything else in this language; the
+// colors are the grid's current ink and cell background.
 var TextPixels  := nil;
 var TextTexture := nil;
+var GridCols    := 80;
+var GridRows    := 25;
+var GridW       := 0;
+var GridH       := 0;
 var CursorCol   := 0;
 var CursorRow   := 0;
 var TextInk     := 11184810;      // LightGray, the text-mode default
@@ -185,6 +197,10 @@ begin
     if SDL_Init (SDL_INIT_VIDEO) <> 0 then
         raise 'Graph could not start: ' + SDL_GetError ();
 
+    // The text grid is a logical surface scaled to the window; nearest-
+    // neighbour scaling would decimate its antialiasing, linear keeps it.
+    SDL_SetHint ('SDL_RENDER_SCALE_QUALITY', 'linear');
+
     VideoReady := True;
 end
 
@@ -195,10 +211,17 @@ end
 procedure Present ();
 begin
     SDL_UpdateTexture (Texture, nil, Pixels.Address, WindowWidth * 4);
-    SDL_UpdateTexture (TextTexture, nil, TextPixels.Address, WindowWidth * 4);
     SDL_RenderClear (Renderer);
     SDL_RenderCopy (Renderer, Texture, nil, nil);
-    SDL_RenderCopy (Renderer, TextTexture, nil, nil);
+
+    // The grid is its own logical size; copying to a nil destination is what
+    // scales it to the window.
+    if TextTexture <> nil then
+    begin
+        SDL_UpdateTexture (TextTexture, nil, TextPixels.Address, GridW * 4);
+        SDL_RenderCopy (Renderer, TextTexture, nil, nil);
+    end
+
     SDL_RenderPresent (Renderer);
     SDL_PumpEvents ();
 end
@@ -328,6 +351,10 @@ begin
     F.Close ();
 
     FontLoaded := True;
+
+    // A new font means a new cell size, so a live grid is rebuilt -- empty,
+    // at the same logical columns and rows -- by the next stamping verb.
+    if Window <> nil then DropGrid ();
 end
 
 /// Loads the default font the first time text draws.
@@ -343,6 +370,45 @@ begin
         raise 'No font is installed: ''graphfont.hex'' is not in the working '
             + 'directory, and InstallUserFont has not named another.';
     end
+end
+
+/// Allocates the grid's framebuffer and texture on first need.
+///
+/// Private to this unit. The grid's pixel size is its logical size -- cells
+/// times the font's cell -- and never the window's; the GPU scales it at
+/// present time. Dropping the buffer to nil is how TextMode and a font
+/// change ask for it to be rebuilt.
+procedure EnsureGrid ();
+begin
+    EnsureFont ();
+
+    if TextPixels <> nil then Exit;
+
+    GridW := GridCols * CellWidth ();
+    GridH := GridRows * FontHeight;
+
+    TextTexture := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
+                                      GridW, GridH);
+
+    if TextTexture = nil then raise 'Graph: ' + SDL_GetError ();
+
+    SDL_SetTextureBlendMode (TextTexture, BLENDMODE_BLEND);
+
+    TextPixels := Buffer (GridW * GridH * 4);
+
+    StampTarget (TextPixels.Address, GridW, GridH);
+end
+
+/// Drops the grid's buffer so the next stamping verb rebuilds it.
+///
+/// Private to this unit; the grid comes back empty, which is what both a
+/// mode change and a font change mean for stamped pixels.
+procedure DropGrid ();
+begin
+    if TextTexture <> nil then SDL_DestroyTexture (TextTexture);
+
+    TextTexture := nil;
+    TextPixels  := nil;
 end
 
 /// Mixes Ink into the ground at a coverage of 0 .. 255, channel by channel.
@@ -533,28 +599,10 @@ begin
     // zero is black, so the window opens clean.
     Pixels := Buffer (WindowWidth * WindowHeight * 4);
 
-    // The text grid above it: zeroed means every cell transparent, and the
-    // GPU blends it over the background at present time.
-    TextTexture := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
-                                      WindowWidth, WindowHeight);
-
-    if TextTexture = nil then
-    begin
-        var Cause := SDL_GetError ();
-
-        CloseGraph ();
-
-        raise 'InitGraph: ' + Cause;
-    end
-
-    SDL_SetTextureBlendMode (TextTexture, BLENDMODE_BLEND);
-
-    TextPixels := Buffer (WindowWidth * WindowHeight * 4);
-
-    StampTarget (TextPixels.Address, WindowWidth, WindowHeight);
-
     CurrentX  := 0;
     CurrentY  := 0;
+    GridCols  := 80;
+    GridRows  := 25;
     CursorCol := 0;
     CursorRow := 0;
     TextInk   := LightGray;
@@ -745,40 +793,71 @@ begin
     Exit FontHeight div 2;
 end
 
-/// The grid's width in cells.
+/// The grid's width in cells: 80 until `TextMode` says otherwise.
 ///
-/// The window's width divided by the cell's, so a 1280-pixel window with the
-/// default font is 80 columns -- the classic screen. A wide (CJK) glyph
-/// occupies two of them.
+/// The grid is logical, not a division of the window -- an 80 by 25 screen
+/// is 80 by 25 in every window, scaled to fit. A wide (CJK) glyph occupies
+/// two of its cells.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
 ///
 /// # Examples
-/// `The Grid Is The Window Divided Into Cells`
+/// `The Grid Is Eighty By Twenty Five Whatever The Window`
 function TextCols () : Integer;
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    EnsureFont ();
-
-    Exit WindowWidth div CellWidth ();
+    Exit GridCols;
 end
 
-/// The grid's height in cells.
+/// The grid's height in cells: 25 until `TextMode` says otherwise.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
 ///
 /// # Examples
-/// `The Grid Is The Window Divided Into Cells`
+/// `The Grid Is Eighty By Twenty Five Whatever The Window`
 function TextRows () : Integer;
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    EnsureFont ();
+    Exit GridRows;
+end
 
-    Exit WindowHeight div FontHeight;
+/// Chooses the grid: Cols by Rows cells, whatever the window's size.
+///
+/// The screen clears, the cursor homes, and the colors return to their
+/// defaults, which is what Turbo Pascal's `TextMode` did. Its argument was a
+/// video-card mode -- CO80, CO40, Font8x8 -- because the grid was a register
+/// setting; here the grid is logical and any pair will do, so the two
+/// classics are `TextMode (80, 25)` and `TextMode (40, 25)` and nothing
+/// stops `TextMode (132, 50)`.
+///
+/// The window does not change size or aspect: the grid is scaled to it. An
+/// 80 by 25 grid shown in a 4:3 window has cells displayed 1:2.4, which is
+/// exactly how a real VGA text mode looked on a 4:3 tube.
+///
+/// # Raises
+/// `Graph is not open.` without a window, and `TextMode needs a positive
+/// grid.` for a Cols or Rows of zero or less.
+///
+/// # Examples
+/// `TextMode Chooses The Grid`
+procedure TextMode (Cols : Integer, Rows : Integer);
+begin
+    if Window = nil then raise 'Graph is not open.';
+    if Cols <= 0 or Rows <= 0 then raise 'TextMode needs a positive grid.';
+
+    GridCols  := Cols;
+    GridRows  := Rows;
+    CursorCol := 0;
+    CursorRow := 0;
+    TextInk   := LightGray;
+    TextBack  := Transparent;
+
+    DropGrid ();
+    Present ();
 end
 
 /// Moves the cursor to column Col, row Row.
@@ -948,7 +1027,7 @@ procedure Print (Text : String);
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    EnsureFont ();
+    EnsureGrid ();
 
     for var I := 0; I < Length (Text); I := I + 1 do
     begin
@@ -990,7 +1069,7 @@ procedure ClrEol ();
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    EnsureFont ();
+    EnsureGrid ();
 
     for var Col := CursorCol; Col < TextCols (); Col := Col + 1 do
         StampCell (Col * CellWidth (), CursorRow * FontHeight, nil,
@@ -1014,7 +1093,7 @@ procedure ClrScr ();
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    EnsureFont ();
+    EnsureGrid ();
 
     for var Row := 0; Row < TextRows (); Row := Row + 1 do
         for var Col := 0; Col < TextCols (); Col := Col + 1 do
@@ -1413,13 +1492,78 @@ end
 
 // -------------------------------------------------------- text mode tests --
 
-test 'The Grid Is The Window Divided Into Cells';
+/// The grid is logical: the classic screen in every window, scaled to fit.
+test 'The Grid Is Eighty By Twenty Five Whatever The Window';
 begin
     CloseGraph ();
     InitGraph (1280, 800, 'grid', False);
 
     AssertEqual (80, TextCols ());
     AssertEqual (25, TextRows ());
+
+    CloseGraph ();
+    InitGraph (320, 200, 'small', False);
+
+    AssertEqual (80, TextCols ());
+    AssertEqual (25, TextRows ());
+
+    CloseGraph ();
+end
+
+test 'TextMode Chooses The Grid';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'mode', False);
+
+    TextMode (40, 25);
+
+    AssertEqual (40, TextCols ());
+    AssertEqual (25, TextRows ());
+
+    // And the new grid stamps at its own size.
+    Print ('A');
+    AssertEqual (1, WhereX ());
+
+    CloseGraph ();
+end
+
+/// What Turbo Pascal's TextMode did on a mode change, kept: a fresh screen.
+test 'TextMode Clears Homes And Resets The Colors';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'reset', False);
+
+    TextBackground (Blue);
+    TextColor (Yellow);
+    Print ('old');
+    GotoXY (5, 3);
+
+    TextMode (40, 25);
+
+    AssertEqual (0, WhereX ());
+    AssertEqual (0, WhereY ());
+
+    // A stamped space shows the defaults are back: transparent background.
+    Print (' ');
+    AssertEqual (0, TextPixels.GetInt (0));
+
+    CloseGraph ();
+end
+
+test 'TextMode Refuses Nonsense And A Closed Window';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try TextMode (80, 25); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    InitGraph (320, 200, 'bad', False);
+
+    Message := '';
+    try TextMode (0, 25); except on e : String do Message := e; end
+    AssertEqual ('TextMode needs a positive grid.', Message);
 
     CloseGraph ();
 end
@@ -1486,22 +1630,20 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 16; X := X + 1 do
-            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then Lit := Lit + 1;
+            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then Lit := Lit + 1;
 
     AssertTrue (Lit > 0);
 
     CloseGraph ();
 end
 
-/// A 64-pixel window with the 32-high font is a 4 by 2 grid, which makes the
-/// wrap reachable in one short string.
+/// TextMode makes the wrap reachable in one short string.
 test 'Print Wraps At The Last Column';
 begin
     CloseGraph ();
-    InitGraph (64, 64, 'wrap', False);
+    InitGraph (320, 200, 'wrap', False);
 
-    AssertEqual (4, TextCols ());
-
+    TextMode (4, 2);
     Print ('ABCDE');
 
     AssertEqual (1, WhereX ());
@@ -1553,10 +1695,10 @@ begin
     Print ('█ ');
 
     // The block's centre pixel is opaque white.
-    AssertEqual (-1, TextPixels.GetInt ((16 * WindowWidth + 8) * 4));
+    AssertEqual (-1, TextPixels.GetInt ((16 * GridW + 8) * 4));
 
     // The space's centre pixel is opaque blue: 0xFF0000AA.
-    AssertEqual (Blue - 16777216, TextPixels.GetInt ((16 * WindowWidth + 24) * 4));
+    AssertEqual (Blue - 16777216, TextPixels.GetInt ((16 * GridW + 24) * 4));
 
     CloseGraph ();
 end
@@ -1572,7 +1714,7 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 16; X := X + 1 do
-            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then
+            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then
                 Painted := Painted + 1;
 
     AssertEqual (0, Painted);
@@ -1614,7 +1756,7 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 64; X := X + 1 do
-            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then
+            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then
                 Prose := Prose + 1;
 
     AssertEqual (0, Prose);
@@ -1636,7 +1778,7 @@ begin
 
     AssertEqual (0, WhereX ());
     AssertEqual (0, WhereY ());
-    AssertEqual (Blue - 16777216, TextPixels.GetInt ((50 * WindowWidth + 50) * 4));
+    AssertEqual (Blue - 16777216, TextPixels.GetInt ((50 * GridW + 50) * 4));
 
     CloseGraph ();
 end
@@ -1652,17 +1794,18 @@ begin
     OutTextXY (0, 0, '██');
     var Chart := LitPixels (0, 0, 64, 64);
 
+    TextMode (4, 2);
     PrintLn ('A');
     PrintLn ('B');
 
     var TopHalf := 0;
     var LowHalf := 0;
 
-    for var Y := 0; Y < 32; Y := Y + 1 do
-        for var X := 0; X < 64; X := X + 1 do
+    for var Y := 0; Y < GridH div 2; Y := Y + 1 do
+        for var X := 0; X < GridW; X := X + 1 do
         begin
-            if TextPixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then TopHalf := TopHalf + 1;
-            if TextPixels.GetInt (((Y + 32) * WindowWidth + X) * 4) <> 0 then LowHalf := LowHalf + 1;
+            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then TopHalf := TopHalf + 1;
+            if TextPixels.GetInt (((Y + GridH div 2) * GridW + X) * 4) <> 0 then LowHalf := LowHalf + 1;
         end
 
     AssertTrue (TopHalf > 0);
