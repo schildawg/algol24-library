@@ -268,9 +268,11 @@ not logic; the unit says which glyph, what mode, what ink, where. The stamper
 exists because a full 80×25 screen is 2,000 cells and the interpreted blend
 loop (~18 ms/glyph) would have taken half a minute per screenful; with it a
 whole IDE screen paints in ~0.4 s interpreted. Free text (`OutTextXY`) still
-blends in Algol-24. The grid is 0-based like the language, TP's 1-based habit
-notwithstanding, and `examples/ide.a24` is the acceptance piece — the Turbo
-C++ screen rebuilt from the vocabulary.
+blends in Algol-24. The screen is 1-based, cells and pixels
+alike — `(1, 1)` is home, `GotoXY (TextCols (), TextRows ())` the far corner,
+`GetMaxX ()` the width itself — while the language's strings stay 0-based;
+the seam is `Text[Col - 1]`, at the memory boundary. `examples/ide.a24` is
+the acceptance piece — the Turbo C++ screen rebuilt from the vocabulary.
 
 `examples/statistics.a24` is the worked application — built by
 `examples/build.sh`, verified by `examples/check.sh`, explained in

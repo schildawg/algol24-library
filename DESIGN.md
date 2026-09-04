@@ -47,6 +47,17 @@ lives on. `ClrEol` erases the celled text and the pie chart under it shows
 through, intact — erasing a graphic is a graphics act, on the canvas that
 holds it.
 
+### The screen counts from one
+
+Cells and pixels alike: `(1, 1)` is the top-left — of the grid, of the
+window, of a canvas — and the count is the last index, so the bottom-right
+cell is `TextCols (), TextRows ()` and the last pixel column is `GetMaxX ()`
+= the width. Decided for the storybook read of `(1, 1, 80, 25)` and because
+one dialect for the whole screen kills both classic off-by-ones at once.
+The language's strings and Buffers stay 0-based — that seam exists wherever
+the base is drawn, and it lives at the memory boundary: a cursor column
+meets a string index as `Text[Col - 1]`.
+
 ### The two kinds of text
 
 | | **celled** (the grid) | **free** (a canvas) |
@@ -80,7 +91,7 @@ Settled, all five by decision:
 - **Every drawing verb is a Canvas method.** `Chart.Line (…)`,
   `Chart.OutTextXY (…)` — where a thing draws is unaskable, because the
   receiver says.
-- **Coordinates are local.** (0,0) is the canvas's own top-left corner, which
+- **Coordinates are local.** (1,1) is the canvas's own top-left corner, which
   is what makes a drawing portable: move the canvas and the drawing moves,
   nothing redraws. It is also the clip — a canvas cannot scribble outside
   itself, which keeps the old `SetViewPort` promise without a clipping

@@ -298,7 +298,7 @@ CloseGraph ();
 ```
 
 ```console
-1
+2
 ```
 
 ---
@@ -389,7 +389,7 @@ uses graph;
 InitGraph (320, 200, 'eol', False);
 
 Print ('doomed text');
-GotoXY (0, 0);
+GotoXY (1, 1);
 ClrEol ();
 
 WriteLn (WhereX ());
@@ -398,7 +398,7 @@ CloseGraph ();
 ```
 
 ```console
-0
+1
 ```
 
 ---
@@ -450,8 +450,8 @@ CloseGraph ();
 ```
 
 ```console
-0
-0
+1
+1
 ```
 
 ---
@@ -701,7 +701,7 @@ InitGraph (100, 50, 'grid', False);
 
 var Columns := 0;
 
-for var X := 0; X <= GetMaxX (); X := X + 1 do
+for var X := 1; X <= GetMaxX (); X := X + 1 do
     Columns := Columns + 1;
 
 WriteLn (Columns);
@@ -853,7 +853,7 @@ CloseGraph ();
 ```
 
 ```console
-1
+2
 ```
 
 
@@ -980,8 +980,8 @@ CloseGraph ();
 ```
 
 ```console
-639
-479
+640
+480
 ```
 
 ---
@@ -1678,7 +1678,8 @@ procedure OutTextXY (X : Integer, Y : Integer, Text : String);
 
 The current position is neither consulted nor moved, which is Turbo Pascal's
 rule and the useful one: placed text is placed, and a following
-[`OutText`](#outtext) carries on from wherever it was.
+[`OutText`](#outtext) carries on from wherever it was. Pixels count from 1 —
+`1, 1` is the window's corner — like everything on this screen.
 
 Coordinates may land partly or wholly outside the window; what falls outside
 is clipped pixel by pixel rather than raising, so a label may slide off an
@@ -1799,7 +1800,7 @@ CloseGraph ();
 ```
 
 ```console
-7
+8
 ```
 
 ---
@@ -1848,7 +1849,7 @@ CloseGraph ();
 ```
 
 ```console
-2
+3
 ```
 
 ---

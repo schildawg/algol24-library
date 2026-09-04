@@ -250,8 +250,8 @@ var GridCols    := 80;
 var GridRows    := 25;
 var GridW       := 0;
 var GridH       := 0;
-var CursorCol   := 0;
-var CursorRow   := 0;
+var CursorCol   := 1;
+var CursorRow   := 1;
 var TextInk     := 11184810;      // LightGray, the text-mode default
 var TextBack    := -1;            // Transparent
 
@@ -574,12 +574,12 @@ end
 /// Blends one pixel into the framebuffer, clipped at the window's edge.
 procedure Wash (X : Integer, Y : Integer, Ink : Integer, Cover : Integer);
 begin
-    if X >= 0 then
-      if Y >= 0 then
-        if X < WindowWidth then
-          if Y < WindowHeight then
+    if X >= 1 then
+      if Y >= 1 then
+        if X <= WindowWidth then
+          if Y <= WindowHeight then
           begin
-              var At := (Y * WindowWidth + X) * 4;
+              var At := ((Y - 1) * WindowWidth + (X - 1)) * 4;
 
               Pixels.PutInt (At, Mix (Pixels.GetInt (At), Ink, Cover));
           end
@@ -649,7 +649,7 @@ begin
 
     for var Y := Top; Y < Top + High; Y := Y + 1 do
         for var X := Left; X < Left + Wide; X := X + 1 do
-            if Pixels.GetInt ((Y * WindowWidth + X) * 4) <> 0 then
+            if Pixels.GetInt (((Y - 1) * WindowWidth + (X - 1)) * 4) <> 0 then
                 Count := Count + 1;
 
     Exit Count;
@@ -734,8 +734,8 @@ begin
     // zero is black, so the window opens clean.
     Pixels := Buffer (WindowWidth * WindowHeight * 4);
 
-    CurrentX  := 0;
-    CurrentY  := 0;
+    CurrentX  := 1;
+    CurrentY  := 1;
     GridCols  := 80;
     GridRows  := 25;
     CursorCol := 0;
@@ -746,6 +746,8 @@ begin
     BlinkPhaseMs := 267;
     KeyQueue  := [];
     KeyHead   := 0;
+    CursorCol := 1;
+    CursorRow := 1;
 
     SDL_StartTextInput ();
 
@@ -780,16 +782,17 @@ begin
     Window       := nil;
     WindowWidth  := 0;
     WindowHeight := 0;
-    CurrentX     := 0;
-    CurrentY     := 0;
+    CurrentX     := 1;
+    CurrentY     := 1;
 end
 
-/// The highest X a program can draw to, which is the window's width minus one.
+/// The highest X a program can draw to, which is the window's width.
 ///
-/// The answer describes the window that actually opened, so under fullscreen it
-/// is the desktop's width minus one whatever `InitGraph` was asked for. The
-/// minus one is the point of the routine: `for var X := 0; X <= GetMaxX (); …`
-/// visits every column exactly.
+/// The screen counts from 1, pixels and cells alike, so the count is the last
+/// index and `for var X := 1; X <= GetMaxX (); …` visits every column with no
+/// minus one anywhere. The answer describes the window that actually opened,
+/// so under fullscreen it is the desktop's width whatever `InitGraph` was
+/// asked for.
 ///
 /// For how big a window *could* be, before opening one, see `ScreenWidth`.
 ///
@@ -803,10 +806,10 @@ function GetMaxX () : Integer;
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    Exit WindowWidth - 1;
+    Exit WindowWidth;
 end
 
-/// The highest Y a program can draw to, which is the window's height minus one.
+/// The highest Y a program can draw to, which is the window's height.
 ///
 /// Everything said of `GetMaxX` holds here, for rows.
 ///
@@ -819,14 +822,14 @@ function GetMaxY () : Integer;
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    Exit WindowHeight - 1;
+    Exit WindowHeight;
 end
 
 /// The desktop's width in pixels.
 ///
 /// Usable before `InitGraph`, which is its purpose: it answers how much room
 /// the desktop has, so a program can choose a window size to fit. After a
-/// fullscreen `InitGraph` it is what `GetMaxX () + 1` will equal.
+/// fullscreen `InitGraph` it is what `GetMaxX ()` will equal.
 ///
 /// # Raises
 /// The message SDL gives when the desktop cannot be asked.
@@ -1161,8 +1164,8 @@ begin
 
     GridCols     := Cols;
     GridRows     := Rows;
-    CursorCol    := 0;
-    CursorRow    := 0;
+    CursorCol    := 1;
+    CursorRow    := 1;
     TextInk      := LightGray;
     TextBack     := Transparent;
     TextBlinking := False;
@@ -1173,9 +1176,13 @@ end
 
 /// Moves the cursor to column Col, row Row.
 ///
-/// Zero-based, like the language's strings and the window's pixels: the
-/// top-left cell is 0, 0. Turbo Pascal counted from 1, and that habit is the
-/// one to unlearn here.
+/// One-based, as Turbo Pascal and every terminal since have had it: the
+/// top-left cell is 1, 1 and the bottom-right is `TextCols (), TextRows ()`
+/// -- the count is the last index, and no cell coordinate ever carries a
+/// minus one. The celled world counts from 1 and the pixel world from 0,
+/// which is the split the era's machines and today's terminals both chose;
+/// the one seam is that a cursor column meets a string index as
+/// `Text[Col - 1]`.
 ///
 /// # Raises
 /// `Graph is not open.` without a window, and `GotoXY is off the grid.` for
@@ -1187,14 +1194,14 @@ procedure GotoXY (Col : Integer, Row : Integer);
 begin
     if Window = nil then raise 'Graph is not open.';
 
-    if Col < 0 or Row < 0 or Col >= TextCols () or Row >= TextRows () then
+    if Col < 1 or Row < 1 or Col > TextCols () or Row > TextRows () then
         raise 'GotoXY is off the grid.';
 
     CursorCol := Col;
     CursorRow := Row;
 end
 
-/// The cursor's column.
+/// The cursor's column, counting from 1.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
@@ -1208,7 +1215,7 @@ begin
     Exit CursorCol;
 end
 
-/// The cursor's row.
+/// The cursor's row, counting from 1.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
@@ -1365,9 +1372,9 @@ end
 /// Private to this unit; the newline both PrintLn and a #10 in Print spell.
 procedure NewLine ();
 begin
-    CursorCol := 0;
+    CursorCol := 1;
 
-    if CursorRow + 1 < TextRows () then
+    if CursorRow < TextRows () then
     begin
         CursorRow := CursorRow + 1;
 
@@ -1409,10 +1416,10 @@ begin
     var Cells := Wide div CellWidth ();
 
     if Cells < 1 then Cells := 1;
-    if CursorCol + Cells > TextCols () then NewLine ();
+    if CursorCol + Cells - 1 > TextCols () then NewLine ();
 
-    var CellX := CursorCol * CellWidth ();
-    var CellY := CursorRow * FontHeight;
+    var CellX := (CursorCol - 1) * CellWidth ();
+    var CellY := (CursorRow - 1) * FontHeight;
 
     // A blinking glyph's ink goes to the blink layer and only its background
     // to the text layer, which is why the letters vanish and the cell stays.
@@ -1442,7 +1449,7 @@ begin
 
     CursorCol := CursorCol + Cells;
 
-    if CursorCol >= TextCols () then NewLine ();
+    if CursorCol > TextCols () then NewLine ();
 end
 
 /// Writes Text at the cursor, in the current colors, advancing it.
@@ -1510,14 +1517,14 @@ begin
 
     EnsureGrid ();
 
-    for var Col := CursorCol; Col < TextCols (); Col := Col + 1 do
-        StampCell (Col * CellWidth (), CursorRow * FontHeight, nil,
+    for var Col := CursorCol; Col <= TextCols (); Col := Col + 1 do
+        StampCell ((Col - 1) * CellWidth (), (CursorRow - 1) * FontHeight, nil,
                    CellWidth (), FontHeight, 1, TextInk, TextBack);
 
     AimBlink ();
 
-    for var Col := CursorCol; Col < TextCols (); Col := Col + 1 do
-        StampCell (Col * CellWidth (), CursorRow * FontHeight, nil,
+    for var Col := CursorCol; Col <= TextCols (); Col := Col + 1 do
+        StampCell ((Col - 1) * CellWidth (), (CursorRow - 1) * FontHeight, nil,
                    CellWidth (), FontHeight, 1, TextInk, Transparent);
 
     AimText ();
@@ -1555,8 +1562,8 @@ begin
 
     AimText ();
 
-    CursorCol := 0;
-    CursorRow := 0;
+    CursorCol := 1;
+    CursorRow := 1;
 
     Present ();
 end
@@ -1574,8 +1581,8 @@ begin
 
     InitGraph (320, 200, 'sized', False);
 
-    AssertEqual (319, GetMaxX ());
-    AssertEqual (199, GetMaxY ());
+    AssertEqual (320, GetMaxX ());
+    AssertEqual (200, GetMaxY ());
 
     CloseGraph ();
 end
@@ -1603,7 +1610,7 @@ begin
     AssertEqual ('Graph is already open.', Message);
 
     // And the first window survived the refusal.
-    AssertEqual (99, GetMaxX ());
+    AssertEqual (100, GetMaxX ());
 
     CloseGraph ();
 end
@@ -1638,9 +1645,9 @@ begin
 
     InitGraph (100, 100, 'full', True);
 
-    AssertEqual (ScreenWidth () - 1, GetMaxX ());
-    AssertTrue (GetMaxY () + 1 > 100);
-    AssertTrue (GetMaxY () + 1 <= ScreenHeight ());
+    AssertEqual (ScreenWidth (), GetMaxX ());
+    AssertTrue (GetMaxY () > 100);
+    AssertTrue (GetMaxY () <= ScreenHeight ());
 
     CloseGraph ();
 end
@@ -1662,8 +1669,8 @@ begin
 
     InitGraph (640, 480, 'second', False);
 
-    AssertEqual (639, GetMaxX ());
-    AssertEqual (479, GetMaxY ());
+    AssertEqual (640, GetMaxX ());
+    AssertEqual (480, GetMaxY ());
 
     CloseGraph ();
 end
@@ -1727,8 +1734,8 @@ begin
     OutTextXY (10, 10, 'A');
 
     AssertTrue (LitPixels (10, 10, 40, 40) > 0);
-    AssertEqual (0, CurrentX);
-    AssertEqual (0, CurrentY);
+    AssertEqual (1, CurrentX);
+    AssertEqual (1, CurrentY);
 
     CloseGraph ();
 end
@@ -1740,8 +1747,8 @@ begin
 
     OutText ('AB');
 
-    AssertEqual (FontWidths[Ord ('A')] + FontWidths[Ord ('B')], CurrentX);
-    AssertEqual (0, CurrentY);
+    AssertEqual (1 + FontWidths[Ord ('A')] + FontWidths[Ord ('B')], CurrentX);
+    AssertEqual (1, CurrentY);
 
     // And the next call carries on from there rather than overprinting.
     var Before := CurrentX;
@@ -1775,12 +1782,12 @@ begin
     InitGraph (200, 100, 'wide', False);
 
     OutText ('你');
-    var Wide := CurrentX;
+    var Wide := CurrentX - 1;
 
-    CurrentX := 0;
+    CurrentX := 1;
     OutText ('A');
 
-    AssertEqual (2 * CurrentX, Wide);
+    AssertEqual (2 * (CurrentX - 1), Wide);
 
     CloseGraph ();
 end
@@ -1792,7 +1799,7 @@ begin
     CloseGraph ();
     InitGraph (100, 100, 'emoji', False);
 
-    OutTextXY (0, 0, '🙂');
+    OutTextXY (1, 1, '🙂');
 
     var Colored := False;
 
@@ -1818,7 +1825,7 @@ begin
 
     OutText ('ʣ');
 
-    AssertEqual (FontHeight div 2, CurrentX);
+    AssertEqual (1 + FontHeight div 2, CurrentX);
 
     CloseGraph ();
 end
@@ -1877,7 +1884,7 @@ begin
 
     try InstallUserFont ('no-such-font.hex'); except end
 
-    CurrentX := 0;
+    CurrentX := 1;
     OutText ('A');
 
     AssertEqual (Before, CurrentX);
@@ -1922,7 +1929,7 @@ begin
     CloseGraph ();
     InitGraph (200, 100, 'frame', False);
 
-    OutTextXY (0, 0, '╔═╗');
+    OutTextXY (1, 1, '╔═╗');
 
     AssertEqual (16, FontWidths[Ord ('═')]);
     AssertEqual (16, FontWidths[Ord ('║')]);
@@ -1977,7 +1984,7 @@ begin
 
     // And the new grid stamps at its own size.
     Print ('A');
-    AssertEqual (1, WhereX ());
+    AssertEqual (2, WhereX ());
 
     CloseGraph ();
 end
@@ -1995,8 +2002,8 @@ begin
 
     TextMode (40, 25);
 
-    AssertEqual (0, WhereX ());
-    AssertEqual (0, WhereY ());
+    AssertEqual (1, WhereX ());
+    AssertEqual (1, WhereY ());
 
     // A stamped space shows the defaults are back: transparent background.
     Print (' ');
@@ -2042,8 +2049,8 @@ begin
     CloseGraph ();
     InitGraph (320, 200, 'cursor', False);
 
-    AssertEqual (0, WhereX ());
-    AssertEqual (0, WhereY ());
+    AssertEqual (1, WhereX ());
+    AssertEqual (1, WhereY ());
 
     GotoXY (10, 5);
 
@@ -2060,12 +2067,16 @@ begin
 
     var Message := '';
 
-    try GotoXY (TextCols (), 0); except on e : String do Message := e; end
+    try GotoXY (TextCols () + 1, 1); except on e : String do Message := e; end
     AssertEqual ('GotoXY is off the grid.', Message);
 
     Message := '';
-    try GotoXY (0, -1); except on e : String do Message := e; end
+    try GotoXY (0, 1); except on e : String do Message := e; end
     AssertEqual ('GotoXY is off the grid.', Message);
+
+    // The storybook corner is valid: the count is the last index.
+    GotoXY (TextCols (), TextRows ());
+    AssertEqual (TextCols (), WhereX ());
 
     CloseGraph ();
 end
@@ -2077,8 +2088,8 @@ begin
 
     Print ('AB');
 
-    AssertEqual (2, WhereX ());
-    AssertEqual (0, WhereY ());
+    AssertEqual (3, WhereX ());
+    AssertEqual (1, WhereY ());
 
     // Something landed in the first cell of the text layer.
     var Lit := 0;
@@ -2101,8 +2112,8 @@ begin
     TextMode (4, 2);
     Print ('ABCDE');
 
-    AssertEqual (1, WhereX ());
-    AssertEqual (1, WhereY ());
+    AssertEqual (2, WhereX ());
+    AssertEqual (2, WhereY ());
 
     CloseGraph ();
 end
@@ -2114,12 +2125,12 @@ begin
 
     PrintLn ('AB');
 
-    AssertEqual (0, WhereX ());
-    AssertEqual (1, WhereY ());
+    AssertEqual (1, WhereX ());
+    AssertEqual (2, WhereY ());
 
     PrintLn ('');
 
-    AssertEqual (2, WhereY ());
+    AssertEqual (3, WhereY ());
 
     CloseGraph ();
 end
@@ -2131,7 +2142,7 @@ begin
 
     Print ('你');
 
-    AssertEqual (2, WhereX ());
+    AssertEqual (3, WhereX ());
 
     CloseGraph ();
 end
@@ -2197,13 +2208,13 @@ begin
     InitGraph (320, 200, 'rule', False);
 
     // A graphic on the background, and prose on the grid above it.
-    OutTextXY (0, 0, '████');
-    var Chart := LitPixels (0, 0, 64, 32);
+    OutTextXY (1, 1, '████');
+    var Chart := LitPixels (1, 1, 64, 32);
 
     AssertTrue (Chart > 0);
 
     Print ('ABCD');
-    GotoXY (0, 0);
+    GotoXY (1, 1);
     ClrEol ();
 
     // The prose is gone from the grid...
@@ -2217,7 +2228,7 @@ begin
     AssertEqual (0, Prose);
 
     // ... and the chart beneath is untouched.
-    AssertEqual (Chart, LitPixels (0, 0, 64, 32));
+    AssertEqual (Chart, LitPixels (1, 1, 64, 32));
 
     CloseGraph ();
 end
@@ -2227,12 +2238,12 @@ begin
     CloseGraph ();
     InitGraph (128, 96, 'fill', False);
 
-    GotoXY (2, 1);
+    GotoXY (3, 2);
     TextBackground (Blue);
     ClrScr ();
 
-    AssertEqual (0, WhereX ());
-    AssertEqual (0, WhereY ());
+    AssertEqual (1, WhereX ());
+    AssertEqual (1, WhereY ());
     AssertEqual (Blue - 16777216, TextPixels.GetInt ((50 * GridW + 50) * 4));
 
     CloseGraph ();
@@ -2246,8 +2257,8 @@ begin
     CloseGraph ();
     InitGraph (64, 64, 'scroll', False);
 
-    OutTextXY (0, 0, '██');
-    var Chart := LitPixels (0, 0, 64, 64);
+    OutTextXY (1, 1, '██');
+    var Chart := LitPixels (1, 1, 64, 64);
 
     TextMode (4, 2);
     PrintLn ('A');
@@ -2265,7 +2276,7 @@ begin
 
     AssertTrue (TopHalf > 0);
     AssertEqual (0, LowHalf);
-    AssertEqual (Chart, LitPixels (0, 0, 64, 64));
+    AssertEqual (Chart, LitPixels (1, 1, 64, 64));
 
     CloseGraph ();
 end
@@ -2427,7 +2438,7 @@ begin
     TextColor (White + Blink);
     Print ('█');
 
-    GotoXY (0, 0);
+    GotoXY (1, 1);
     TextColor (White);
     Print (' ');
 

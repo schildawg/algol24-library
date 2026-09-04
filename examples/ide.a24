@@ -40,12 +40,11 @@ end
 begin
     InitGraph (800, 600, 'Turbo Algol-24', False);
 
-    // Every position below derives from the grid, so the screen paints
-    // correctly at any window size -- 1280x800 is the classic 80x25, and
-    // 640x480 is the same IDE at 40x15.
+    // Every position below derives from the grid -- one-based, storybook:
+    // (1, 1) is the corner and (Cols, Rows) the other one.
     var Cols   := TextCols ();
     var Rows   := TextRows ();
-    var Bottom := Rows - 2;
+    var Bottom := Rows - 1;          // the frame's bottom border row
 
     // The desktop: every cell blue.
     TextBackground (Blue);
@@ -53,16 +52,16 @@ begin
 
     // ------------------------------------------------------- the menu bar --
     TextBackground (LightGray);
-    GotoXY (0, 0);
+    GotoXY (1, 1);
     Print (Fill (' ', Cols - 1));
-    GotoXY (1, 0);
+    GotoXY (2, 1);
     TextColor (Red);
     Print ('≡');
-    GotoXY (4, 0);
+    GotoXY (5, 1);
 
     for var Item in ['File', 'Edit', 'Search', 'Run', 'Compile',
                      'Debug', 'Project', 'Options', 'Window', 'Help'] do
-        if WhereY () = 0 then
+        if WhereY () = 1 then
           if WhereX () + Length (Item) + 2 < Cols then MenuItem (Item);
 
     // ---------------------------------------------------- the editor frame --
@@ -73,7 +72,7 @@ begin
     var Inner := Cols - 12 - Length (Title);   // between '╔═[■]' and '1═[↕]═╗'
     var Side  := Inner div 2;
 
-    GotoXY (0, 1);
+    GotoXY (1, 2);
     Print ('╔═[');
     TextColor (LightGreen);
     Print ('■');
@@ -84,15 +83,15 @@ begin
     TextColor (White);
     Print (']═╗');
 
-    for var Row := 2; Row < Bottom; Row := Row + 1 do
+    for var Row := 3; Row < Bottom; Row := Row + 1 do
     begin
-        GotoXY (0, Row);
+        GotoXY (1, Row);
         Print ('║');
-        GotoXY (Cols - 1, Row);
+        GotoXY (Cols, Row);
 
         TextColor (Cyan);
 
-        if Row = 2 then Print ('▲');
+        if Row = 3 then Print ('▲');
         else if Row = Bottom - 1 then Print ('▼');
         else Print ('▒');
 
@@ -101,7 +100,7 @@ begin
 
     var HBar := Cols - 17;                     // between the fixed ends
 
-    GotoXY (0, Bottom);
+    GotoXY (1, Bottom);
     Print ('╚═ 1:1 ' + Fill ('═', 4));
     TextColor (Cyan);
     Print ('◄' + Fill ('▒', HBar) + '►');
@@ -110,36 +109,36 @@ begin
 
     // The editing cursor, waiting at the top of the empty file -- blinking,
     // which is the whole reason it reads as a cursor and not a brick.
-    GotoXY (1, 2);
+    GotoXY (2, 3);
     TextColor (Yellow + Blink);
     Print ('▄');
 
     // Three lines of the file, one per intensity: the same cyan dimmed and
     // brightened around NormVideo's everyday LightGray.
-    GotoXY (2, 4);
+    GotoXY (3, 5);
     TextColor (LightCyan);
     LowVideo ();
     Print ('{ LowVideo  -- for the quiet aside }');
 
-    GotoXY (2, 5);
+    GotoXY (3, 6);
     NormVideo ();
     TextBackground (Blue);     // NormVideo resets the background too --
     Print ('{ NormVideo -- the everyday text }');   // Transparent would let
                                                     // the black show through
-    GotoXY (2, 6);
+    GotoXY (3, 7);
     TextColor (Cyan);
     HighVideo ();
     Print ('{ HighVideo -- for the loud parts }');
 
     // ----------------------------------------------------- the status line --
     TextBackground (LightGray);
-    GotoXY (0, Rows - 1);
+    GotoXY (1, Rows);
     Print (Fill (' ', Cols - 1));
-    GotoXY (1, Rows - 1);
+    GotoXY (2, Rows);
 
     for var Pair in [['F1', 'Help'], ['F2', 'Save'], ['F3', 'Open'],
                      ['Alt-F9', 'Compile'], ['F9', 'Make'], ['F10', 'Menu']] do
-        if WhereY () = Rows - 1 then
+        if WhereY () = Rows then
           if WhereX () + Length (Pair[0]) + Length (Pair[1]) + 3 < Cols then
               StatusKey (Pair[0], Pair[1]);
 
