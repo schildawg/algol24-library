@@ -1173,24 +1173,27 @@ var
     Dead   : Boolean;
 
 begin
-    constructor Init (AX1 : Integer, AY1 : Integer, AX2 : Integer, AY2 : Integer,
-                      AOrder : Integer);
+    constructor Init (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
+                      Order : Integer);
     begin
         if SdlWin = nil then raise 'Graph is not open.';
-        if AOrder = 0 then raise 'Order 0 is the screen''s.';
-        if AX1 < 1 or AY1 < 1 or AX2 < AX1 or AY2 < AY1 then
+        if Order = 0 then raise 'Order 0 is the screen''s.';
+        if X1 < 1 or Y1 < 1 or X2 < X1 or Y2 < Y1 then
             raise 'Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.';
 
         EnsureFont ();
 
-        X1 := AX1;
-        Y1 := AY1;
-        X2 := AX2;
-        Y2 := AY2;
-        Cols := AX2 - AX1 + 1;
-        Rows := AY2 - AY1 + 1;
+        // A parameter shadows the field of the same name, so the fields are
+        // reached through `this` -- which lets the parameters be named for
+        // what they are, and lets a caller write `Window (X1: 1, ...)`.
+        this.X1 := X1;
+        this.Y1 := Y1;
+        this.X2 := X2;
+        this.Y2 := Y2;
+        Cols := X2 - X1 + 1;
+        Rows := Y2 - Y1 + 1;
 
-        Order    := AOrder;
+        this.Order := Order;
         Alpha    := 255;
         Ink      := LightGray;
         Back     := Transparent;
@@ -1608,19 +1611,22 @@ var
     Dead   : Boolean;
 
 begin
-    constructor Init (AX : Integer, AY : Integer, AW : Integer, AH : Integer,
-                      AOrder : Integer);
+    constructor Init (X : Integer, Y : Integer, W : Integer, H : Integer,
+                      Order : Integer);
     begin
         if SdlWin = nil then raise 'Graph is not open.';
-        if AOrder = 0 then raise 'Order 0 is the screen''s.';
-        if AW < 1 or AH < 1 then raise 'ViewPort needs a positive size.';
+        if Order = 0 then raise 'Order 0 is the screen''s.';
+        if W < 1 or H < 1 then raise 'ViewPort needs a positive size.';
 
-        X := AX;
-        Y := AY;
-        W := AW;
-        H := AH;
+        // The parameters are named for the fields they fill, so the fields
+        // are reached through `this` and a caller may write
+        // `ViewPort (X: 10, Y: 10, ...)`.
+        this.X := X;
+        this.Y := Y;
+        this.W := W;
+        this.H := H;
 
-        Order  := AOrder;
+        this.Order := Order;
         Alpha  := 255;
         CurX   := 1;
         CurY   := 1;
@@ -1728,22 +1734,22 @@ begin
     /// # Raises
     /// `SetLineStyle wants a known style.` and `SetLineStyle needs a
     /// thickness of 1 or more.`
-    procedure SetLineStyle (AStyle : Integer, Pattern : Integer, Thickness : Integer);
+    procedure SetLineStyle (Style : Integer, Pattern : Integer, Thickness : Integer);
     begin
         Check ();
 
-        if AStyle < SolidLn or AStyle > UserBitLn then
+        if Style < SolidLn or Style > UserBitLn then
             raise 'SetLineStyle wants a known style.';
 
         if Thickness < 1 then raise 'SetLineStyle needs a thickness of 1 or more.';
 
-        Style := AStyle;
+        this.Style := Style;
         Thick := Thickness;
 
-        if AStyle = SolidLn then Bits := 65535;
-        else if AStyle = DottedLn then Bits := 52428;      // 1100110011001100
-        else if AStyle = CenterLn then Bits := 64632;      // 1111110001111000
-        else if AStyle = DashedLn then Bits := 61680;      // 1111000011110000
+        if Style = SolidLn then Bits := 65535;
+        else if Style = DottedLn then Bits := 52428;      // 1100110011001100
+        else if Style = CenterLn then Bits := 64632;      // 1111110001111000
+        else if Style = DashedLn then Bits := 61680;      // 1111000011110000
         else Bits := Pattern;
     end
 
@@ -1810,14 +1816,14 @@ begin
     ///
     /// Bresenham, in the viewport's own coordinates, clipped at its edges.
     /// The current style patterns it and the current thickness widens it.
-    procedure Line (AX1 : Integer, AY1 : Integer, AX2 : Integer, AY2 : Integer);
+    procedure Line (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
     begin
         Check ();
 
-        var X0 := AX1;
-        var Y0 := AY1;
-        var DX := AX2 - AX1;
-        var DY := AY2 - AY1;
+        var X0 := X1;
+        var Y0 := Y1;
+        var DX := X2 - X1;
+        var DY := Y2 - Y1;
 
         if DX < 0 then DX := 0 - DX;
         if DY < 0 then DY := 0 - DY;
@@ -1825,8 +1831,8 @@ begin
         var SX := -1;
         var SY := -1;
 
-        if AX1 < AX2 then SX := 1;
-        if AY1 < AY2 then SY := 1;
+        if X1 < X2 then SX := 1;
+        if Y1 < Y2 then SY := 1;
 
         // A steep line steps in Y and spreads its thickness in X.
         var Steep := DY > DX;
@@ -1845,10 +1851,10 @@ begin
 
             Tick := Tick + 1;
 
-            if X0 = AX2 then if Y0 = AY2 then
+            if X0 = X2 then if Y0 = Y2 then
             begin
-                PenX := AX2;
-                PenY := AY2;
+                PenX := X2;
+                PenY := Y2;
 
                 Present ();
 
@@ -1891,14 +1897,14 @@ begin
     ///
     /// Four lines in the current style and thickness; the pen ends where it
     /// began, which is what makes the four sides one figure.
-    procedure Rectangle (AX1 : Integer, AY1 : Integer, AX2 : Integer, AY2 : Integer);
+    procedure Rectangle (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
     begin
         Check ();
 
-        this.Line (AX1, AY1, AX2, AY1);
-        this.Line (AX2, AY1, AX2, AY2);
-        this.Line (AX2, AY2, AX1, AY2);
-        this.Line (AX1, AY2, AX1, AY1);
+        this.Line (X1, Y1, X2, Y1);
+        this.Line (X2, Y1, X2, Y2);
+        this.Line (X2, Y2, X1, Y2);
+        this.Line (X1, Y2, X1, Y1);
     end
 
     /// Sets the direction and size free text on this viewport is drawn in.
@@ -4327,6 +4333,41 @@ begin
 
     AssertTrue (Painted > 0);
     AssertTrue (Painted <= 60 * 40);
+
+    CloseGraph ();
+end
+
+/// The reference documents these parameter names, and Algol-24 has named
+/// arguments -- so a caller may write them, and they must be real.
+test 'The Documented Parameter Names Are The Real Ones';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'named', False);
+
+    var W := Window (X1: 4, Y1: 5, X2: 38, Y2: 20, Order: 1);
+
+    AssertEqual (4, W.X1);
+    AssertEqual (35, W.Cols);
+    AssertEqual (1, W.Order);
+
+    var V := ViewPort (X: 10, Y: 20, W: 100, H: 50, Order: 2);
+
+    AssertEqual (10, V.X);
+    AssertEqual (100, V.W);
+    AssertEqual (2, V.Order);
+
+    V.SetLineStyle (Style: DashedLn, Pattern: 0, Thickness: ThickWidth);
+
+    AssertEqual (DashedLn, V.Style);
+    AssertEqual (3, V.Thick);
+
+    V.Line (X1: 1, Y1: 1, X2: 20, Y2: 1);
+
+    AssertEqual (20, V.GetX ());
+
+    V.Rectangle (X1: 2, Y1: 2, X2: 8, Y2: 8);
+
+    AssertEqual (2, V.GetX ());
 
     CloseGraph ();
 end

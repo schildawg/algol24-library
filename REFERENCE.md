@@ -740,7 +740,7 @@ WriteLn (Frac (3.7));
 
 **Function**
 
-Returns the highest X a program can draw to — the window's width minus one.
+Returns the highest X a program can draw to — the window's width.
 
 **Declaration**
 
@@ -750,12 +750,14 @@ function GetMaxX () : Integer;
 
 **Remarks**
 
-The minus one is the point of the routine: `for var X := 0; X <= GetMaxX ();`
-visits every column exactly, which is the idiom drawing code is written in.
+The screen counts from 1, pixels and cells alike, so the count is the last
+index: `for var X := 1; X <= GetMaxX ();` visits every column with no minus
+one anywhere — the off-by-one Turbo Pascal's 0-based `GetMaxX` was famous for
+does not exist here.
 
 ⚠️ **The answer describes the window that actually opened**, not the request.
-Under a fullscreen [`InitGraph`](#initgraph) it is the desktop's width minus
-one, whatever size was asked for.
+Under a fullscreen [`InitGraph`](#initgraph) it is the desktop's width,
+whatever size was asked for.
 
 Raises `Graph is not open.` before `InitGraph` or after
 [`CloseGraph`](#closegraph), when there is no window to measure.
@@ -797,7 +799,7 @@ CloseGraph ();
 
 **Function**
 
-Returns the highest Y a program can draw to — the window's height minus one.
+Returns the highest Y a program can draw to — the window's height.
 
 **Declaration**
 
@@ -840,9 +842,12 @@ procedure GotoXY (Col : Integer, Row : Integer);
 
 **Remarks**
 
-⚠️ **Zero-based**: the top-left cell is `0, 0`, matching the language's
-strings and the window's pixels. Turbo Pascal counted from 1, and that habit
-is the one to unlearn here.
+⚠️ **One-based, storybook**: the top-left cell is `1, 1` and the bottom-right
+is `TextCols (), TextRows ()` — the count is the last index, and no cell
+coordinate ever carries a minus one. The whole screen counts from 1, pixels
+included, as Turbo Pascal's text mode and every terminal since have had it;
+the one seam is that a cursor column meets the language's 0-based strings as
+`Text[Col - 1]`.
 
 A position off the grid raises `GotoXY is off the grid.` rather than being
 clamped or ignored — the cursor is always somewhere real, and a wrong
@@ -1846,7 +1851,9 @@ Any codepoint the installed font carries will draw — see
 [`InstallUserFont`](#installuserfont) for what the shipped default covers.
 Emoji arrive in their own colors. A codepoint the font lacks advances a blank
 half-cell rather than raising, so a text with one exotic character still
-lands. Ink is white, until the unit grows a way to choose a color.
+lands. The ink is the background surface's white; a
+[`ViewPort`](#viewport)'s own free text takes the color its
+[`SetColor`](#line) was given.
 
 `WriteLn` cannot serve here, and it was tried: a unit-defined `WriteLn`
 **replaces** the built-in rather than overloading it, so a program using such
@@ -3284,7 +3291,8 @@ function WhereX () : Integer;
 
 **Remarks**
 
-Zero-based, like [`GotoXY`](#gotoxy), which shows it read back.
+One-based, like [`GotoXY`](#gotoxy), which shows it read back: 1 at the left
+edge, `TextCols ()` at the right.
 
 Raises `Graph is not open.` without a window.
 
@@ -3314,7 +3322,7 @@ function WhereY () : Integer;
 
 **Remarks**
 
-Zero-based. Everything said of [`WhereX`](#wherex) holds here.
+One-based. Everything said of [`WhereX`](#wherex) holds here.
 
 **See also**
 
