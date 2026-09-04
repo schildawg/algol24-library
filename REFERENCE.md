@@ -69,8 +69,10 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
 | [`Trunc`](#trunc) | function | `math` |
+| [`ViewPort`](#viewport) | class | `graph` |
 | [`WhereX`](#wherex) | function | `graph` |
 | [`WhereY`](#wherey) | function | `graph` |
+| [`Window`](#window) | class | `graph` |
 
 ---
 
@@ -2846,6 +2848,105 @@ Trunc of an infinity.
 
 ---
 
+## ViewPort
+
+*class* — unit `graph`
+
+**Function**
+
+A positioned, sized pixel surface with a place in the stack.
+
+**Declaration**
+
+```algol24
+constructor ViewPort (X : Integer, Y : Integer, W : Integer, H : Integer,
+                      Order : Integer);
+
+procedure MoveTo (PX : Integer, PY : Integer);
+procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
+procedure OutText (Text : String);
+procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
+procedure Show ();
+
+// readable, and the first four settable
+X, Y : Integer          the top-left pixel on screen
+Order : Integer         under the root grid when negative, over it when positive
+Alpha : Integer         0 invisible .. 255 opaque
+W, H : Integer          the size, fixed at creation
+```
+
+**Remarks**
+
+Turbo Pascal's `SetViewPort` named a clipped drawing region; this is that
+grown into an object. `X, Y` place it on screen in pixels, `W, H` size it,
+and `Order` stacks it — negative under the root grid, positive over it, and
+0 is refused because that is the root grid's own.
+
+⚠️ **Coordinates inside a viewport are local**, counting from 1: `1, 1` is
+*its* top-left corner, not the screen's. That is what makes the drawing
+portable — [`MoveTo`](#viewport) the viewport and everything on it moves,
+nothing redraws.
+
+⚠️ **Local is also the clip.** A pixel outside the viewport is discarded
+silently rather than raising, so a drawing cannot scribble on its neighbours
+and there is no clipping rectangle to maintain.
+
+Unpainted pixels are transparent, so a fresh viewport shows everything
+beneath it; `Alpha` ghosts the whole surface at once. Both `Alpha` and
+`Order` may be assigned after creation — reordering is bring-to-front.
+
+`OutTextXY` draws **free** text: a graphic that happens to be letters, with
+no cursor, no wrap, and no text verb that will ever erase it — see
+[`Print`](#print) for the celled kind. `OutText` draws at the viewport's own
+current position and advances it.
+
+Drawing does not appear until something presents; `Show` is that, and
+[`ReadKey`](#readkey) does it too while waiting.
+
+`CloseGraph` invalidates every surface: a method called afterward raises
+`CloseGraph has closed this surface.`
+
+Raises `Graph is not open.` without a window, `Order 0 is the screen's.`,
+and `ViewPort needs a positive size.`
+
+**See also**
+
+[`OutTextXY`](#outtextxy), [`ReadKey`](#readkey), [`Window`](#window)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'viewport', False);
+
+var Chart := ViewPort (100, 60, 200, 120, 2);
+
+Chart.PutPixel (1, 1, Yellow);
+Chart.PutPixel (200, 120, Yellow);
+Chart.PutPixel (201, 1, Red);
+Chart.OutTextXY (8, 8, 'a label');
+Chart.Show ();
+
+WriteLn (Chart.W);
+WriteLn (Chart.H);
+WriteLn (Chart.Order);
+
+Chart.Order := -1;
+WriteLn (Chart.Order);
+
+CloseGraph ();
+```
+
+```console
+200
+120
+2
+-1
+```
+
+---
+
 ## WhereX
 
 *function* — unit `graph`
@@ -2901,3 +3002,120 @@ Zero-based. Everything said of [`WhereX`](#wherex) holds here.
 **Example**
 
 See [`GotoXY`](#gotoxy) and [`PrintLn`](#println).
+
+---
+
+## Window
+
+*class* — unit `graph`
+
+**Function**
+
+A rectangle of text cells with a place in the stack.
+
+**Declaration**
+
+```algol24
+constructor Window (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
+                    Order : Integer);
+
+procedure MoveTo (Col : Integer, Row : Integer);
+procedure GotoXY (Col : Integer, Row : Integer);
+function  WhereX () : Integer;
+function  WhereY () : Integer;
+procedure TextColor (Color : Integer);
+procedure TextBackground (Color : Integer);
+procedure HighVideo ();
+procedure LowVideo ();
+procedure NormVideo ();
+procedure Print (Text : String);
+procedure PrintLn (Text : String);
+procedure ClrEol ();
+procedure ClrScr ();
+
+// readable, and Order and Alpha settable
+X1, Y1, X2, Y2 : Integer    the corner cells, inclusive
+Cols, Rows : Integer        the size in cells
+Order : Integer             under the root grid when negative, over it when positive
+Alpha : Integer             0 invisible .. 255 opaque
+```
+
+**Remarks**
+
+Turbo Pascal's `Window (X1, Y1, X2, Y2)` grown into an object. The corners
+are cells of the root grid's space, **inclusive and one-based**, so
+`Window (1, 1, 80, 25)` is the whole screen and `Window (10, 5, 49, 19)` is
+40 × 15 cells.
+
+⚠️ **A window is a terminal of its own.** It carries the whole text
+vocabulary as methods, each acting on its own cells: its own cursor
+(`1, 1` is *its* corner), its own ink and background, its own blink ink, and
+its own scrolling — `PrintLn` at the window's bottom row scrolls **that
+window's** cells and nothing else's. `ClrScr` clears it alone.
+
+That is the design's one rule, and where it pays: `B.ClrEol` erases B's
+prose and cannot touch a chart on another surface, however they overlap on
+screen.
+
+`Order` stacks it — negative under the root grid, positive over it, 0
+refused as the root grid's own — and ties stack by creation, earlier
+beneath later. Because text is a stackable surface, a window may sit **over**
+a graphic that is itself over other text, which no single text plane can
+express.
+
+`MoveTo` drags the window, keeping its size; any position is allowed, off
+the grid included, and what falls outside is clipped at present time.
+
+⚠️ **The wrap is deferred**, as text mode always had it: a line that exactly
+fills the last column leaves the cursor resting *on* that column with the
+wrap owed, and it happens only when another character arrives. Without this
+a window's own bottom border would scroll the window as it was drawn.
+[`GotoXY`](#window) and `ClrScr` cancel a wrap that is owed.
+
+An `InstallUserFont` of a different cell size rebuilds every live window at
+the same columns and rows — the cells come back empty.
+
+`CloseGraph` invalidates every surface: a method called afterward raises
+`CloseGraph has closed this surface.`
+
+Raises `Graph is not open.` without a window, `Order 0 is the screen's.`,
+and `Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.`
+
+**See also**
+
+[`Print`](#print), [`TextColor`](#textcolor), [`ViewPort`](#viewport)
+
+**Example**
+
+`examples/surfaces.a24` drags one window over another's chart; this shows
+that a window's cursor and the screen's are different things.
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'windows', False);
+
+var W := Window (10, 5, 49, 19, 1);
+
+W.TextBackground (Blue);
+W.ClrScr ();
+W.Print ('its own cursor and colors');
+
+WriteLn (W.Cols);
+WriteLn (W.Rows);
+WriteLn (W.WhereX ());
+WriteLn (WhereX ());
+
+W.MoveTo (2, 2);
+WriteLn (W.X2);
+
+CloseGraph ();
+```
+
+```console
+40
+15
+26
+1
+41
+```
