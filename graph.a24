@@ -63,6 +63,8 @@ function SDL_SetTextureBlendMode (Tex : Pointer, Mode : Integer) : Integer;
     external 'SDL_SetTextureBlendMode' in '/opt/homebrew/lib/libSDL2.dylib';
 function SDL_SetHint (Name : String, Value : String) : Integer;
     external 'SDL_SetHint' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_SetTextureAlphaMod (Tex : Pointer, Alpha : Integer) : Integer;
+    external 'SDL_SetTextureAlphaMod' in '/opt/homebrew/lib/libSDL2.dylib';
 function SDL_PollEvent (E : Pointer) : Integer;
     external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
 function SDL_PushEvent (E : Pointer) : Integer;
@@ -195,7 +197,7 @@ const White        := 16777215;
 // above it.
 
 var VideoReady   := False;
-var Window       := nil;
+var SdlWin       := nil;
 var Renderer     := nil;
 var Texture      := nil;
 var Pixels       := nil;
@@ -216,12 +218,17 @@ var CurrentY := 0;
 //
 // The cursor is in cells, 0-based like everything else in this language; the
 // colors are the grid's current ink and cell background.
-var TextPixels   := nil;
-var TextTexture  := nil;
-var BlinkPixels  := nil;
-var BlinkTexture := nil;
-var TextBlinking := False;
 var BlinkPhaseMs := 267;
+
+// The surface stack: every Window and ViewPort made since InitGraph, the
+// root grid included, composed in Order at present time. The root is the
+// screen-wide Window at Order 0, created lazily by the first text verb so a
+// purely graphical program never needs a font; the global text verbs are
+// its methods, by delegation.
+var Surfaces   := [];
+var Root       := nil;
+var NextSerial := 1;
+var DstRect    := nil;
 
 // The key queue: what PumpKeys has read from SDL and ReadKey has not yet
 // answered. A head index rather than a shifting list, cleared when drained.
@@ -248,12 +255,6 @@ var SpecialSyms := [1073741906 : KeyUp,     1073741905 : KeyDown,
                     13 : #13, 27 : #27, 8 : #8, 9 : #9, 1073741912 : #13];
 var GridCols    := 80;
 var GridRows    := 25;
-var GridW       := 0;
-var GridH       := 0;
-var CursorCol   := 1;
-var CursorRow   := 1;
-var TextInk     := 11184810;      // LightGray, the text-mode default
-var TextBack    := -1;            // Transparent
 
 // The intensity pairs of the CGA palette, both ways. Brown's partner is
 // Yellow rather than a brighter brown, because the original adapter's brown
@@ -306,20 +307,32 @@ begin
     SDL_RenderClear (Renderer);
     SDL_RenderCopy (Renderer, Texture, nil, nil);
 
-    // The grid is its own logical size; copying to a nil destination is what
-    // scales it to the window.
-    if TextTexture <> nil then
-    begin
-        SDL_UpdateTexture (TextTexture, nil, TextPixels.Address, GridW * 4);
-        SDL_RenderCopy (Renderer, TextTexture, nil, nil);
+    // The stack, in Order, ties by creation. The blink phase is one clock
+    // for every surface: 267ms each way by default, the language's own
+    // clock [RT-012] deciding, and whoever presents sees the right phase.
+    var Visible := Trunc (Clock () * 1000.0) div BlinkPhaseMs mod 2 = 0;
+    var LastO   := -1000000000;
+    var LastS   := -1;
 
-        // The blink layer shows in one phase and not the other. The clock
-        // is the language's own [RT-012]; whoever presents sees the right
-        // phase, so any drawing or an idle Print ('') keeps it beating.
-        if Trunc (Clock () * 1000.0) div BlinkPhaseMs mod 2 = 0 then
+    for var I := 0; I < Surfaces.Length; I := I + 1 do
+    begin
+        var Pick := nil;
+
+        for var S in Surfaces do
         begin
-            SDL_UpdateTexture (BlinkTexture, nil, BlinkPixels.Address, GridW * 4);
-            SDL_RenderCopy (Renderer, BlinkTexture, nil, nil);
+            if S.Order > LastO or (S.Order = LastO and S.Serial > LastS) then
+              if Pick = nil then Pick := S;
+              else if S.Order < Pick.Order
+                   or (S.Order = Pick.Order and S.Serial < Pick.Serial) then
+                  Pick := S;
+        end
+
+        if Pick <> nil then
+        begin
+            Pick.Blit (Visible);
+
+            LastO := Pick.Order;
+            LastS := Pick.Serial;
         end
     end
 
@@ -327,6 +340,38 @@ begin
     SDL_PumpEvents ();
 
     LastPresentMs := Trunc (Clock () * 1000.0);
+end
+
+/// The bright partner of a palette color, or the color itself.
+///
+/// Private to this unit; a function rather than a bare map read because a
+/// map answers Any, and a written-type field refuses Any [VAL-001] -- a
+/// declared return type is the laundering the checker accepts.
+function BrightOf (C : Integer) : Integer;
+begin
+    if C in BrightPartner then Exit BrightPartner[C];
+
+    Exit C;
+end
+
+/// The dim partner of a palette color, or the color itself.
+///
+/// Private to this unit, on BrightOf's reasoning.
+function DimOf (C : Integer) : Integer;
+begin
+    if C in DimPartner then Exit DimPartner[C];
+
+    Exit C;
+end
+
+/// The width of Code's glyph, or a blank half-cell for one the font lacks.
+///
+/// Private to this unit, typed for the same reason as BrightOf.
+function GlyphWidthOf (Code : Integer) : Integer;
+begin
+    if Code in FontWidths then Exit FontWidths[Code];
+
+    Exit FontHeight div 2;
 end
 
 /// The value of one hex digit; anything else is zero.
@@ -455,9 +500,12 @@ begin
 
     FontLoaded := True;
 
-    // A new font means a new cell size, so a live grid is rebuilt -- empty,
-    // at the same logical columns and rows -- by the next stamping verb.
-    if Window <> nil then DropGrid ();
+    // A new font means a new cell size, so every live Window rebuilds its
+    // buffers -- empty, at the same columns and rows. ViewPorts are pixels
+    // and unaffected.
+    if SdlWin <> nil then
+        for var S in Surfaces do
+            if S is Window then S.Rebuild ();
 end
 
 /// Loads the default font the first time text draws.
@@ -473,77 +521,6 @@ begin
         raise 'No font is installed: ''graphfont.hex'' is not in the working '
             + 'directory, and InstallUserFont has not named another.';
     end
-end
-
-/// Allocates the grid's framebuffer and texture on first need.
-///
-/// Private to this unit. The grid's pixel size is its logical size -- cells
-/// times the font's cell -- and never the window's; the GPU scales it at
-/// present time. Dropping the buffer to nil is how TextMode and a font
-/// change ask for it to be rebuilt.
-procedure EnsureGrid ();
-begin
-    EnsureFont ();
-
-    if TextPixels <> nil then Exit;
-
-    GridW := GridCols * CellWidth ();
-    GridH := GridRows * FontHeight;
-
-    TextTexture := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
-                                      GridW, GridH);
-
-    if TextTexture = nil then raise 'Graph: ' + SDL_GetError ();
-
-    SDL_SetTextureBlendMode (TextTexture, BLENDMODE_BLEND);
-
-    TextPixels := Buffer (GridW * GridH * 4);
-
-    // The blink layer: the ink of blinking cells only, shown and hidden by
-    // Present on the clock. Their backgrounds stay in the text layer, which
-    // is why only the letters vanish, as the adapter had it.
-    BlinkTexture := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
-                                       GridW, GridH);
-
-    if BlinkTexture = nil then raise 'Graph: ' + SDL_GetError ();
-
-    SDL_SetTextureBlendMode (BlinkTexture, BLENDMODE_BLEND);
-
-    BlinkPixels := Buffer (GridW * GridH * 4);
-
-    StampTarget (TextPixels.Address, GridW, GridH);
-end
-
-/// Aims the stamper at the blink layer; AimText undoes it.
-///
-/// Private to this unit. The stamper's target is one piece of C state, so
-/// every excursion to the blink layer ends by aiming back.
-procedure AimBlink ();
-begin
-    StampTarget (BlinkPixels.Address, GridW, GridH);
-end
-
-/// Aims the stamper back at the text layer.
-///
-/// Private to this unit.
-procedure AimText ();
-begin
-    StampTarget (TextPixels.Address, GridW, GridH);
-end
-
-/// Drops the grid's buffer so the next stamping verb rebuilds it.
-///
-/// Private to this unit; the grid comes back empty, which is what both a
-/// mode change and a font change mean for stamped pixels.
-procedure DropGrid ();
-begin
-    if TextTexture <> nil then SDL_DestroyTexture (TextTexture);
-    if BlinkTexture <> nil then SDL_DestroyTexture (BlinkTexture);
-
-    TextTexture  := nil;
-    TextPixels   := nil;
-    BlinkTexture := nil;
-    BlinkPixels  := nil;
 end
 
 /// Mixes Ink into the ground at a coverage of 0 .. 255, channel by channel.
@@ -678,10 +655,10 @@ end
 /// and the message SDL gives when the window or its renderer cannot be made.
 ///
 /// # Examples
-/// `InitGraph Opens A Window Of The Size Asked For`
+/// `InitGraph Opens A SdlWin Of The Size Asked For`
 procedure InitGraph (Width : Integer, Height : Integer, Title : String, Fullscreen : Boolean);
 begin
-    if Window <> nil then raise 'Graph is already open.';
+    if SdlWin <> nil then raise 'Graph is already open.';
     if Width <= 0 or Height <= 0 then raise 'InitGraph needs a positive size.';
 
     EnsureVideo ();
@@ -690,19 +667,19 @@ begin
 
     if Fullscreen then Flags := WINDOW_SHOWN + WINDOW_FULLSCREEN_DESKTOP;
 
-    Window := SDL_CreateWindow (Title, WINDOWPOS_CENTERED, WINDOWPOS_CENTERED,
+    SdlWin := SDL_CreateWindow (Title, WINDOWPOS_CENTERED, WINDOWPOS_CENTERED,
                                 Width, Height, Flags);
 
-    if Window = nil then raise 'InitGraph: ' + SDL_GetError ();
+    if SdlWin = nil then raise 'InitGraph: ' + SDL_GetError ();
 
-    Renderer := SDL_CreateRenderer (Window, -1, 0);
+    Renderer := SDL_CreateRenderer (SdlWin, -1, 0);
 
     if Renderer = nil then
     begin
         var Message := SDL_GetError ();
 
-        SDL_DestroyWindow (Window);
-        Window := nil;
+        SDL_DestroyWindow (SdlWin);
+        SdlWin := nil;
 
         raise 'InitGraph: ' + Message;
     end
@@ -713,7 +690,7 @@ begin
     var W := Buffer (4);
     var H := Buffer (4);
 
-    SDL_GetWindowSize (Window, W.Address, H.Address);
+    SDL_GetWindowSize (SdlWin, W.Address, H.Address);
 
     WindowWidth  := W.GetInt (0);
     WindowHeight := H.GetInt (0);
@@ -738,16 +715,12 @@ begin
     CurrentY  := 1;
     GridCols  := 80;
     GridRows  := 25;
-    CursorCol := 0;
-    CursorRow := 0;
-    TextInk   := LightGray;
-    TextBack  := Transparent;
-    TextBlinking := False;
     BlinkPhaseMs := 267;
-    KeyQueue  := [];
-    KeyHead   := 0;
-    CursorCol := 1;
-    CursorRow := 1;
+    KeyQueue   := [];
+    KeyHead    := 0;
+    Surfaces   := [];
+    Root       := nil;
+    NextSerial := 1;
 
     SDL_StartTextInput ();
 
@@ -763,23 +736,27 @@ end
 /// is released.
 ///
 /// # Examples
-/// `CloseGraph Does Nothing When The Window Is Not Open`
+/// `CloseGraph Does Nothing When The SdlWin Is Not Open`
 procedure CloseGraph ();
 begin
-    if Window = nil then Exit;
+    if SdlWin = nil then Exit;
 
     if Texture <> nil then SDL_DestroyTexture (Texture);
-    if TextTexture <> nil then SDL_DestroyTexture (TextTexture);
+
+    // Every surface dies with the window it was made in.
+    for var S in Surfaces do
+        S.Discard ();
+
+    Surfaces := [];
+    Root     := nil;
 
     SDL_DestroyRenderer (Renderer);
-    SDL_DestroyWindow (Window);
+    SDL_DestroyWindow (SdlWin);
 
     Texture      := nil;
     Pixels       := nil;
-    TextTexture  := nil;
-    TextPixels   := nil;
     Renderer     := nil;
-    Window       := nil;
+    SdlWin       := nil;
     WindowWidth  := 0;
     WindowHeight := 0;
     CurrentX     := 1;
@@ -801,10 +778,10 @@ end
 /// no window to measure.
 ///
 /// # Examples
-/// `InitGraph Opens A Window Of The Size Asked For`
+/// `InitGraph Opens A SdlWin Of The Size Asked For`
 function GetMaxX () : Integer;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     Exit WindowWidth;
 end
@@ -817,10 +794,10 @@ end
 /// `Graph is not open.` before `InitGraph` or after `CloseGraph`.
 ///
 /// # Examples
-/// `InitGraph Opens A Window Of The Size Asked For`
+/// `InitGraph Opens A SdlWin Of The Size Asked For`
 function GetMaxY () : Integer;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     Exit WindowHeight;
 end
@@ -835,7 +812,7 @@ end
 /// The message SDL gives when the desktop cannot be asked.
 ///
 /// # Examples
-/// `ScreenWidth And ScreenHeight Answer Before A Window Opens`
+/// `ScreenWidth And ScreenHeight Answer Before A SdlWin Opens`
 function ScreenWidth () : Integer;
 begin
     EnsureVideo ();
@@ -857,7 +834,7 @@ end
 /// The message SDL gives when the desktop cannot be asked.
 ///
 /// # Examples
-/// `ScreenWidth And ScreenHeight Answer Before A Window Opens`
+/// `ScreenWidth And ScreenHeight Answer Before A SdlWin Opens`
 function ScreenHeight () : Integer;
 begin
     EnsureVideo ();
@@ -888,7 +865,7 @@ end
 /// `OutText Advances The Current Position By The Text's Width`
 procedure OutText (Text : String);
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     EnsureFont ();
 
@@ -913,7 +890,7 @@ end
 /// `OutTextXY Draws Where It Is Told And Leaves The Position Alone`
 procedure OutTextXY (X : Integer, Y : Integer, Text : String);
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     EnsureFont ();
 
@@ -1040,7 +1017,7 @@ end
 /// `KeyPressed Sees A Key Without Consuming It`
 function KeyPressed () : Boolean;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     PumpKeys ();
     PresentIfDue ();
@@ -1069,7 +1046,7 @@ end
 /// `ReadKey Answers Keys In The Order They Arrived`
 function ReadKey () : Char;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     while True do
     begin
@@ -1106,6 +1083,616 @@ begin
     Exit FontHeight div 2;
 end
 
+// --------------------------------------------------------------- surfaces --
+
+/// A rectangle of text cells with a place in the stack: Turbo Pascal's
+/// `Window (X1, Y1, X2, Y2)` grown into a class.
+///
+/// A Window carries the whole text vocabulary as methods, with its own
+/// cursor, its own colors, its own blink ink and its own scrolling -- its
+/// `PrintLn` at its own bottom row scrolls its cells and nothing else's. It
+/// is placed in the root grid's cell space, inclusive and one-based, and
+/// stacks by `Order`: negative under the root grid, positive over it, ties
+/// by creation. `Order` and `Alpha` may be assigned after creation;
+/// `MoveTo` drags it. `CloseGraph` invalidates it.
+class Window;
+var
+    X1     : Integer;
+    Y1     : Integer;
+    X2     : Integer;
+    Y2     : Integer;
+    Cols   : Integer;
+    Rows   : Integer;
+    PxW    : Integer;
+    PxH    : Integer;
+    Buf    : Any;
+    Tex    : Any;
+    BBuf   : Any;
+    BTex   : Any;
+    CurCol : Integer;
+    CurRow : Integer;
+    Pending : Boolean;
+    Ink    : Integer;
+    Back   : Integer;
+    Blinking : Boolean;
+    Order  : Integer;
+    Alpha  : Integer;
+    Serial : Integer;
+    Dead   : Boolean;
+
+begin
+    constructor Init (AX1 : Integer, AY1 : Integer, AX2 : Integer, AY2 : Integer,
+                      AOrder : Integer);
+    begin
+        if SdlWin = nil then raise 'Graph is not open.';
+        if AOrder = 0 then raise 'Order 0 is the screen''s.';
+        if AX1 < 1 or AY1 < 1 or AX2 < AX1 or AY2 < AY1 then
+            raise 'Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.';
+
+        EnsureFont ();
+
+        X1 := AX1;
+        Y1 := AY1;
+        X2 := AX2;
+        Y2 := AY2;
+        Cols := AX2 - AX1 + 1;
+        Rows := AY2 - AY1 + 1;
+
+        Order    := AOrder;
+        Alpha    := 255;
+        Ink      := LightGray;
+        Back     := Transparent;
+        Blinking := False;
+        CurCol   := 1;
+        CurRow   := 1;
+        Pending  := False;
+        Dead     := False;
+        Serial   := NextSerial;
+
+        NextSerial := NextSerial + 1;
+
+        Rebuild ();
+        Surfaces.Add (this);
+    end
+
+    /// Raises when CloseGraph has taken the surface's window away.
+    procedure Check ();
+    begin
+        if Dead then raise 'CloseGraph has closed this surface.';
+    end
+
+    /// Allocates the pixel buffers and textures from the current font.
+    ///
+    /// Called at birth and by a font change, which changes the cell size; the
+    /// cells come back empty and the cursor homes.
+    procedure Rebuild ();
+    begin
+        if Tex <> nil then SDL_DestroyTexture (Tex);
+        if BTex <> nil then SDL_DestroyTexture (BTex);
+
+        PxW := Cols * CellWidth ();
+        PxH := Rows * FontHeight;
+
+        Tex := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
+                                  PxW, PxH);
+        BTex := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
+                                   PxW, PxH);
+
+        if Tex = nil then raise 'Graph: ' + SDL_GetError ();
+        if BTex = nil then raise 'Graph: ' + SDL_GetError ();
+
+        SDL_SetTextureBlendMode (Tex, BLENDMODE_BLEND);
+        SDL_SetTextureBlendMode (BTex, BLENDMODE_BLEND);
+
+        Buf  := Buffer (PxW * PxH * 4);
+        BBuf := Buffer (PxW * PxH * 4);
+
+        CurCol  := 1;
+        CurRow  := 1;
+        Pending := False;
+    end
+
+    /// Releases the textures; the surface is dead thereafter.
+    procedure Discard ();
+    begin
+        if Tex <> nil then SDL_DestroyTexture (Tex);
+        if BTex <> nil then SDL_DestroyTexture (BTex);
+
+        Tex  := nil;
+        BTex := nil;
+        Dead := True;
+    end
+
+    /// Moves the window so its top-left cell is Col, Row, size kept.
+    ///
+    /// Any position is allowed, off the grid included -- a window may be
+    /// dragged partly or wholly out of view, and what falls outside is
+    /// clipped at present time.
+    procedure MoveTo (Col : Integer, Row : Integer);
+    begin
+        Check ();
+
+        X2 := Col + Cols - 1;
+        Y2 := Row + Rows - 1;
+        X1 := Col;
+        Y1 := Row;
+    end
+
+    /// Moves this window's cursor, one-based within its own cells.
+    procedure GotoXY (Col : Integer, Row : Integer);
+    begin
+        Check ();
+
+        if Col < 1 or Row < 1 or Col > Cols or Row > Rows then
+            raise 'GotoXY is off the grid.';
+
+        CurCol  := Col;
+        CurRow  := Row;
+        Pending := False;
+    end
+
+    /// This window's cursor column, counting from 1.
+    function WhereX () : Integer;
+    begin
+        Check ();
+
+        Exit CurCol;
+    end
+
+    /// This window's cursor row, counting from 1.
+    function WhereY () : Integer;
+    begin
+        Check ();
+
+        Exit CurRow;
+    end
+
+    /// Sets this window's ink; `+ Blink` makes it blink.
+    procedure TextColor (Color : Integer);
+    begin
+        Check ();
+
+        if Color < 0 then raise 'TextColor cannot be transparent.';
+
+        Blinking := Color >= Blink;
+
+        if Blinking then Color := Color - Blink;
+
+        if Color > 16777215 then raise 'TextColor wants an RGB color, plus Blink at most.';
+
+        Ink := Color;
+    end
+
+    /// Sets this window's cell background; Transparent shows what is below.
+    procedure TextBackground (Color : Integer);
+    begin
+        Check ();
+
+        if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
+
+        Back := Color;
+    end
+
+    /// Brightens this window's ink, as the intensity bit did.
+    procedure HighVideo ();
+    begin
+        Check ();
+
+        if Ink in BrightPartner then Ink := BrightOf (Ink);
+        else if Ink in DimPartner then Exit;
+        else Ink := (Ink div 65536 + (255 - Ink div 65536) div 2) * 65536
+                  + (Ink div 256 mod 256 + (255 - Ink div 256 mod 256) div 2) * 256
+                  + (Ink mod 256 + (255 - Ink mod 256) div 2);
+    end
+
+    /// Dims this window's ink, the mirror of HighVideo.
+    procedure LowVideo ();
+    begin
+        Check ();
+
+        if Ink in DimPartner then Ink := DimOf (Ink);
+        else if Ink in BrightPartner then Exit;
+        else Ink := (Ink div 65536 div 2) * 65536
+                  + (Ink div 256 mod 256 div 2) * 256
+                  + (Ink mod 256 div 2);
+    end
+
+    /// Restores this window's startup colors: LightGray on Transparent.
+    procedure NormVideo ();
+    begin
+        Check ();
+
+        Ink      := LightGray;
+        Back     := Transparent;
+        Blinking := False;
+    end
+
+    /// The newline both PrintLn and a #10 spell: column 1, next row,
+    /// scrolling THIS window's cells at its bottom.
+    procedure NewLine ();
+    begin
+        CurCol  := 1;
+        Pending := False;
+
+        if CurRow < Rows then
+        begin
+            CurRow := CurRow + 1;
+
+            Exit;
+        end
+
+        var Fill := 0;
+
+        if Back >= 0 then Fill := Back - 16777216;
+
+        StampTarget (Buf.Address, PxW, PxH);
+        ScrollTarget (FontHeight, Fill);
+        StampTarget (BBuf.Address, PxW, PxH);
+        ScrollTarget (FontHeight, 0);
+    end
+
+    /// Stamps one codepoint at this window's cursor and advances it.
+    procedure StampAt (Code : Integer);
+    begin
+        // A wrap left pending by the previous character happens now, rather
+        // than when that character filled the last cell. Text mode always
+        // deferred it, and the difference is not cosmetic: a line that
+        // exactly fills the bottom row -- a window's lower border, say --
+        // would otherwise scroll the window the instant it was drawn.
+        if Pending then
+        begin
+            NewLine ();
+
+            Pending := False;
+        end
+
+        var Wide  := CellWidth ();
+        var Mode  := 1;
+        var Words := nil;
+
+        if Code in FontGlyphs then
+        begin
+            Words := FontGlyphs[Code];
+            Wide  := FontWidths[Code];
+
+            if Code in FontPictures then Mode := 2;
+            if not FontGrey then if not (Code in FontPictures) then Mode := 0;
+        end
+
+        var Cells := Wide div CellWidth ();
+
+        if Cells < 1 then Cells := 1;
+        if CurCol + Cells - 1 > Cols then NewLine ();
+
+        var CellX := (CurCol - 1) * CellWidth ();
+        var CellY := (CurRow - 1) * FontHeight;
+
+        // Blinking ink goes to the blink buffer, its background to the text
+        // buffer; a steady stamp clears the blink beneath it.
+        if Blinking then
+        begin
+            StampTarget (Buf.Address, PxW, PxH);
+            StampCell (CellX, CellY, nil, Wide, FontHeight, 1, Ink, Back);
+            StampTarget (BBuf.Address, PxW, PxH);
+
+            if Words = nil then StampCell (CellX, CellY, nil, Wide, FontHeight, 1, Ink, Transparent);
+            else StampCell (CellX, CellY, Words.Address, Wide, FontHeight, Mode, Ink, Transparent);
+        end
+        else
+        begin
+            StampTarget (Buf.Address, PxW, PxH);
+
+            if Words = nil then
+                StampCell (CellX, CellY, nil, Wide, FontHeight, 1, Ink, Back);
+            else
+                StampCell (CellX, CellY, Words.Address, Wide, FontHeight, Mode, Ink, Back);
+
+            StampTarget (BBuf.Address, PxW, PxH);
+            StampCell (CellX, CellY, nil, Wide, FontHeight, 1, Ink, Transparent);
+        end
+
+        CurCol := CurCol + Cells;
+
+        // Past the last column the cursor rests ON the last column with the
+        // wrap owed, so WhereX never answers a cell that does not exist.
+        if CurCol > Cols then
+        begin
+            CurCol  := Cols;
+            Pending := True;
+        end
+    end
+
+    /// Writes Text at this window's cursor, in its colors, advancing it.
+    ///
+    /// Wraps at the window's own last column and scrolls its own cells at
+    /// its bottom row; a #10 starts a new row. Everything the screen-wide
+    /// Print does, within these walls.
+    procedure Print (Text : String);
+    begin
+        Check ();
+
+        for var I := 0; I < Length (Text); I := I + 1 do
+        begin
+            if Text[I] = #10 then NewLine ();
+            else StampAt (Ord (Text[I]));
+        end
+
+        Present ();
+    end
+
+    /// Writes Text and moves to the start of this window's next row.
+    procedure PrintLn (Text : String);
+    begin
+        Print (Text);
+        NewLine ();
+        Present ();
+    end
+
+    /// Clears this window from its cursor to the end of its row.
+    procedure ClrEol ();
+    begin
+        Check ();
+
+        StampTarget (Buf.Address, PxW, PxH);
+
+        for var Col := CurCol; Col <= Cols; Col := Col + 1 do
+            StampCell ((Col - 1) * CellWidth (), (CurRow - 1) * FontHeight, nil,
+                       CellWidth (), FontHeight, 1, Ink, Back);
+
+        StampTarget (BBuf.Address, PxW, PxH);
+
+        for var Col := CurCol; Col <= Cols; Col := Col + 1 do
+            StampCell ((Col - 1) * CellWidth (), (CurRow - 1) * FontHeight, nil,
+                       CellWidth (), FontHeight, 1, Ink, Transparent);
+
+        Present ();
+    end
+
+    /// Clears all this window's cells to its background and homes its cursor.
+    procedure ClrScr ();
+    begin
+        Check ();
+
+        StampTarget (Buf.Address, PxW, PxH);
+
+        for var Row := 0; Row < Rows; Row := Row + 1 do
+            for var Col := 0; Col < Cols; Col := Col + 1 do
+                StampCell (Col * CellWidth (), Row * FontHeight, nil,
+                           CellWidth (), FontHeight, 1, Ink, Back);
+
+        StampTarget (BBuf.Address, PxW, PxH);
+
+        for var Row := 0; Row < Rows; Row := Row + 1 do
+            for var Col := 0; Col < Cols; Col := Col + 1 do
+                StampCell (Col * CellWidth (), Row * FontHeight, nil,
+                           CellWidth (), FontHeight, 1, Ink, Transparent);
+
+        CurCol  := 1;
+        CurRow  := 1;
+        Pending := False;
+
+        Present ();
+    end
+
+    /// Draws this window into the frame: present-time only.
+    ///
+    /// The window lives in the root grid's cell space, so its place on
+    /// screen is that space scaled to the physical window.
+    procedure Blit (BlinkVisible : Boolean);
+    begin
+        if Dead then Exit;
+
+        var LogW := GridCols * CellWidth ();
+        var LogH := GridRows * FontHeight;
+
+        if DstRect = nil then DstRect := Buffer (16);
+
+        DstRect.PutInt (0,  (X1 - 1) * CellWidth () * WindowWidth div LogW);
+        DstRect.PutInt (4,  (Y1 - 1) * FontHeight * WindowHeight div LogH);
+        DstRect.PutInt (8,  PxW * WindowWidth div LogW);
+        DstRect.PutInt (12, PxH * WindowHeight div LogH);
+
+        SDL_UpdateTexture (Tex, nil, Buf.Address, PxW * 4);
+        SDL_SetTextureAlphaMod (Tex, Alpha);
+        SDL_RenderCopy (Renderer, Tex, nil, DstRect.Address);
+
+        if BlinkVisible then
+        begin
+            SDL_UpdateTexture (BTex, nil, BBuf.Address, PxW * 4);
+            SDL_SetTextureAlphaMod (BTex, Alpha);
+            SDL_RenderCopy (Renderer, BTex, nil, DstRect.Address);
+        end
+    end
+end
+
+/// A positioned, sized pixel surface with a place in the stack.
+///
+/// What DESIGN.md first called Canvas, under the Turbo Pascal name for a
+/// clipped drawing region. Local coordinates count from 1 and are the clip;
+/// unpainted pixels are transparent; `Order` stacks it under or over the
+/// text, `Alpha` ghosts the whole surface, and both may be assigned after
+/// creation. `MoveTo` drags it. `CloseGraph` invalidates it.
+class ViewPort;
+var
+    X      : Integer;
+    Y      : Integer;
+    W      : Integer;
+    H      : Integer;
+    Buf    : Any;
+    Tex    : Any;
+    CurX   : Integer;
+    CurY   : Integer;
+    Order  : Integer;
+    Alpha  : Integer;
+    Serial : Integer;
+    Dead   : Boolean;
+
+begin
+    constructor Init (AX : Integer, AY : Integer, AW : Integer, AH : Integer,
+                      AOrder : Integer);
+    begin
+        if SdlWin = nil then raise 'Graph is not open.';
+        if AOrder = 0 then raise 'Order 0 is the screen''s.';
+        if AW < 1 or AH < 1 then raise 'ViewPort needs a positive size.';
+
+        X := AX;
+        Y := AY;
+        W := AW;
+        H := AH;
+
+        Order  := AOrder;
+        Alpha  := 255;
+        CurX   := 1;
+        CurY   := 1;
+        Serial := NextSerial;
+        Dead   := False;
+
+        NextSerial := NextSerial + 1;
+
+        Tex := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING, W, H);
+
+        if Tex = nil then raise 'Graph: ' + SDL_GetError ();
+
+        SDL_SetTextureBlendMode (Tex, BLENDMODE_BLEND);
+
+        Buf := Buffer (W * H * 4);
+
+        Surfaces.Add (this);
+    end
+
+    /// Raises when CloseGraph has taken the surface's window away.
+    procedure Check ();
+    begin
+        if Dead then raise 'CloseGraph has closed this surface.';
+    end
+
+    /// Releases the texture; the surface is dead thereafter.
+    procedure Discard ();
+    begin
+        if Tex <> nil then SDL_DestroyTexture (Tex);
+
+        Tex  := nil;
+        Dead := True;
+    end
+
+    /// Moves the viewport so its top-left pixel is at PX, PY on screen.
+    procedure MoveTo (PX : Integer, PY : Integer);
+    begin
+        Check ();
+
+        X := PX;
+        Y := PY;
+    end
+
+    /// Paints one pixel of this viewport, in local coordinates from 1.
+    ///
+    /// A position off the viewport is clipped silently -- the edge is the
+    /// clip, as a canvas's edge always is here.
+    procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
+    begin
+        Check ();
+
+        if PX >= 1 then
+          if PY >= 1 then
+            if PX <= W then
+              if PY <= H then
+                  Buf.PutInt (((PY - 1) * W + (PX - 1)) * 4, Color - 16777216);
+    end
+
+    /// Draws free text with its top-left at local PX, PY; the ink is white.
+    ///
+    /// This is a graphic that happens to be letters: no cursor, no wrap, no
+    /// text verb will ever erase it. Present it with `Show`.
+    procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
+    begin
+        Check ();
+        EnsureFont ();
+        StampTarget (Buf.Address, W, H);
+
+        var At := PX - 1;
+
+        for var I := 0; I < Length (Text); I := I + 1 do
+        begin
+            var Code  := Ord (Text[I]);
+            var Wide  := FontHeight div 2;
+            var Mode  := 1;
+            var Words := nil;
+
+            if Code in FontGlyphs then
+            begin
+                Words := FontGlyphs[Code];
+                Wide  := FontWidths[Code];
+
+                if Code in FontPictures then Mode := 2;
+                if not FontGrey then if not (Code in FontPictures) then Mode := 0;
+            end
+
+            if Words <> nil then
+                StampCell (At, PY - 1, Words.Address, Wide, FontHeight, Mode,
+                           16777215, Transparent);
+
+            At := At + Wide;
+        end
+
+        Present ();
+    end
+
+    /// Draws free text at this viewport's current position, advancing it.
+    procedure OutText (Text : String);
+    begin
+        Check ();
+
+        // `this`, because the unqualified name would find the global
+        // OutTextXY -- which draws on the background, not on this surface.
+        this.OutTextXY (CurX, CurY, Text);
+
+        for var I := 0; I < Length (Text); I := I + 1 do
+            CurX := CurX + GlyphWidthOf (Ord (Text[I]));
+    end
+
+    /// Pushes the pixels to the screen.
+    procedure Show ();
+    begin
+        Check ();
+        Present ();
+    end
+
+    /// Draws this viewport into the frame: present-time only.
+    procedure Blit (BlinkVisible : Boolean);
+    begin
+        if Dead then Exit;
+
+        if DstRect = nil then DstRect := Buffer (16);
+
+        DstRect.PutInt (0, X - 1);
+        DstRect.PutInt (4, Y - 1);
+        DstRect.PutInt (8, W);
+        DstRect.PutInt (12, H);
+
+        SDL_UpdateTexture (Tex, nil, Buf.Address, W * 4);
+        SDL_SetTextureAlphaMod (Tex, Alpha);
+        SDL_RenderCopy (Renderer, Tex, nil, DstRect.Address);
+    end
+end
+
+/// Builds the root Window -- the screen-wide grid at Order 0 -- on the
+/// first text verb, so a purely graphical program never loads a font.
+///
+/// Private to this unit.
+procedure EnsureRoot ();
+begin
+    if Root <> nil then Exit;
+
+    Root := Window (1, 1, GridCols, GridRows, 1);
+    Root.Order := 0;
+end
+
+// -------------------------------------------------- the global text verbs --
+//
+// The words programs already use, kept as the root Window's methods: the
+// screen-wide grid is the bottom surface, and writing to "the screen" is
+// writing to it.
+
 /// The grid's width in cells: 80 until `TextMode` says otherwise.
 ///
 /// The grid is logical, not a division of the window -- an 80 by 25 screen
@@ -1119,7 +1706,7 @@ end
 /// `The Grid Is Eighty By Twenty Five Whatever The Window`
 function TextCols () : Integer;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     Exit GridCols;
 end
@@ -1133,7 +1720,7 @@ end
 /// `The Grid Is Eighty By Twenty Five Whatever The Window`
 function TextRows () : Integer;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
     Exit GridRows;
 end
@@ -1143,13 +1730,9 @@ end
 /// The screen clears, the cursor homes, and the colors return to their
 /// defaults, which is what Turbo Pascal's `TextMode` did. Its argument was a
 /// video-card mode -- CO80, CO40, Font8x8 -- because the grid was a register
-/// setting; here the grid is logical and any pair will do, so the two
-/// classics are `TextMode (80, 25)` and `TextMode (40, 25)` and nothing
-/// stops `TextMode (132, 50)`.
-///
-/// The window does not change size or aspect: the grid is scaled to it. An
-/// 80 by 25 grid shown in a 4:3 window has cells displayed 1:2.4, which is
-/// exactly how a real VGA text mode looked on a 4:3 tube.
+/// setting; here the grid is logical and any pair will do. Other surfaces
+/// survive a mode change; they live in the cell space it defines and scale
+/// with it.
 ///
 /// # Raises
 /// `Graph is not open.` without a window, and `TextMode needs a positive
@@ -1159,29 +1742,34 @@ end
 /// `TextMode Chooses The Grid`
 procedure TextMode (Cols : Integer, Rows : Integer);
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
     if Cols <= 0 or Rows <= 0 then raise 'TextMode needs a positive grid.';
 
-    GridCols     := Cols;
-    GridRows     := Rows;
-    CursorCol    := 1;
-    CursorRow    := 1;
-    TextInk      := LightGray;
-    TextBack     := Transparent;
-    TextBlinking := False;
+    GridCols := Cols;
+    GridRows := Rows;
 
-    DropGrid ();
+    if Root <> nil then
+    begin
+        Root.Discard ();
+
+        var Kept := [];
+
+        for var S in Surfaces do
+            if S.Serial <> Root.Serial then Kept.Add (S);
+
+        Surfaces := Kept;
+        Root     := nil;
+    end
+
     Present ();
 end
 
-/// Moves the cursor to column Col, row Row.
+/// Moves the screen's cursor to column Col, row Row.
 ///
 /// One-based, as Turbo Pascal and every terminal since have had it: the
 /// top-left cell is 1, 1 and the bottom-right is `TextCols (), TextRows ()`
 /// -- the count is the last index, and no cell coordinate ever carries a
-/// minus one. The celled world counts from 1 and the pixel world from 0,
-/// which is the split the era's machines and today's terminals both chose;
-/// the one seam is that a cursor column meets a string index as
+/// minus one. The one seam with the language's 0-based strings is
 /// `Text[Col - 1]`.
 ///
 /// # Raises
@@ -1192,16 +1780,13 @@ end
 /// `GotoXY Places The Cursor And WhereX Reads It Back`
 procedure GotoXY (Col : Integer, Row : Integer);
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    if Col < 1 or Row < 1 or Col > TextCols () or Row > TextRows () then
-        raise 'GotoXY is off the grid.';
-
-    CursorCol := Col;
-    CursorRow := Row;
+    EnsureRoot ();
+    Root.GotoXY (Col, Row);
 end
 
-/// The cursor's column, counting from 1.
+/// The screen cursor's column, counting from 1.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
@@ -1210,12 +1795,14 @@ end
 /// `GotoXY Places The Cursor And WhereX Reads It Back`
 function WhereX () : Integer;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    Exit CursorCol;
+    EnsureRoot ();
+
+    Exit Root.WhereX ();
 end
 
-/// The cursor's row, counting from 1.
+/// The screen cursor's row, counting from 1.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
@@ -1224,64 +1811,50 @@ end
 /// `GotoXY Places The Cursor And WhereX Reads It Back`
 function WhereY () : Integer;
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    Exit CursorRow;
+    EnsureRoot ();
+
+    Exit Root.WhereY ();
 end
 
-/// Sets the ink celled text draws with.
-///
-/// Any RGB Integer; the sixteen CGA constants are the classic vocabulary.
-/// The default is LightGray, which is what a text mode woke up in.
+/// Sets the screen's ink; `+ Blink` makes it blink.
 ///
 /// # Raises
-/// `TextColor cannot be transparent.` -- ink is the one thing a cell always
-/// has.
+/// `Graph is not open.`; `TextColor cannot be transparent.`; and `TextColor
+/// wants an RGB color, plus Blink at most.` past the flag.
 ///
 /// # Examples
 /// `TextColor And TextBackground Color The Cell`
 procedure TextColor (Color : Integer);
 begin
-    if Color < 0 then raise 'TextColor cannot be transparent.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    TextBlinking := Color >= Blink;
-
-    if TextBlinking then Color := Color - Blink;
-
-    if Color > 16777215 then raise 'TextColor wants an RGB color, plus Blink at most.';
-
-    TextInk := Color;
+    EnsureRoot ();
+    Root.TextColor (Color);
 end
 
-/// Sets the background cells are painted with.
-///
-/// `Transparent` -- the default -- leaves everything beneath the glyph
-/// visible, which is the merged world's natural state. Any RGB color makes
-/// the cell opaque, which is what a menu bar or a readable HUD wants.
+/// Sets the screen's cell background; Transparent shows what is beneath.
 ///
 /// # Raises
-/// `TextBackground wants a color or Transparent.` for any other negative.
+/// `Graph is not open.` and `TextBackground wants a color or Transparent.`
 ///
 /// # Examples
 /// `TextColor And TextBackground Color The Cell`
 procedure TextBackground (Color : Integer);
 begin
-    if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    TextBack := Color;
+    EnsureRoot ();
+    Root.TextBackground (Color);
 end
 
 /// Sets how long each blink phase lasts, in milliseconds.
 ///
-/// Blinking ink is visible for Ms milliseconds and hidden for the same, so a
-/// full blink takes twice this. The default is 267 -- the adapter's own
-/// cadence, sixteen frames of sixty each way -- and 533 gives the slower,
-/// one-second blink of the console caret that came after. Turbo Pascal
-/// offered no such method because the rate lived in a register; that was the
-/// hardware's limitation, not a design worth inheriting.
-///
-/// The rate is a program-level setting: `TextMode` and `NormVideo` reset the
-/// colors and the blink flag, never this. A fresh `InitGraph` restores 267.
+/// One clock for every surface: blinking ink is visible for Ms milliseconds
+/// and hidden for the same. The default is 267 -- the adapter's cadence --
+/// and 533 gives the caret's slower blink. A fresh `InitGraph` restores 267;
+/// `TextMode` and the videos never touch it.
 ///
 /// # Raises
 /// `SetBlinkRate needs a positive time.` for an Ms of zero or less.
@@ -1295,216 +1868,79 @@ begin
     BlinkPhaseMs := Ms;
 end
 
-/// Brightens the ink celled text draws with.
-///
-/// A dim palette color becomes its bright partner -- `Blue` to `LightBlue`,
-/// and `Brown` to `Yellow`, the adapter's famous odd couple -- and a bright
-/// one stays itself, which is the idempotence Turbo Pascal's intensity bit
-/// had. Any other RGB moves halfway toward white, so calling again brightens
-/// further; that is the 24-bit reading of a 16-color idea, and it is stated
-/// rather than hidden.
-///
-/// The background is never touched.
+/// Brightens the screen's ink, as the intensity bit did.
 ///
 /// # Examples
 /// `HighVideo Brightens The Ink And LowVideo Dims It`
 procedure HighVideo ();
 begin
-    if TextInk in BrightPartner then
-    begin
-        TextInk := BrightPartner[TextInk];
+    if SdlWin = nil then raise 'Graph is not open.';
 
-        Exit;
-    end
-
-    if TextInk in DimPartner then Exit;
-
-    var R := TextInk div 65536;
-    var G := TextInk div 256 mod 256;
-    var B := TextInk mod 256;
-
-    TextInk := (R + (255 - R) div 2) * 65536
-             + (G + (255 - G) div 2) * 256
-             + (B + (255 - B) div 2);
+    EnsureRoot ();
+    Root.HighVideo ();
 end
 
-/// Dims the ink celled text draws with.
-///
-/// The mirror of `HighVideo`: a bright palette color becomes its dim partner
-/// and a dim one stays itself; any other RGB moves halfway toward black,
-/// again further on each call.
+/// Dims the screen's ink, the mirror of HighVideo.
 ///
 /// # Examples
 /// `HighVideo Brightens The Ink And LowVideo Dims It`
 procedure LowVideo ();
 begin
-    if TextInk in DimPartner then
-    begin
-        TextInk := DimPartner[TextInk];
+    if SdlWin = nil then raise 'Graph is not open.';
 
-        Exit;
-    end
-
-    if TextInk in BrightPartner then Exit;
-
-    TextInk := (TextInk div 65536 div 2) * 65536
-             + (TextInk div 256 mod 256 div 2) * 256
-             + (TextInk mod 256 div 2);
+    EnsureRoot ();
+    Root.LowVideo ();
 end
 
-/// Restores the ink and background a text mode wakes up in.
-///
-/// LightGray on Transparent -- the defaults `InitGraph` and `TextMode` set --
-/// which is what Turbo Pascal's `NormVideo` did with the attribute the
-/// program started under.
+/// Restores the screen's startup colors: LightGray on Transparent.
 ///
 /// # Examples
 /// `NormVideo Restores The Startup Colors`
 procedure NormVideo ();
 begin
-    TextInk      := LightGray;
-    TextBack     := Transparent;
-    TextBlinking := False;
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureRoot ();
+    Root.NormVideo ();
 end
 
-/// Moves the cursor to the start of the next row, scrolling at the bottom.
+/// Writes Text at the screen's cursor, in its colors, advancing it.
 ///
-/// Private to this unit; the newline both PrintLn and a #10 in Print spell.
-procedure NewLine ();
-begin
-    CursorCol := 1;
-
-    if CursorRow < TextRows () then
-    begin
-        CursorRow := CursorRow + 1;
-
-        Exit;
-    end
-
-    // The grid scrolls; the graphics stay put, per DESIGN.md. The vacated
-    // band takes the current background.
-    var Fill := 0;
-
-    if TextBack >= 0 then Fill := TextBack - 16777216;   // 0xFF000000 | bg, signed
-
-    ScrollTarget (FontHeight, Fill);
-
-    AimBlink ();
-    ScrollTarget (FontHeight, 0);
-    AimText ();
-end
-
-/// Stamps one codepoint at the cursor and advances it, wrapping first when
-/// the glyph does not fit the row.
-///
-/// Private to this unit.
-procedure StampAtCursor (Code : Integer);
-begin
-    var Wide  := CellWidth ();
-    var Mode  := 1;
-    var Words := nil;
-
-    if Code in FontGlyphs then
-    begin
-        Words := FontGlyphs[Code];
-        Wide  := FontWidths[Code];
-
-        if Code in FontPictures then Mode := 2;
-        if not FontGrey then if not (Code in FontPictures) then Mode := 0;
-    end
-
-    var Cells := Wide div CellWidth ();
-
-    if Cells < 1 then Cells := 1;
-    if CursorCol + Cells - 1 > TextCols () then NewLine ();
-
-    var CellX := (CursorCol - 1) * CellWidth ();
-    var CellY := (CursorRow - 1) * FontHeight;
-
-    // A blinking glyph's ink goes to the blink layer and only its background
-    // to the text layer, which is why the letters vanish and the cell stays.
-    // A steady stamp clears the blink cell it lands on, so old blink never
-    // lingers under new text.
-    if TextBlinking then
-    begin
-        StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, TextBack);
-        AimBlink ();
-
-        if Words = nil then StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, Transparent);
-        else StampCell (CellX, CellY, Words.Address, Wide, FontHeight, Mode, TextInk, Transparent);
-
-        AimText ();
-    end
-    else
-    begin
-        if Words = nil then
-            StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, TextBack);
-        else
-            StampCell (CellX, CellY, Words.Address, Wide, FontHeight, Mode, TextInk, TextBack);
-
-        AimBlink ();
-        StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, Transparent);
-        AimText ();
-    end
-
-    CursorCol := CursorCol + Cells;
-
-    if CursorCol > TextCols () then NewLine ();
-end
-
-/// Writes Text at the cursor, in the current colors, advancing it.
-///
-/// This is celled text: it lands on the grid, wraps at the last column,
-/// scrolls the grid -- and only the grid -- at the bottom, and is what
-/// `ClrEol` and `ClrScr` erase. A #10 in the text starts a new row. A wide
-/// glyph takes two cells; one the font lacks takes one blank cell.
-///
-/// The name is a placeholder with a settled future: when the compiler learns
-/// to overload built-ins, `Write` and `WriteLn` absorb Print and PrintLn --
-/// see DESIGN.md.
+/// The screen is the root Window, and this is its Print: celled text that
+/// wraps at the last column, scrolls the grid -- and only the grid -- at the
+/// bottom, and is what `ClrEol` and `ClrScr` erase. The name is a
+/// placeholder Write and WriteLn absorb when the compiler learns to
+/// overload built-ins.
 ///
 /// # Raises
-/// `Graph is not open.` without a window, and `EnsureFont`'s message when no
-/// font can be found.
+/// `Graph is not open.` without a window.
 ///
 /// # Examples
 /// `Print Stamps Cells And Advances The Cursor`
 procedure Print (Text : String);
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    EnsureGrid ();
-
-    for var I := 0; I < Length (Text); I := I + 1 do
-    begin
-        if Text[I] = #10 then NewLine ();
-        else StampAtCursor (Ord (Text[I]));
-    end
-
-    Present ();
+    EnsureRoot ();
+    Root.Print (Text);
 end
 
-/// Writes Text and moves to the start of the next row.
-///
-/// `PrintLn ('')` is a bare newline. Everything said of `Print` holds here.
+/// Writes Text and moves to the start of the screen's next row.
 ///
 /// # Raises
-/// As `Print`.
+/// `Graph is not open.` without a window.
 ///
 /// # Examples
 /// `PrintLn Moves To The Start Of The Next Row`
 procedure PrintLn (Text : String);
 begin
-    Print (Text);
-    NewLine ();
-    Present ();
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureRoot ();
+    Root.PrintLn (Text);
 end
 
-/// Clears the grid from the cursor to the end of its row.
-///
-/// The cells take the current background, and the cursor does not move. Only
-/// the grid is touched: a graphic beneath the cleared cells shows through,
-/// intact, which is the design's one rule doing its work.
+/// Clears the screen from its cursor to the end of the row.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
@@ -1513,29 +1949,13 @@ end
 /// `ClrEol Erases The Prose And Never The Chart`
 procedure ClrEol ();
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    EnsureGrid ();
-
-    for var Col := CursorCol; Col <= TextCols (); Col := Col + 1 do
-        StampCell ((Col - 1) * CellWidth (), (CursorRow - 1) * FontHeight, nil,
-                   CellWidth (), FontHeight, 1, TextInk, TextBack);
-
-    AimBlink ();
-
-    for var Col := CursorCol; Col <= TextCols (); Col := Col + 1 do
-        StampCell ((Col - 1) * CellWidth (), (CursorRow - 1) * FontHeight, nil,
-                   CellWidth (), FontHeight, 1, TextInk, Transparent);
-
-    AimText ();
-    Present ();
+    EnsureRoot ();
+    Root.ClrEol ();
 end
 
-/// Clears the whole grid and homes the cursor.
-///
-/// Every cell takes the current background -- `TextBackground (Blue);
-/// ClrScr;` is how a classic screen paints its field. With the background
-/// Transparent the grid becomes wholly invisible. Graphics are not touched.
+/// Clears the whole screen grid and homes its cursor.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
@@ -1544,28 +1964,10 @@ end
 /// `ClrScr Fills The Grid With The Background And Homes The Cursor`
 procedure ClrScr ();
 begin
-    if Window = nil then raise 'Graph is not open.';
+    if SdlWin = nil then raise 'Graph is not open.';
 
-    EnsureGrid ();
-
-    for var Row := 0; Row < TextRows (); Row := Row + 1 do
-        for var Col := 0; Col < TextCols (); Col := Col + 1 do
-            StampCell (Col * CellWidth (), Row * FontHeight, nil,
-                       CellWidth (), FontHeight, 1, TextInk, TextBack);
-
-    AimBlink ();
-
-    for var Row := 0; Row < TextRows (); Row := Row + 1 do
-        for var Col := 0; Col < TextCols (); Col := Col + 1 do
-            StampCell (Col * CellWidth (), Row * FontHeight, nil,
-                       CellWidth (), FontHeight, 1, TextInk, Transparent);
-
-    AimText ();
-
-    CursorCol := 1;
-    CursorRow := 1;
-
-    Present ();
+    EnsureRoot ();
+    Root.ClrScr ();
 end
 
 // ---------------------------------------------------------------- tests --
@@ -1575,7 +1977,7 @@ end
 // for a moment, which is harmless and occasionally worth seeing. Nothing
 // asserted depends on which driver answered.
 
-test 'InitGraph Opens A Window Of The Size Asked For';
+test 'InitGraph Opens A SdlWin Of The Size Asked For';
 begin
     CloseGraph ();
 
@@ -1593,12 +1995,12 @@ begin
 
     InitGraph (100, 100, 'Algol-24 ✓', False);
 
-    AssertEqual ('Algol-24 ✓', SDL_GetWindowTitle (Window));
+    AssertEqual ('Algol-24 ✓', SDL_GetWindowTitle (SdlWin));
 
     CloseGraph ();
 end
 
-test 'InitGraph Raises When The Window Is Already Open';
+test 'InitGraph Raises When The SdlWin Is Already Open';
 begin
     CloseGraph ();
 
@@ -1652,7 +2054,7 @@ begin
     CloseGraph ();
 end
 
-test 'CloseGraph Does Nothing When The Window Is Not Open';
+test 'CloseGraph Does Nothing When The SdlWin Is Not Open';
 begin
     CloseGraph ();
     CloseGraph ();
@@ -1660,7 +2062,7 @@ begin
     AssertTrue (True);
 end
 
-test 'CloseGraph Releases The Window So Another May Open';
+test 'CloseGraph Releases The SdlWin So Another May Open';
 begin
     CloseGraph ();
 
@@ -1675,7 +2077,7 @@ begin
     CloseGraph ();
 end
 
-test 'GetMaxX And GetMaxY Raise When The Window Is Not Open';
+test 'GetMaxX And GetMaxY Raise When The SdlWin Is Not Open';
 begin
     CloseGraph ();
 
@@ -1689,7 +2091,7 @@ begin
     AssertEqual ('Graph is not open.', Message);
 end
 
-test 'GetMaxX And GetMaxY Raise Again After The Window Closes';
+test 'GetMaxX And GetMaxY Raise Again After The SdlWin Closes';
 begin
     CloseGraph ();
 
@@ -1703,13 +2105,13 @@ begin
 end
 
 /// The values are the machine's, so only their soundness can be asserted.
-test 'ScreenWidth And ScreenHeight Answer Before A Window Opens';
+test 'ScreenWidth And ScreenHeight Answer Before A SdlWin Opens';
 begin
     AssertTrue (ScreenWidth () > 0);
     AssertTrue (ScreenHeight () > 0);
 end
 
-test 'ScreenWidth Is Unchanged By A Window Opening And Closing';
+test 'ScreenWidth Is Unchanged By A SdlWin Opening And Closing';
 begin
     CloseGraph ();
 
@@ -1760,7 +2162,7 @@ begin
     CloseGraph ();
 end
 
-test 'OutText And OutTextXY Raise When The Window Is Not Open';
+test 'OutText And OutTextXY Raise When The SdlWin Is Not Open';
 begin
     CloseGraph ();
 
@@ -1830,7 +2232,7 @@ begin
     CloseGraph ();
 end
 
-test 'Text Past The Window''s Edge Is Clipped Rather Than Raising';
+test 'Text Past The SdlWin''s Edge Is Clipped Rather Than Raising';
 begin
     CloseGraph ();
     InitGraph (64, 64, 'clip', False);
@@ -1955,7 +2357,7 @@ end
 // -------------------------------------------------------- text mode tests --
 
 /// The grid is logical: the classic screen in every window, scaled to fit.
-test 'The Grid Is Eighty By Twenty Five Whatever The Window';
+test 'The Grid Is Eighty By Twenty Five Whatever The SdlWin';
 begin
     CloseGraph ();
     InitGraph (1280, 800, 'grid', False);
@@ -2007,12 +2409,12 @@ begin
 
     // A stamped space shows the defaults are back: transparent background.
     Print (' ');
-    AssertEqual (0, TextPixels.GetInt (0));
+    AssertEqual (0, Root.Buf.GetInt (0));
 
     CloseGraph ();
 end
 
-test 'TextMode Refuses Nonsense And A Closed Window';
+test 'TextMode Refuses Nonsense And A Closed SdlWin';
 begin
     CloseGraph ();
 
@@ -2030,7 +2432,7 @@ begin
     CloseGraph ();
 end
 
-test 'The Grid Metrics Raise When The Window Is Not Open';
+test 'The Grid Metrics Raise When The SdlWin Is Not Open';
 begin
     CloseGraph ();
 
@@ -2096,7 +2498,7 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 16; X := X + 1 do
-            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then Lit := Lit + 1;
+            if Root.Buf.GetInt ((Y * Root.PxW + X) * 4) <> 0 then Lit := Lit + 1;
 
     AssertTrue (Lit > 0);
 
@@ -2161,10 +2563,10 @@ begin
     Print ('█ ');
 
     // The block's centre pixel is opaque white.
-    AssertEqual (-1, TextPixels.GetInt ((16 * GridW + 8) * 4));
+    AssertEqual (-1, Root.Buf.GetInt ((16 * Root.PxW + 8) * 4));
 
     // The space's centre pixel is opaque blue: 0xFF0000AA.
-    AssertEqual (Blue - 16777216, TextPixels.GetInt ((16 * GridW + 24) * 4));
+    AssertEqual (Blue - 16777216, Root.Buf.GetInt ((16 * Root.PxW + 24) * 4));
 
     CloseGraph ();
 end
@@ -2180,7 +2582,7 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 16; X := X + 1 do
-            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then
+            if Root.Buf.GetInt ((Y * Root.PxW + X) * 4) <> 0 then
                 Painted := Painted + 1;
 
     AssertEqual (0, Painted);
@@ -2190,6 +2592,9 @@ end
 
 test 'TextColor Refuses Transparent And TextBackground Refuses Nonsense';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     var Message := '';
 
     try TextColor (Transparent); except on e : String do Message := e; end
@@ -2222,7 +2627,7 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 64; X := X + 1 do
-            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then
+            if Root.Buf.GetInt ((Y * Root.PxW + X) * 4) <> 0 then
                 Prose := Prose + 1;
 
     AssertEqual (0, Prose);
@@ -2244,7 +2649,7 @@ begin
 
     AssertEqual (1, WhereX ());
     AssertEqual (1, WhereY ());
-    AssertEqual (Blue - 16777216, TextPixels.GetInt ((50 * GridW + 50) * 4));
+    AssertEqual (Blue - 16777216, Root.Buf.GetInt ((50 * Root.PxW + 50) * 4));
 
     CloseGraph ();
 end
@@ -2267,11 +2672,11 @@ begin
     var TopHalf := 0;
     var LowHalf := 0;
 
-    for var Y := 0; Y < GridH div 2; Y := Y + 1 do
-        for var X := 0; X < GridW; X := X + 1 do
+    for var Y := 0; Y < Root.PxH div 2; Y := Y + 1 do
+        for var X := 0; X < Root.PxW; X := X + 1 do
         begin
-            if TextPixels.GetInt ((Y * GridW + X) * 4) <> 0 then TopHalf := TopHalf + 1;
-            if TextPixels.GetInt (((Y + GridH div 2) * GridW + X) * 4) <> 0 then LowHalf := LowHalf + 1;
+            if Root.Buf.GetInt ((Y * Root.PxW + X) * 4) <> 0 then TopHalf := TopHalf + 1;
+            if Root.Buf.GetInt (((Y + Root.PxH div 2) * Root.PxW + X) * 4) <> 0 then LowHalf := LowHalf + 1;
         end
 
     AssertTrue (TopHalf > 0);
@@ -2332,76 +2737,94 @@ end
 
 test 'HighVideo Brightens The Ink And LowVideo Dims It';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     TextColor (Blue);
     HighVideo ();
-    AssertEqual (LightBlue, TextInk);
+    AssertEqual (LightBlue, Root.Ink);
 
     // Idempotent on the palette, as the intensity bit was.
     HighVideo ();
-    AssertEqual (LightBlue, TextInk);
+    AssertEqual (LightBlue, Root.Ink);
 
     LowVideo ();
-    AssertEqual (Blue, TextInk);
+    AssertEqual (Blue, Root.Ink);
 
     LowVideo ();
-    AssertEqual (Blue, TextInk);
+    AssertEqual (Blue, Root.Ink);
 end
 
 /// The adapter's odd couple: brown's bright partner is yellow, not a
 /// brighter brown.
 test 'HighVideo Sends Brown To Yellow And Back';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     TextColor (Brown);
     HighVideo ();
-    AssertEqual (Yellow, TextInk);
+    AssertEqual (Yellow, Root.Ink);
 
     LowVideo ();
-    AssertEqual (Brown, TextInk);
+    AssertEqual (Brown, Root.Ink);
 end
 
 /// Off the palette there is no intensity bit, so the 24-bit reading is
 /// halfway toward white or black -- exact values pinned.
 test 'Off The Palette The Videos Move Halfway';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     TextColor (8405024);          // 0x804020
     HighVideo ();
-    AssertEqual (12558223, TextInk);   // 0xBF9F8F
+    AssertEqual (12558223, Root.Ink);   // 0xBF9F8F
 
     TextColor (8405024);
     LowVideo ();
-    AssertEqual (4202512, TextInk);    // 0x402010
+    AssertEqual (4202512, Root.Ink);    // 0x402010
 end
 
 test 'NormVideo Restores The Startup Colors';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     TextColor (Yellow);
     TextBackground (Blue);
 
     NormVideo ();
 
-    AssertEqual (LightGray, TextInk);
-    AssertEqual (Transparent, TextBack);
+    AssertEqual (LightGray, Root.Ink);
+    AssertEqual (Transparent, Root.Back);
 end
 
 // ------------------------------------------------------------ blink tests --
 
 test 'Blink Rides Bit Twenty Four Of TextColor';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     AssertEqual (16777216, Blink);
 
     TextColor (LightRed + Blink);
-    AssertEqual (LightRed, TextInk);
-    AssertTrue (TextBlinking);
+    AssertEqual (LightRed, Root.Ink);
+    AssertTrue (Root.Blinking);
 
     // Without the flag, blinking ends -- the bit is per-color, as TP's was.
     TextColor (LightRed);
-    AssertTrue (not TextBlinking);
+    AssertTrue (not Root.Blinking);
 
     NormVideo ();
 end
 
 test 'TextColor Refuses A Color Past Blink';
 begin
+    CloseGraph ();
+    InitGraph (320, 200, 'w', False);
+
     var Message := '';
 
     try TextColor (Blink + Blink); except on e : String do Message := e; end
@@ -2422,10 +2845,10 @@ begin
     Print ('█');
 
     // The text layer's cell is pure background -- the white went elsewhere.
-    AssertEqual (Blue - 16777216, TextPixels.GetInt ((16 * GridW + 8) * 4));
+    AssertEqual (Blue - 16777216, Root.Buf.GetInt ((16 * Root.PxW + 8) * 4));
 
     // The blink layer holds the ink, opaque white.
-    AssertEqual (-1, BlinkPixels.GetInt ((16 * GridW + 8) * 4));
+    AssertEqual (-1, Root.BBuf.GetInt ((16 * Root.PxW + 8) * 4));
 
     CloseGraph ();
 end
@@ -2442,7 +2865,7 @@ begin
     TextColor (White);
     Print (' ');
 
-    AssertEqual (0, BlinkPixels.GetInt ((16 * GridW + 8) * 4));
+    AssertEqual (0, Root.BBuf.GetInt ((16 * Root.PxW + 8) * 4));
 
     CloseGraph ();
 end
@@ -2460,7 +2883,7 @@ begin
 
     for var Y := 0; Y < 32; Y := Y + 1 do
         for var X := 0; X < 32; X := X + 1 do
-            if BlinkPixels.GetInt ((Y * GridW + X) * 4) <> 0 then Lit := Lit + 1;
+            if Root.BBuf.GetInt ((Y * Root.PxW + X) * 4) <> 0 then Lit := Lit + 1;
 
     AssertEqual (0, Lit);
 
@@ -2480,9 +2903,9 @@ begin
     // The ink now sits in the top half of the blink layer.
     var Top := 0;
 
-    for var Y := 0; Y < GridH div 2; Y := Y + 1 do
+    for var Y := 0; Y < Root.PxH div 2; Y := Y + 1 do
         for var X := 0; X < 16; X := X + 1 do
-            if BlinkPixels.GetInt ((Y * GridW + X) * 4) <> 0 then Top := Top + 1;
+            if Root.BBuf.GetInt ((Y * Root.PxW + X) * 4) <> 0 then Top := Top + 1;
 
     AssertTrue (Top > 0);
 
@@ -2496,11 +2919,12 @@ begin
 
     TextColor (White + Blink);
     NormVideo ();
-    AssertTrue (not TextBlinking);
+    AssertTrue (not Root.Blinking);
 
     TextColor (White + Blink);
     TextMode (40, 25);
-    AssertTrue (not TextBlinking);
+    Print ('');                        // TextMode rebuilt the root lazily
+    AssertTrue (not Root.Blinking);
 
     CloseGraph ();
 end
@@ -2678,7 +3102,7 @@ begin
     CloseGraph ();
 end
 
-test 'A Fresh Window Starts With An Empty Queue';
+test 'A Fresh SdlWin Starts With An Empty Queue';
 begin
     CloseGraph ();
     InitGraph (320, 200, 'stale', False);
@@ -2698,7 +3122,7 @@ begin
     CloseGraph ();
 end
 
-test 'Input Raises When The Window Is Not Open';
+test 'Input Raises When The SdlWin Is Not Open';
 begin
     CloseGraph ();
 
@@ -2710,4 +3134,383 @@ begin
     Message := '';
     try ReadKey (); except on e : String do Message := e; end
     AssertEqual ('Graph is not open.', Message);
+end
+
+// ---------------------------------------------------------- surface tests --
+
+test 'A Window Validates Its Rectangle Its Order And The Screen';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try Window (1, 1, 10, 5, 1); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    InitGraph (320, 200, 'make', False);
+
+    Message := '';
+    try Window (1, 1, 10, 5, 0); except on e : String do Message := e; end
+    AssertEqual ('Order 0 is the screen''s.', Message);
+
+    Message := '';
+    try Window (5, 1, 4, 5, 1); except on e : String do Message := e; end
+    AssertEqual ('Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.', Message);
+
+    CloseGraph ();
+end
+
+test 'Each Window Has Its Own Cursor And Colors';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'own', False);
+
+    var A := Window (1, 1, 10, 5, 1);
+    var B := Window (11, 1, 20, 5, 2);
+
+    A.GotoXY (3, 2);
+    A.TextColor (Yellow);
+    B.TextColor (Cyan);
+
+    AssertEqual (3, A.WhereX ());
+    AssertEqual (1, B.WhereX ());
+    AssertEqual (Yellow, A.Ink);
+    AssertEqual (Cyan, B.Ink);
+
+    // And the screen's own cursor is a third, untouched party.
+    AssertEqual (1, WhereX ());
+
+    CloseGraph ();
+end
+
+test 'A Window Prints Into Its Own Cells And Not The Screen''s';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'cells', False);
+
+    var A := Window (2, 2, 11, 4, 1);
+
+    A.Print ('X');
+
+    var Own := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 16; X := X + 1 do
+            if A.Buf.GetInt ((Y * A.PxW + X) * 4) <> 0 then Own := Own + 1;
+
+    AssertTrue (Own > 0);
+    AssertEqual (2, A.WhereX ());
+
+    // The root grid never woke: no screen text verb has run.
+    AssertTrue (Root = nil);
+
+    CloseGraph ();
+end
+
+/// A window is a terminal of its own: it wraps at ITS last column and
+/// scrolls ITS cells at its bottom row.
+test 'A Window Wraps And Scrolls Within Its Own Walls';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'walls', False);
+
+    var A := Window (3, 3, 6, 4, 1);        // 4 cols, 2 rows
+
+    A.Print ('ABCDE');
+
+    AssertEqual (2, A.WhereX ());
+    AssertEqual (2, A.WhereY ());
+
+    A.PrintLn ('');
+    A.Print ('F');
+
+    // The scroll happened in A's buffer: its lower half is now background.
+    var Low := 0;
+
+    for var Y := A.PxH div 2; Y < A.PxH; Y := Y + 1 do
+        for var X := 0; X < A.PxW; X := X + 1 do
+            if A.Buf.GetInt ((Y * A.PxW + X) * 4) <> 0 then Low := Low + 1;
+
+    AssertTrue (Low > 0);                    // the F just stamped there
+
+    CloseGraph ();
+end
+
+test 'MoveTo Drags A Window Preserving Its Size';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'drag', False);
+
+    var A := Window (5, 5, 14, 9, 1);
+
+    A.MoveTo (30, 2);
+
+    AssertEqual (30, A.X1);
+    AssertEqual (2, A.Y1);
+    AssertEqual (39, A.X2);
+    AssertEqual (6, A.Y2);
+
+    // Off the grid is allowed: a window may be dragged out of view.
+    A.MoveTo (-3, -1);
+
+    AssertEqual (-3, A.X1);
+    AssertEqual (10, A.Cols);
+
+    CloseGraph ();
+end
+
+test 'A Window''s Blink Ink Lives In Its Own Blink Buffer';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'wblink', False);
+
+    var A := Window (1, 1, 10, 3, 1);
+
+    A.TextColor (White + Blink);
+    A.Print ('█');
+
+    AssertEqual (-1, A.BBuf.GetInt ((16 * A.PxW + 8) * 4));
+
+    CloseGraph ();
+end
+
+/// The rule, across surfaces: a window's text verbs cannot reach a chart on
+/// another surface, however they overlap on screen.
+test 'ClrScr On A Window Leaves A ViewPort''s Pixels Alone';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'rule2', False);
+
+    var V := ViewPort (1, 1, 40, 40, 2);
+
+    V.PutPixel (5, 5, Red);
+
+    var A := Window (1, 1, 10, 3, 3);
+
+    A.TextBackground (Blue);
+    A.ClrScr ();
+
+    AssertEqual (Red - 16777216, V.Buf.GetInt ((4 * 40 + 4) * 4));
+
+    CloseGraph ();
+end
+
+test 'InstallUserFont Rebuilds Live Windows At The New Cell Size';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'rebuild', False);
+
+    var A := Window (1, 1, 10, 3, 1);
+
+    AssertEqual (3 * 32, A.PxH);
+
+    InstallUserFont ('romfont.hex');
+
+    AssertEqual (3 * 16, A.PxH);
+    AssertEqual (10 * 8, A.PxW);
+
+    InstallUserFont ('graphfont.hex');
+
+    AssertEqual (3 * 32, A.PxH);
+
+    CloseGraph ();
+end
+
+test 'CloseGraph Invalidates Every Surface';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'die', False);
+
+    var A := Window (1, 1, 10, 3, 1);
+    var V := ViewPort (1, 1, 20, 20, 2);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try A.Print ('x'); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.PutPixel (1, 1, Red); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'A ViewPort Validates And Paints Exact Pixels';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'port', False);
+
+    var Message := '';
+
+    try ViewPort (1, 1, 0, 5, 1); except on e : String do Message := e; end
+    AssertEqual ('ViewPort needs a positive size.', Message);
+
+    var V := ViewPort (10, 10, 8, 8, 1);
+
+    V.PutPixel (1, 1, White);
+    V.PutPixel (8, 8, Blue);
+    V.PutPixel (9, 9, Red);              // off the edge: clipped, silent
+
+    AssertEqual (-1, V.Buf.GetInt (0));
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((7 * 8 + 7) * 4));
+
+    CloseGraph ();
+end
+
+test 'A ViewPort Draws Free Text And Advances Its Position';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'vtext', False);
+
+    var V := ViewPort (1, 1, 100, 40, 1);
+
+    V.OutText ('AB');
+
+    AssertEqual (1 + GlyphWidthOf (Ord ('A')) + GlyphWidthOf (Ord ('B')), V.CurX);
+
+    var Lit := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 32; X := X + 1 do
+            if V.Buf.GetInt ((Y * 100 + X) * 4) <> 0 then Lit := Lit + 1;
+
+    AssertTrue (Lit > 0);
+
+    CloseGraph ();
+end
+
+test 'Order And Alpha Are Assignable And Ties Stack By Creation';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'stack', False);
+
+    var A := ViewPort (1, 1, 8, 8, 5);
+    var B := ViewPort (1, 1, 8, 8, 5);
+
+    AssertTrue (B.Serial > A.Serial);
+
+    A.Order := -2;
+    A.Alpha := 128;
+
+    AssertEqual (-2, A.Order);
+    AssertEqual (128, A.Alpha);
+
+    CloseGraph ();
+end
+
+test 'TextMode Keeps The Other Surfaces';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'keepers', False);
+
+    Print ('wake the root');
+
+    var V := ViewPort (1, 1, 8, 8, 1);
+
+    V.PutPixel (2, 2, Green);
+    TextMode (40, 25);
+
+    AssertEqual (Green - 16777216, V.Buf.GetInt ((1 * 8 + 1) * 4));
+    AssertEqual (1, Surfaces.Length);       // the root went, the port stayed
+
+    Print ('');
+    AssertEqual (2, Surfaces.Length);       // and the root came back lazily
+
+    CloseGraph ();
+end
+
+/// The bug a window's own border found: a line that exactly fills the bottom
+/// row must not scroll the window the instant it is drawn. Text mode always
+/// deferred the wrap to the next character, and so does this.
+test 'Filling The Last Row Does Not Scroll Until Something Else Is Written';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'lazy', False);
+
+    var A := Window (1, 1, 4, 3, 1);
+
+    A.GotoXY (1, 1);
+    A.Print ('TTTT');                  // the top border, exactly four wide
+
+    A.GotoXY (1, 3);
+    A.Print ('BBBB');                  // the bottom border, filling the row
+
+    // Nothing scrolled: the top row still holds what was put there.
+    var Top := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < A.PxW; X := X + 1 do
+            if A.Buf.GetInt ((Y * A.PxW + X) * 4) <> 0 then Top := Top + 1;
+
+    AssertTrue (Top > 0);
+
+    // The cursor rests on the last column with the wrap owed.
+    AssertEqual (4, A.WhereX ());
+    AssertEqual (3, A.WhereY ());
+    AssertTrue (A.Pending);
+
+    CloseGraph ();
+end
+
+test 'The Deferred Wrap Happens On The Next Character';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'defer', False);
+
+    var A := Window (1, 1, 4, 3, 1);
+
+    A.Print ('ABCD');
+
+    AssertEqual (4, A.WhereX ());
+    AssertEqual (1, A.WhereY ());
+
+    A.Print ('E');
+
+    AssertEqual (2, A.WhereX ());
+    AssertEqual (2, A.WhereY ());
+
+    CloseGraph ();
+end
+
+/// Moving the cursor deliberately cancels a wrap that was owed.
+test 'GotoXY And ClrScr Cancel A Pending Wrap';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'cancel', False);
+
+    var A := Window (1, 1, 4, 3, 1);
+
+    A.Print ('ABCD');
+    AssertTrue (A.Pending);
+
+    A.GotoXY (2, 2);
+    AssertTrue (not A.Pending);
+
+    A.Print ('ABC');
+    A.ClrScr ();
+    AssertTrue (not A.Pending);
+    AssertEqual (1, A.WhereX ());
+
+    CloseGraph ();
+end
+
+/// And the screen's own grid has the same manners, through the same code.
+test 'The Screen Grid Defers Its Wrap Too';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'screen', False);
+
+    TextMode (4, 2);
+    Print ('ABCD');
+
+    AssertEqual (4, WhereX ());
+    AssertEqual (1, WhereY ());
+
+    Print ('E');
+
+    AssertEqual (2, WhereX ());
+    AssertEqual (2, WhereY ());
+
+    CloseGraph ();
 end

@@ -1,0 +1,129 @@
+// The interleave a single text plane cannot express: window A holds a chart
+// drawn OVER its own text, and window B is dragged OVER both.
+//
+//     algc examples/surfaces.a24
+//
+// Arrow keys drag window B. Tab restacks it under the chart and back. Esc,
+// or the close button, finishes.
+
+uses graph;
+uses math;
+
+/// N copies of Ch, joined.
+function Fill (Ch : Char, N : Integer) : String;
+begin
+    var B := Buffer ();
+
+    for var I := 0; I < N; I := I + 1 do
+        B.Append (Ch);
+
+    Exit B.Text;
+end
+
+/// Frames a window's own cells and titles it.
+procedure Frame (W, Title : String);
+begin
+    W.GotoXY (1, 1);
+    W.Print ('╔' + Fill ('═', W.Cols - 2) + '╗');
+
+    for var R := 2; R < W.Rows; R := R + 1 do
+    begin
+        W.GotoXY (1, R);
+        W.Print ('║');
+        W.GotoXY (W.Cols, R);
+        W.Print ('║');
+    end
+
+    W.GotoXY (1, W.Rows);
+    W.Print ('╚' + Fill ('═', W.Cols - 2) + '╝');
+
+    W.GotoXY (3, 1);
+    W.Print (' ' + Title + ' ');
+end
+
+begin
+    InitGraph (640, 480, 'Surfaces', False);
+
+    // The desktop: the root grid, at Order 0.
+    TextBackground (Blue);
+    ClrScr ();
+    TextColor (LightGray);
+    GotoXY (2, 1);
+    Print ('The desktop is the root grid.  Arrows drag B;  Tab restacks it;  Esc quits.');
+
+    // Window A, with text of its own.
+    var A := Window (4, 4, 44, 20, 1);
+
+    A.TextBackground (Cyan);
+    A.TextColor (Black);
+    A.ClrScr ();
+    Frame (A, 'A');
+
+    A.GotoXY (3, 3);
+    A.Print ('This window''s own text.');
+    A.GotoXY (3, 4);
+    A.Print ('The chart below is a ViewPort');
+    A.GotoXY (3, 5);
+    A.Print ('at a HIGHER Order, so it covers');
+    A.GotoXY (3, 6);
+    A.Print ('these words -- and window B, at a');
+    A.GotoXY (3, 7);
+    A.Print ('higher Order still, covers IT.');
+
+    // The chart: a ViewPort over A's text, in A's client area.
+    var Chart := ViewPort (200, 300, 300, 200, 2);
+
+    for var I := 0; I < 300; I := I + 1 do
+    begin
+        var H := Trunc (100.0 + 90.0 * Sin (I / 24.0));
+
+        for var Y := H; Y < 200; Y := Y + 1 do
+            Chart.PutPixel (I + 1, Y, LightGreen);
+    end
+
+    Chart.OutTextXY (10, 10, 'a ViewPort, Order 2');
+    Chart.Show ();
+
+    // Window B, the one that drags.
+    var B := Window (20, 10, 60, 18, 3);
+
+    B.TextBackground (Magenta);
+    B.TextColor (White);
+    B.ClrScr ();
+    Frame (B, 'B');
+
+    B.GotoXY (3, 3);
+    B.Print ('Window B, Order 3.');
+    B.GotoXY (3, 4);
+    B.Print ('Celled text OVER a graphic --');
+    B.GotoXY (3, 5);
+    B.Print ('which is over other text.');
+    B.GotoXY (3, 7);
+    B.TextColor (Yellow + Blink);
+    B.Print ('drag me');
+
+    var Under := False;
+
+    while True do
+    begin
+        var K := ReadKey ();
+
+        if K = KeyClose then Halt (0);
+        if K = #27 then Halt (0);
+
+        if K = KeyLeft  then B.MoveTo (B.X1 - 1, B.Y1);
+        if K = KeyRight then B.MoveTo (B.X1 + 1, B.Y1);
+        if K = KeyUp    then B.MoveTo (B.X1, B.Y1 - 1);
+        if K = KeyDown  then B.MoveTo (B.X1, B.Y1 + 1);
+
+        if K = #9 then
+        begin
+            Under := not Under;
+
+            if Under then B.Order := 1;
+            else B.Order := 3;
+        end
+
+        B.Print ('');
+    end
+end

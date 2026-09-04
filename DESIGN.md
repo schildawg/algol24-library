@@ -20,32 +20,57 @@ inherited.
 
 ## The architecture
 
-One window, composed from bottom to top:
+One window, composed bottom to top as **one ordered stack of surfaces**, of
+two kinds:
 
 ```
-   background                      the window's own surface
-   canvases with negative Order    graphics under the text
-   the text grid                   Order 0 -- celled text, the one grid
-   canvases with positive Order    graphics over the text
+   background                the window's own surface, global pixel verbs
+   the root Window           the screen-wide grid, Order 0 -- the desktop
+   surfaces, by Order        Windows and ViewPorts, interleaved freely
 ```
 
-- **The text grid** is the celled surface `WriteLn` will write to. There is
-  exactly one and it sits at Order 0, which no canvas may claim. It is
-  **logical** — 80 × 25 by default whatever the window, chosen by `TextMode`,
-  and scaled to the window by the GPU at present time. A happy consequence:
-  in a 4:3 window the cells display at 1:2.4, the authentic aspect of a text
-  mode on a 4:3 tube.
-- **A Canvas** is a class: a positioned, sized drawing surface with its own
-  pixels, its own transparency, and a place in the stack. Every drawing verb
-  is a method on it.
+- **A Window is celled**: a rectangle of text cells on cell boundaries,
+  `X1, Y1, X2, Y2` inclusive in the root grid's cell space -- Turbo Pascal's
+  `Window (1, 1, 80, 25)` grown into a class. It carries the whole text
+  vocabulary as methods -- `Print`, `GotoXY`, `ClrScr`, the colors, the
+  videos, `Blink` -- with its own cursor, its own colors, its own blink ink,
+  and its own scrolling: its `PrintLn` at its own bottom row scrolls its
+  cells and nothing else's.
+- **A ViewPort is pixels**: a positioned, sized drawing surface with its own
+  pixels and transparency -- what this document first called Canvas, renamed
+  to the Turbo Pascal word for a clipped drawing region, which is what it is.
+- **The root grid is the bottom Window**, screen-wide at Order 0, which no
+  other surface may claim. The global text verbs delegate to it, so every
+  program written before surfaces existed still means what it meant.
+
+### Why two kinds, and not layers
+
+A single text plane can only be entirely above or entirely below any given
+graphic. The TurboVision case that breaks it: window A holds a pie chart
+drawn *over* its text; window B drags *over* both. That is text, graphic,
+text -- interleaved -- and no fixed layering can say it. With text itself a
+stackable surface, B covers the chart because B is above it in the one
+stack; no special case, just Order.
+
+```
+   root grid            the desktop's celled text        (bottom)
+   Window A             a text window, Order 1
+   ViewPort chart       A's pie chart, Order 2
+   Window B             dragged over both, Order 3       (top)
+```
+
+Dragging B is assignment to its position; the chart follows A the same way;
+`B.ClrEol` erases B's prose and cannot touch the chart, which belongs to a
+different surface. The one rule survives sharpened: **text verbs act on the
+receiving surface's text.**
 
 ### The one rule
 
-**On the grid, text behaves like text mode; off the grid, text is a graphic.**
-Every interaction question resolves by asking which side of that line a thing
-lives on. `ClrEol` erases the celled text and the pie chart under it shows
-through, intact — erasing a graphic is a graphics act, on the canvas that
-holds it.
+**On a grid, text behaves like text mode; off the grid, text is a graphic.**
+Every interaction question resolves by asking which surface a thing lives
+on. `ClrEol` erases the celled text and the chart beneath shows through,
+intact -- erasing a graphic is a graphics act, on the ViewPort that holds
+it.
 
 ### The screen counts from one
 
@@ -84,29 +109,36 @@ which is what a chart's axis label wants. Chinese set vertically keeps each
 glyph upright and stacks them down a column — a different feature, deliberately
 not conflated, addable later without touching orientation.
 
-## Canvas
+## Surfaces
 
-Settled, all five by decision:
+Settled for both kinds, the first five by the original Canvas decisions:
 
-- **Every drawing verb is a Canvas method.** `Chart.Line (…)`,
-  `Chart.OutTextXY (…)` — where a thing draws is unaskable, because the
-  receiver says.
-- **Coordinates are local.** (1,1) is the canvas's own top-left corner, which
-  is what makes a drawing portable: move the canvas and the drawing moves,
-  nothing redraws. It is also the clip — a canvas cannot scribble outside
-  itself, which keeps the old `SetViewPort` promise without a clipping
-  rectangle to maintain.
+- **Every verb is a method on its surface.** `Chart.OutTextXY (…)`,
+  `B.Print (…)` — where a thing draws or writes is unaskable, because the
+  receiver says. The globals are the root Window's methods, kept as the
+  words programs already use.
+- **Coordinates are local.** (1,1) is the surface's own top-left — cell for
+  a Window, pixel for a ViewPort — which is what makes its contents
+  portable: move the surface and everything on it moves, nothing redraws.
+  Local is also the clip: a surface cannot scribble outside itself, which
+  keeps the old `SetViewPort` promise without a clipping rectangle to
+  maintain.
 - **Translucency is 0..255**, property `Alpha`, default 255. A byte, because
   every color channel and every coverage value in the pipeline is already a
   byte, and no Real comparison wanted anywhere. Per-pixel transparency needs
   no dial at all: an unpainted pixel is transparent, which is the natural
   state of a fresh canvas.
-- **`Order` is a nonzero signed integer** — negative under the text grid,
-  positive over it — and `Order`, `X` and `Y` are settable after creation:
-  reordering is bring-to-front, moving is dragging. Two canvases with the same
-  Order stack by creation, earlier beneath later.
-- **`CloseGraph` invalidates every canvas.** A canvas belongs to the window it
-  was made in; reopening starts clean.
+- **`Order` is a nonzero signed integer** — negative under the root grid,
+  positive over it — and `Order` and position are settable after creation:
+  reordering is bring-to-front, moving is dragging. Two surfaces with the
+  same Order stack by creation, earlier beneath later. Order 0 is the root
+  grid's alone.
+- **`CloseGraph` invalidates every surface.** A surface belongs to the window
+  it was made in; reopening starts clean.
+- **A Window is placed in cells, a ViewPort in pixels** — each kind speaks
+  its own world's coordinates, both counting from 1. Windows live in the
+  root grid's logical cell space and scale with it; ViewPorts live in the
+  screen's pixel space beside the global pixel verbs.
 
 ## Why this costs nothing at present time
 
@@ -140,18 +172,17 @@ A TurboVision-style text window with a pie chart inside it:
 
 Nothing below is designed yet; nothing above blocks any of it.
 
-- **The background as the root canvas.** The likely end state is that the
-  window's own surface is simply a canvas at the bottom of the stack, and
-  today's global `OutText` / `OutTextXY` either delegate to it or retire.
-  Decided when the Canvas class lands.
+- **The background as the root ViewPort.** The window's own surface may one
+  day be simply a ViewPort at the bottom of the stack, and the global pixel
+  verbs its methods, completing the symmetry the root Window began.
 - **`WriteLn` onto the grid** waits on the compiler growing overloading for
   built-ins. Until it lands, the celled writers are named **`Print` and
   `PrintLn`**, which `Write`/`WriteLn` absorb when the fix arrives; `OutText`
   carries free text throughout.
-- **A per-canvas text grid** — a window that scrolls its own celled contents.
-  The grid stays singular until something needs otherwise.
-- **Canvas scaling** — a texture can be presented at other than 1:1, which is
-  sprite scaling for free. `Width`/`Height` stay read-only until wanted.
+- ~~A per-canvas text grid~~ — arrived as the Window class: a window that
+  scrolls its own celled contents is exactly what a Window is.
+- **ViewPort scaling** — a texture can be presented at other than 1:1, which
+  is sprite scaling for free. Sizes stay fixed at creation until wanted.
 - **CJK vertical writing**, as above.
 - ~~`Blink`~~ — arrived early, because the clock it waited on was the
   language's own `clock ()` [RT-012] all along. The spelling is Turbo

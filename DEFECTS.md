@@ -14,7 +14,44 @@ Three kinds of thing, and the distinction matters:
 
 ## Defects
 
-*None open.*
+### L-2 — overload selection warns even when arity makes it unambiguous
+
+**Status:** open, reported 2026-09-03. Blocks the Pascal-style aliases below.
+
+A call to an overloaded name warns at *every* call site, whatever the
+arities involved, and the warning goes to **stdout** where it mixes with the
+program's own output:
+
+```algol24
+procedure Bump (By : Integer);              begin … end
+procedure Bump (T : Thing, By : Integer);   begin … end
+```
+```console
+[WARN] p.a24:5: 'Bump' selects among 2 overloads at run time.
+[WARN] p.a24:6: 'Bump' selects among 2 overloads at run time.
+global bump 5
+```
+
+[ERR-010] is right that selection is dynamic when argument *types* decide it
+— the type system is gradual, so a declared `Any` may hold anything at run
+time. But **arity is not a type**: a call written with one argument cannot
+reach a two-argument overload, and the compiler knows both counts before the
+program runs. Where the arities differ and only one candidate can match, the
+selection is static and the warning has nothing to warn about.
+
+Two consequences for a library:
+
+- **The warning is on stdout.** Even one unavoidable overload would corrupt
+  every program's output, and would break this repository's
+  `check-reference.py` and `examples/check.sh`, which compare a program's
+  output byte for byte. Warnings on stderr would leave that harness intact.
+- **Named arguments suppress it** — `Bump (T, By: 7)` is silent — which is a
+  workaround only where the call site can afford the extra word.
+
+What it costs here: `graph`'s methods cannot have the Pascal-style free
+function aliases `Print (W, 'text')` beside the screen-wide `Print ('text')`,
+which is the spelling a Turbo Pascal program would use. The aliases work
+perfectly; they are just too loud to ship.
 
 ---
 
