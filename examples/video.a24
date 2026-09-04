@@ -8,11 +8,6 @@
 
 uses graph;
 
-function SDL_PollEvent (E : Pointer) : Integer;
-    external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
-procedure SDL_Delay (Ms : Integer);
-    external 'SDL_Delay' in '/opt/homebrew/lib/libSDL2.dylib';
-
 begin
     InitGraph (1280, 800, 'HighVideo and LowVideo', False);
 
@@ -90,23 +85,9 @@ begin
     PrintLn ('');
     PrintLn ('close the window, or press any key, to finish.');
 
-    var Event   := Buffer (64);
-    var Running := True;
-
-    while Running do
-    begin
-        while SDL_PollEvent (Event.Address) <> 0 do
-        begin
-            var Kind := Event.GetInt (0);
-
-            if Kind = 256 then Running := False;
-            if Kind = 768 then Running := False;
-        end
-
-        // An idle present keeps the blink phase beating.
-        Print ('');
-        SDL_Delay (16);
-    end
+    // Wait for any key, or the close button -- ReadKey blocks, and keeps the
+    // blink phase beating while it does.
+    ReadKey ();
 
     CloseGraph ();
 end

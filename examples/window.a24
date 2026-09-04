@@ -9,11 +9,6 @@
 
 uses graph;
 
-function SDL_PollEvent (E : Pointer) : Integer;
-    external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
-procedure SDL_Delay (Ms : Integer);
-    external 'SDL_Delay' in '/opt/homebrew/lib/libSDL2.dylib';
-
 const EVENT_QUIT    := 256;
 const EVENT_KEYDOWN := 768;
 
@@ -41,21 +36,8 @@ begin
     WriteLn ('desktop: ' + Str (ScreenWidth ()) + ' x ' + Str (ScreenHeight ()));
     WriteLn ('close the window, or press any key in it, to finish.');
 
-    var Event   := Buffer (64);
-    var Running := True;
-
-    while Running do
-    begin
-        while SDL_PollEvent (Event.Address) <> 0 do
-        begin
-            var Kind := Event.GetInt (0);
-
-            if Kind = EVENT_QUIT then Running := False;
-            if Kind = EVENT_KEYDOWN then Running := False;
-        end
-
-        SDL_Delay (16);
-    end
+    // Wait for any key, or the close button.
+    ReadKey ();
 
     CloseGraph ();
 end

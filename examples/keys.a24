@@ -1,0 +1,54 @@
+// Every key, named as it arrives: type, arrow, function-key and emoji your
+// way around, and watch ReadKey answer one Char per key.
+//
+//     algc examples/keys.a24
+//
+// Esc, or the window's close button, finishes.
+
+uses graph;
+
+begin
+    InitGraph (1280, 800, 'ReadKey', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+
+    TextColor (White);
+    PrintLn ('Press keys. One Char each: characters as themselves, specials');
+    PrintLn ('by name, Ctrl letters as their low characters.  Esc finishes.');
+    PrintLn ('');
+
+    var Names := [KeyUp : 'KeyUp',   KeyDown : 'KeyDown', KeyLeft : 'KeyLeft',
+                  KeyRight : 'KeyRight', KeyHome : 'KeyHome', KeyEnd : 'KeyEnd',
+                  KeyPgUp : 'KeyPgUp', KeyPgDn : 'KeyPgDn',
+                  KeyInsert : 'KeyInsert', KeyDelete : 'KeyDelete',
+                  KeyF1 : 'KeyF1', KeyF2 : 'KeyF2', KeyF3 : 'KeyF3',
+                  KeyF4 : 'KeyF4', KeyF5 : 'KeyF5', KeyF6 : 'KeyF6',
+                  KeyF7 : 'KeyF7', KeyF8 : 'KeyF8', KeyF9 : 'KeyF9',
+                  KeyF10 : 'KeyF10', KeyF11 : 'KeyF11', KeyF12 : 'KeyF12',
+                  #13 : 'Enter', #9 : 'Tab', #8 : 'Backspace'];
+
+    while True do
+    begin
+        var K := ReadKey ();
+
+        if K = KeyClose then Halt (0);
+        if K = #27 then Halt (0);
+
+        if K in Names then
+        begin
+            TextColor (LightCyan);
+            Print (Names[K] + ' ');
+        end
+        else if Ord (K) < 32 then
+        begin
+            TextColor (LightGreen);
+            Print ('Ctrl-' + Str (Char (Ord (K) + 96)) + ' ');
+        end
+        else
+        begin
+            TextColor (Yellow);
+            Print (Str (K));
+        end
+    end
+end

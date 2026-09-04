@@ -63,6 +63,14 @@ function SDL_SetTextureBlendMode (Tex : Pointer, Mode : Integer) : Integer;
     external 'SDL_SetTextureBlendMode' in '/opt/homebrew/lib/libSDL2.dylib';
 function SDL_SetHint (Name : String, Value : String) : Integer;
     external 'SDL_SetHint' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_PollEvent (E : Pointer) : Integer;
+    external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
+function SDL_PushEvent (E : Pointer) : Integer;
+    external 'SDL_PushEvent' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_StartTextInput ();
+    external 'SDL_StartTextInput' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_Delay (Ms : Integer);
+    external 'SDL_Delay' in '/opt/homebrew/lib/libSDL2.dylib';
 
 /// Aims the C cell-stamper at a framebuffer.
 ///
@@ -125,6 +133,39 @@ const Transparent := -1;
 /// survives unchanged.
 const Blink := 16777216;
 
+/// The keys that are not characters, each as one Char of its own.
+///
+/// Turbo Pascal's ReadKey answered an extended key as #0 and then a scan code
+/// on the next call -- a BIOS artifact, two reads per arrow. Here every key
+/// is one Char: the arrows, function keys and the rest live in Unicode's
+/// private-use area, so `if ReadKey () = KeyUp` reads as it should. Enter,
+/// Escape, Tab and Backspace arrive as their real characters, #13 #27 #9 #8,
+/// as they always did. KeyClose is the window's close button, delivered
+/// through the same stream because a window is part of this machine.
+const KeyUp     := #57344;
+const KeyDown   := #57345;
+const KeyLeft   := #57346;
+const KeyRight  := #57347;
+const KeyHome   := #57348;
+const KeyEnd    := #57349;
+const KeyPgUp   := #57350;
+const KeyPgDn   := #57351;
+const KeyInsert := #57352;
+const KeyDelete := #57353;
+const KeyF1     := #57360;
+const KeyF2     := #57361;
+const KeyF3     := #57362;
+const KeyF4     := #57363;
+const KeyF5     := #57364;
+const KeyF6     := #57365;
+const KeyF7     := #57366;
+const KeyF8     := #57367;
+const KeyF9     := #57368;
+const KeyF10    := #57369;
+const KeyF11    := #57370;
+const KeyF12    := #57371;
+const KeyClose  := #57384;
+
 /// The sixteen colors of a CGA text screen, by their Turbo Pascal names.
 ///
 /// Named constants over 24-bit values, so `TextColor (Yellow)` reads like
@@ -181,6 +222,30 @@ var BlinkPixels  := nil;
 var BlinkTexture := nil;
 var TextBlinking := False;
 var BlinkPhaseMs := 267;
+
+// The key queue: what PumpKeys has read from SDL and ReadKey has not yet
+// answered. A head index rather than a shifting list, cleared when drained.
+var KeyQueue      := [];
+var KeyHead       := 0;
+var EventScratch  := nil;
+var LastPresentMs := 0;
+
+// Which SDL keysyms are keys of ours, and which Char each answers. The
+// values past a billion carry SDL's bit 30, its spelling for keys with no
+// character; 13, 27, 8, 9 and 127 are Enter, Escape, Backspace, Tab and
+// Delete, and 1073741912 is the keypad's Enter, folded into #13.
+var SpecialSyms := [1073741906 : KeyUp,     1073741905 : KeyDown,
+                    1073741904 : KeyLeft,   1073741903 : KeyRight,
+                    1073741898 : KeyHome,   1073741901 : KeyEnd,
+                    1073741899 : KeyPgUp,   1073741902 : KeyPgDn,
+                    1073741897 : KeyInsert, 127        : KeyDelete,
+                    1073741882 : KeyF1,     1073741883 : KeyF2,
+                    1073741884 : KeyF3,     1073741885 : KeyF4,
+                    1073741886 : KeyF5,     1073741887 : KeyF6,
+                    1073741888 : KeyF7,     1073741889 : KeyF8,
+                    1073741890 : KeyF9,     1073741891 : KeyF10,
+                    1073741892 : KeyF11,    1073741893 : KeyF12,
+                    13 : #13, 27 : #27, 8 : #8, 9 : #9, 1073741912 : #13];
 var GridCols    := 80;
 var GridRows    := 25;
 var GridW       := 0;
@@ -260,6 +325,8 @@ begin
 
     SDL_RenderPresent (Renderer);
     SDL_PumpEvents ();
+
+    LastPresentMs := Trunc (Clock () * 1000.0);
 end
 
 /// The value of one hex digit; anything else is zero.
@@ -677,6 +744,10 @@ begin
     TextBack  := Transparent;
     TextBlinking := False;
     BlinkPhaseMs := 267;
+    KeyQueue  := [];
+    KeyHead   := 0;
+
+    SDL_StartTextInput ();
 
     SDL_SetRenderDrawColor (Renderer, 0, 0, 0, 255);
     Present ();
@@ -851,6 +922,175 @@ begin
     Present ();
 end
 
+
+// ------------------------------------------------------------------ input --
+
+/// Adds one key to the queue.
+///
+/// Private to this unit.
+procedure EnqueueKey (K : Char);
+begin
+    KeyQueue.Add (K);
+end
+
+/// Takes the UTF-8 text out of a TEXTINPUT event, one Char per codepoint.
+///
+/// Private to this unit, and a function of the event's bytes alone so the
+/// tests can feed it crafted ones: synthesizing a real TEXTINPUT through
+/// SDL_PushEvent crashes the sdl2-compat layer this machine's SDL2 is, so
+/// the decode is exercised directly and only KEYDOWN and QUIT go through
+/// SDL's queue in tests. Typing reaches it the ordinary way.
+procedure TakeTextEvent (E);
+begin
+    var I := 12;
+
+    while I < 44 do
+    begin
+        var B := E[I];
+
+        if B = 0 then Exit;
+
+        if B < 128 then
+        begin
+            EnqueueKey (Char (B));
+            I := I + 1;
+        end
+        else if B < 224 then
+        begin
+            EnqueueKey (Char ((B mod 32) * 64 + E[I + 1] mod 64));
+            I := I + 2;
+        end
+        else if B < 240 then
+        begin
+            EnqueueKey (Char ((B mod 16) * 4096 + (E[I + 1] mod 64) * 64
+                              + E[I + 2] mod 64));
+            I := I + 3;
+        end
+        else
+        begin
+            EnqueueKey (Char ((B mod 8) * 262144 + (E[I + 1] mod 64) * 4096
+                              + (E[I + 2] mod 64) * 64 + E[I + 3] mod 64));
+            I := I + 4;
+        end
+    end
+end
+
+/// Takes the key out of a KEYDOWN event, when it is one of ours.
+///
+/// Private to this unit. A control letter arrives as its low character --
+/// Ctrl-A is #1 -- as it did on the machines this vocabulary comes from. A
+/// plain letter is ignored here, because the text channel delivers it with
+/// the layout and shift applied, which a keysym does not carry.
+procedure TakeKeyEvent (E);
+begin
+    var Sym := E.GetInt (20);
+
+    if E[24] div 64 > 0 then
+      if Sym >= 97 then
+        if Sym <= 122 then
+        begin
+            EnqueueKey (Char (Sym - 96));
+
+            Exit;
+        end
+
+    if Sym in SpecialSyms then EnqueueKey (SpecialSyms[Sym]);
+end
+
+/// Drains SDL's event queue into the key queue.
+///
+/// Private to this unit.
+procedure PumpKeys ();
+begin
+    if EventScratch = nil then EventScratch := Buffer (64);
+
+    while SDL_PollEvent (EventScratch.Address) <> 0 do
+    begin
+        var Kind := EventScratch.GetInt (0);
+
+        if Kind = 256 then EnqueueKey (KeyClose);
+        if Kind = 768 then TakeKeyEvent (EventScratch);
+        if Kind = 771 then TakeTextEvent (EventScratch);
+    end
+end
+
+/// Presents when at least a frame has passed since the last one.
+///
+/// Private to this unit: the heartbeat that keeps Blink beating while a
+/// program waits on input, without a tight loop presenting thousands of
+/// frames a second.
+procedure PresentIfDue ();
+begin
+    if Trunc (Clock () * 1000.0) - LastPresentMs >= 16 then Present ();
+end
+
+/// Whether a key is waiting.
+///
+/// Neither consumes the key nor blocks; `ReadKey` answers it. Polling this in
+/// a loop keeps the blink phase beating, because the poll presents when a
+/// frame is due.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `KeyPressed Sees A Key Without Consuming It`
+function KeyPressed () : Boolean;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    PumpKeys ();
+    PresentIfDue ();
+
+    Exit KeyHead < KeyQueue.Length;
+end
+
+/// The next key, waiting for one if none is ready.
+///
+/// One Char per key, always: a typed character arrives as itself with the
+/// layout and shift applied -- Unicode included, so é and 你 are single
+/// answers -- a special key as its constant (`KeyUp`, `KeyF1`, ...), Enter
+/// Escape Tab and Backspace as #13 #27 #9 #8, a control letter as its low
+/// character, and the window's close button as `KeyClose`. Nothing echoes.
+///
+/// Turbo Pascal answered a special key as #0 and a scan code on the next
+/// call; that was the BIOS showing through, and it is not kept.
+///
+/// While waiting, the blink phase keeps beating -- the wait presents once a
+/// frame -- so `ReadKey` is also the idle loop a finished screen wants.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `ReadKey Answers Keys In The Order They Arrived`
+function ReadKey () : Char;
+begin
+    if Window = nil then raise 'Graph is not open.';
+
+    while True do
+    begin
+        PumpKeys ();
+
+        if KeyHead < KeyQueue.Length then
+        begin
+            var K := KeyQueue[KeyHead];
+
+            KeyHead := KeyHead + 1;
+
+            if KeyHead = KeyQueue.Length then
+            begin
+                KeyQueue := [];
+                KeyHead  := 0;
+            end
+
+            Exit K;
+        end
+
+        PresentIfDue ();
+        SDL_Delay (10);
+    end
+end
 
 // ------------------------------------------------------------- text mode --
 
@@ -2287,4 +2527,176 @@ begin
     Message := '';
     try SetBlinkRate (-100); except on e : String do Message := e; end
     AssertEqual ('SetBlinkRate needs a positive time.', Message);
+end
+
+// ------------------------------------------------------------ input tests --
+
+/// KEYDOWN and QUIT go through SDL's real queue; only TEXTINPUT is fed to
+/// the decoder directly, because pushing one crashes the sdl2-compat layer.
+test 'A Pushed Arrow Comes Back As Its Constant';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'keys', False);
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 768);
+    E.PutInt (20, 1073741906);
+    SDL_PushEvent (E.Address);
+
+    AssertEqual (KeyUp, ReadKey ());
+
+    CloseGraph ();
+end
+
+test 'KeyPressed Sees A Key Without Consuming It';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'peek', False);
+
+    AssertTrue (not KeyPressed ());
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 768);
+    E.PutInt (20, 1073741882);
+    SDL_PushEvent (E.Address);
+
+    AssertTrue (KeyPressed ());
+    AssertTrue (KeyPressed ());
+    AssertEqual (KeyF1, ReadKey ());
+    AssertTrue (not KeyPressed ());
+
+    CloseGraph ();
+end
+
+test 'ReadKey Answers Keys In The Order They Arrived';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'order', False);
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 768);
+    E.PutInt (20, 1073741882);        // F1
+    SDL_PushEvent (E.Address);
+    E.PutInt (20, 13);                // Enter
+    SDL_PushEvent (E.Address);
+    E.PutInt (20, 127);               // Delete
+    SDL_PushEvent (E.Address);
+
+    AssertEqual (KeyF1, ReadKey ());
+    AssertEqual (#13, ReadKey ());
+    AssertEqual (KeyDelete, ReadKey ());
+
+    CloseGraph ();
+end
+
+test 'A Control Letter Arrives As Its Low Character';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'ctrl', False);
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 768);
+    E.PutInt (20, 97);
+    E.PutInt (24, 64);                // left Ctrl held
+    SDL_PushEvent (E.Address);
+
+    AssertEqual (Char (1), ReadKey ());
+
+    CloseGraph ();
+end
+
+/// A plain letter keydown carries no layout or shift; the text channel owns
+/// letters, so the keydown is ignored and nothing arrives twice.
+test 'A Plain Letter Keydown Is Ignored';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'plain', False);
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 768);
+    E.PutInt (20, 97);
+    SDL_PushEvent (E.Address);
+
+    AssertTrue (not KeyPressed ());
+
+    CloseGraph ();
+end
+
+test 'The Close Button Arrives As KeyClose';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'close', False);
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 256);
+    SDL_PushEvent (E.Address);
+
+    AssertEqual (KeyClose, ReadKey ());
+
+    CloseGraph ();
+end
+
+/// The decoder, fed crafted bytes: one ASCII, one two-byte, one three-byte
+/// and one four-byte codepoint, each a single Char.
+test 'Text Arrives Decoded From UTF Eight';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'text', False);
+
+    var E := Buffer (64);
+
+    // One contiguous UTF-8 run -- a zero byte is the decoder's terminator,
+    // so the codepoints must pack with no gaps between the words.
+    E.PutInt (12, -458636447);
+    E.PutInt (16, -1611620163);
+    E.PutInt (20, 33433);
+
+    TakeTextEvent (E);
+
+    AssertEqual (97, Ord (ReadKey ()));
+    AssertEqual (233, Ord (ReadKey ()));
+    AssertEqual (20320, Ord (ReadKey ()));
+    AssertEqual (128578, Ord (ReadKey ()));
+
+    CloseGraph ();
+end
+
+test 'A Fresh Window Starts With An Empty Queue';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'stale', False);
+
+    var E := Buffer (64);
+
+    E.PutInt (0, 768);
+    E.PutInt (20, 1073741882);
+    SDL_PushEvent (E.Address);
+    PumpKeys ();
+
+    CloseGraph ();
+    InitGraph (320, 200, 'fresh', False);
+
+    AssertTrue (not KeyPressed ());
+
+    CloseGraph ();
+end
+
+test 'Input Raises When The Window Is Not Open';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try KeyPressed (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try ReadKey (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
 end

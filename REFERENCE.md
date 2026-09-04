@@ -35,6 +35,8 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Int`](#int) | function | `math` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
+| [`KeyPressed`](#keypressed) | function | `graph` |
+| [`KeyUp` … `KeyClose`](#keys) | constants | `graph` |
 | [`Ln`](#ln) | function | `math` |
 | [`LowVideo`](#lowvideo) | procedure | `graph` |
 | [`Max`](#max) | function | `math` |
@@ -51,6 +53,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
 | [`RandomReal`](#randomreal) | function | `random` |
+| [`ReadKey`](#readkey) | function | `graph` |
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
@@ -1218,6 +1221,87 @@ true
 
 ---
 
+## KeyPressed
+
+*function* — unit `graph`
+
+**Function**
+
+Returns True when a key is waiting.
+
+**Declaration**
+
+```algol24
+function KeyPressed () : Boolean;
+```
+
+**Remarks**
+
+Neither consumes the key nor blocks; [`ReadKey`](#readkey) answers it.
+
+Polling this in a loop keeps the blink phase beating — the poll presents
+when a frame is due — so `while not KeyPressed do` animates a screen the
+way the era's programs did. When the loop has nothing else to do,
+[`ReadKey`](#readkey) alone is the better idle, since it sleeps between
+looks.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`Keys`](#keys), [`ReadKey`](#readkey)
+
+**Example**
+
+See [`ReadKey`](#readkey), which shows the empty queue answered;
+`examples/keys.a24` echoes every key as it arrives.
+
+---
+
+## Keys
+
+*constants* — unit `graph`
+
+**Function**
+
+The keys that are not characters, each as one Char of its own.
+
+**Declaration**
+
+```algol24
+const KeyUp     := #57344;    const KeyF1  := #57360;
+const KeyDown   := #57345;    const KeyF2  := #57361;
+const KeyLeft   := #57346;    ...
+const KeyRight  := #57347;    const KeyF12 := #57371;
+const KeyHome   := #57348;
+const KeyEnd    := #57349;    const KeyClose := #57384;
+const KeyPgUp   := #57350;
+const KeyPgDn   := #57351;
+const KeyInsert := #57352;
+const KeyDelete := #57353;
+```
+
+**Remarks**
+
+Values in Unicode's private-use area, so each special key is an ordinary
+Char and `if ReadKey () = KeyUp` reads as it should. Enter, Escape, Tab and
+Backspace are not here because they never needed to be: they arrive as their
+real characters, `#13` `#27` `#9` `#8`, as they always did.
+
+`KeyClose` is the window's close button, delivered through the same stream —
+a window is part of this machine, and a program's one input loop should hear
+it.
+
+**See also**
+
+[`KeyPressed`](#keypressed), [`ReadKey`](#readkey)
+
+**Example**
+
+See [`ReadKey`](#readkey).
+
+---
+
 ## Ln
 
 *function* — unit `math`
@@ -1980,6 +2064,74 @@ WriteLn (RandomReal ());
 ```console
 0.041630344771878214
 0.45449244472862915
+```
+
+---
+
+## ReadKey
+
+*function* — unit `graph`
+
+**Function**
+
+Returns the next key, waiting for one if none is ready.
+
+**Declaration**
+
+```algol24
+function ReadKey () : Char;
+```
+
+**Remarks**
+
+One Char per key, always:
+
+| the key | the answer |
+| --- | --- |
+| a typed character | itself, layout and shift applied — Unicode included, `é` and `你` are single answers |
+| an arrow, function or navigation key | its [constant](#keys) — `KeyUp`, `KeyF1`, … |
+| Enter, Escape, Tab, Backspace | `#13` `#27` `#9` `#8` |
+| a Ctrl letter | its low character — Ctrl-A is `#1` |
+| the window's close button | `KeyClose` |
+
+Nothing echoes, as Turbo Pascal had it. What is **not** kept is TP's
+extended-key protocol — `#0` and then a scan code on the next call — which
+was the BIOS showing through, two reads per arrow.
+
+While waiting, the blink phase keeps beating: the wait presents once a
+frame, so `ReadKey` is also the idle a finished screen wants, and the demos
+end with exactly that.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`KeyPressed`](#keypressed), [`Keys`](#keys)
+
+**Example**
+
+The idiom is a loop, and it needs a keyboard:
+
+    while ReadKey () <> #27 do
+        Print ('.');
+
+`examples/keys.a24` is that loop grown up — every key echoed by name until
+Esc. What can run unattended is the empty-queue side:
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'keys', False);
+
+WriteLn (KeyPressed ());
+
+CloseGraph ();
+WriteLn ('no key was waiting');
+```
+
+```console
+false
+no key was waiting
 ```
 
 ---
