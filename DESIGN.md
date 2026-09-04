@@ -142,14 +142,13 @@ Nothing below is designed yet; nothing above blocks any of it.
 - **Canvas scaling** — a texture can be presented at other than 1:1, which is
   sprite scaling for free. `Width`/`Height` stay read-only until wanted.
 - **CJK vertical writing**, as above.
-- **`Blink`**, parked until input arrives. Turbo Pascal spelled it
-  `TextColor (LightRed + Blink)` with `Blink = 128` — the CGA attribute
-  byte's bit 7, the same bit BASIC's `COLOR 16`+ wrote. The spelling can
-  survive here as bit 24 (`Blink := 16777216`), since 128 is a legitimate
-  navy in 24-bit color; blinking cells would stamp into a fourth texture the
-  GPU shows and hides by phase. What it waits on is a clock: something must
-  present periodically, and the event loop that would naturally drive it
-  belongs to the input assignment.
+- ~~`Blink`~~ — arrived early, because the clock it waited on was the
+  language's own `clock ()` [RT-012] all along. The spelling is Turbo
+  Pascal's with the flag moved to bit 24; blinking ink lives on its own
+  texture that `Present` shows and hides at the VGA's 267ms cadence. What
+  remains true: the phase advances only when something presents, so an idle
+  program ticks `Print ('')` — until input's event loop takes that job over
+  properly.
 
 ## What was measured on the way here
 

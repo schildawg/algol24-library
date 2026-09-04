@@ -18,6 +18,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Black` … `White`](#colors) | constants | `graph` |
+| [`Blink`](#blink) | constant | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
 | [`ClrEol`](#clreol) | procedure | `graph` |
 | [`ClrScr`](#clrscr) | procedure | `graph` |
@@ -53,6 +54,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
+| [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`TextBackground`](#textbackground) | procedure | `graph` |
 | [`TextColor`](#textcolor) | procedure | `graph` |
@@ -232,6 +234,68 @@ end
 
 ```console
 [INFO] Test: A measurement lands where it should .................... [ PASS ]
+```
+
+---
+
+## Blink
+
+*constant* — unit `graph`
+
+**Function**
+
+The blink flag, added onto a [`TextColor`](#textcolor).
+
+**Declaration**
+
+```algol24
+const Blink := 16777216;
+```
+
+**Remarks**
+
+`TextColor (LightRed + Blink)` makes the ink blink — 267 milliseconds on,
+267 off by default, the VGA's own cadence of sixteen frames each way;
+[`SetBlinkRate`](#setblinkrate) chooses another. The flag
+is per-color, as Turbo Pascal's was: the next `TextColor` without it writes
+steady text, and a steady stamp over a blinking cell ends its blinking.
+[`NormVideo`](#normvideo) and [`TextMode`](#textmode) end it too.
+
+Only the letters vanish; the cell's background stays, exactly as the
+adapter had it.
+
+Turbo Pascal's value was 128 — the CGA attribute byte's bit 7, the same bit
+BASIC's `COLOR 16` and up wrote. Here 128 is a legitimate navy, so the flag
+rides bit 24 and the spelling survives unchanged.
+
+The phase advances whenever something presents, on the language's own
+`clock ()`. A program drawing or sitting in a loop that ticks `Print ('')`
+blinks; one that draws once and halts shows whichever phase it landed in.
+
+**See also**
+
+[`Colors`](#colors), [`NormVideo`](#normvideo), [`TextColor`](#textcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'blink', False);
+
+TextColor (LightRed + Blink);
+Print ('this text blinks');
+
+NormVideo ();
+PrintLn (' and this does not');
+
+WriteLn (WhereY ());
+
+CloseGraph ();
+```
+
+```console
+1
 ```
 
 ---
@@ -2069,6 +2133,65 @@ true
 
 ---
 
+## SetBlinkRate
+
+*procedure* — unit `graph`
+
+**Function**
+
+Sets how long each blink phase lasts, in milliseconds.
+
+**Declaration**
+
+```algol24
+procedure SetBlinkRate (Ms : Integer);
+```
+
+**Remarks**
+
+Blinking ink is visible for `Ms` milliseconds and hidden for the same, so a
+full blink takes twice this. Two cadences with history behind them:
+
+| | |
+| --- | --- |
+| `267` | the adapter's own — sixteen frames of sixty each way; the default |
+| `533` | the slower, one-second blink of the console caret that came after |
+
+The rate is a program-level setting: [`TextMode`](#textmode) and
+[`NormVideo`](#normvideo) reset the colors and the blink flag, never this. A
+fresh `InitGraph` restores 267.
+
+Turbo Pascal offered no such method, because the rate lived in a video
+register — the hardware's limitation, not a design worth inheriting.
+
+Raises `SetBlinkRate needs a positive time.` for an `Ms` of zero or less.
+
+**See also**
+
+[`Blink`](#blink), [`TextColor`](#textcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'cadence', False);
+
+SetBlinkRate (533);
+
+TextColor (Yellow + Blink);
+Print ('the unhurried blink');
+
+CloseGraph ();
+WriteLn ('set');
+```
+
+```console
+set
+```
+
+---
+
 ## SetSeed
 
 *procedure* — unit `random`
@@ -2329,7 +2452,8 @@ procedure TextColor (Color : Integer);
 **Remarks**
 
 Any RGB Integer; the sixteen [color constants](#colors) are the classic
-vocabulary. The default is `LightGray`, which is what a text mode woke up in.
+vocabulary, and adding [`Blink`](#blink) makes the ink blink. The default is
+`LightGray`, which is what a text mode woke up in.
 
 Ink is the one thing a cell always has, so `Transparent` raises
 `TextColor cannot be transparent.`

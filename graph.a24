@@ -14,6 +14,8 @@
 /// path throughout.
 unit graph;
 
+uses math;
+
 // ------------------------------------------------------------------ SDL --
 //
 // Private. Each declaration copies the C signature exactly, which is the whole
@@ -114,6 +116,15 @@ const BLENDMODE_BLEND            := 1;
 /// `TextBackground` accepts it; as an ink it raises.
 const Transparent := -1;
 
+/// The blink flag, added onto a TextColor as Turbo Pascal had it.
+///
+/// `TextColor (LightRed + Blink)` makes the ink blink at the adapter's
+/// cadence. Turbo Pascal's value was 128 -- the CGA attribute byte's bit 7,
+/// the same bit BASIC's COLOR 16 and up wrote -- but 128 is a legitimate
+/// navy in 24-bit color, so the flag rides bit 24 instead and the spelling
+/// survives unchanged.
+const Blink := 16777216;
+
 /// The sixteen colors of a CGA text screen, by their Turbo Pascal names.
 ///
 /// Named constants over 24-bit values, so `TextColor (Yellow)` reads like
@@ -164,8 +175,12 @@ var CurrentY := 0;
 //
 // The cursor is in cells, 0-based like everything else in this language; the
 // colors are the grid's current ink and cell background.
-var TextPixels  := nil;
-var TextTexture := nil;
+var TextPixels   := nil;
+var TextTexture  := nil;
+var BlinkPixels  := nil;
+var BlinkTexture := nil;
+var TextBlinking := False;
+var BlinkPhaseMs := 267;
 var GridCols    := 80;
 var GridRows    := 25;
 var GridW       := 0;
@@ -232,6 +247,15 @@ begin
     begin
         SDL_UpdateTexture (TextTexture, nil, TextPixels.Address, GridW * 4);
         SDL_RenderCopy (Renderer, TextTexture, nil, nil);
+
+        // The blink layer shows in one phase and not the other. The clock
+        // is the language's own [RT-012]; whoever presents sees the right
+        // phase, so any drawing or an idle Print ('') keeps it beating.
+        if Trunc (Clock () * 1000.0) div BlinkPhaseMs mod 2 = 0 then
+        begin
+            SDL_UpdateTexture (BlinkTexture, nil, BlinkPixels.Address, GridW * 4);
+            SDL_RenderCopy (Renderer, BlinkTexture, nil, nil);
+        end
     end
 
     SDL_RenderPresent (Renderer);
@@ -408,6 +432,35 @@ begin
 
     TextPixels := Buffer (GridW * GridH * 4);
 
+    // The blink layer: the ink of blinking cells only, shown and hidden by
+    // Present on the clock. Their backgrounds stay in the text layer, which
+    // is why only the letters vanish, as the adapter had it.
+    BlinkTexture := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
+                                       GridW, GridH);
+
+    if BlinkTexture = nil then raise 'Graph: ' + SDL_GetError ();
+
+    SDL_SetTextureBlendMode (BlinkTexture, BLENDMODE_BLEND);
+
+    BlinkPixels := Buffer (GridW * GridH * 4);
+
+    StampTarget (TextPixels.Address, GridW, GridH);
+end
+
+/// Aims the stamper at the blink layer; AimText undoes it.
+///
+/// Private to this unit. The stamper's target is one piece of C state, so
+/// every excursion to the blink layer ends by aiming back.
+procedure AimBlink ();
+begin
+    StampTarget (BlinkPixels.Address, GridW, GridH);
+end
+
+/// Aims the stamper back at the text layer.
+///
+/// Private to this unit.
+procedure AimText ();
+begin
     StampTarget (TextPixels.Address, GridW, GridH);
 end
 
@@ -418,9 +471,12 @@ end
 procedure DropGrid ();
 begin
     if TextTexture <> nil then SDL_DestroyTexture (TextTexture);
+    if BlinkTexture <> nil then SDL_DestroyTexture (BlinkTexture);
 
-    TextTexture := nil;
-    TextPixels  := nil;
+    TextTexture  := nil;
+    TextPixels   := nil;
+    BlinkTexture := nil;
+    BlinkPixels  := nil;
 end
 
 /// Mixes Ink into the ground at a coverage of 0 .. 255, channel by channel.
@@ -619,6 +675,8 @@ begin
     CursorRow := 0;
     TextInk   := LightGray;
     TextBack  := Transparent;
+    TextBlinking := False;
+    BlinkPhaseMs := 267;
 
     SDL_SetRenderDrawColor (Renderer, 0, 0, 0, 255);
     Present ();
@@ -861,12 +919,13 @@ begin
     if Window = nil then raise 'Graph is not open.';
     if Cols <= 0 or Rows <= 0 then raise 'TextMode needs a positive grid.';
 
-    GridCols  := Cols;
-    GridRows  := Rows;
-    CursorCol := 0;
-    CursorRow := 0;
-    TextInk   := LightGray;
-    TextBack  := Transparent;
+    GridCols     := Cols;
+    GridRows     := Rows;
+    CursorCol    := 0;
+    CursorRow    := 0;
+    TextInk      := LightGray;
+    TextBack     := Transparent;
+    TextBlinking := False;
 
     DropGrid ();
     Present ();
@@ -938,6 +997,12 @@ procedure TextColor (Color : Integer);
 begin
     if Color < 0 then raise 'TextColor cannot be transparent.';
 
+    TextBlinking := Color >= Blink;
+
+    if TextBlinking then Color := Color - Blink;
+
+    if Color > 16777215 then raise 'TextColor wants an RGB color, plus Blink at most.';
+
     TextInk := Color;
 end
 
@@ -957,6 +1022,30 @@ begin
     if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
 
     TextBack := Color;
+end
+
+/// Sets how long each blink phase lasts, in milliseconds.
+///
+/// Blinking ink is visible for Ms milliseconds and hidden for the same, so a
+/// full blink takes twice this. The default is 267 -- the adapter's own
+/// cadence, sixteen frames of sixty each way -- and 533 gives the slower,
+/// one-second blink of the console caret that came after. Turbo Pascal
+/// offered no such method because the rate lived in a register; that was the
+/// hardware's limitation, not a design worth inheriting.
+///
+/// The rate is a program-level setting: `TextMode` and `NormVideo` reset the
+/// colors and the blink flag, never this. A fresh `InitGraph` restores 267.
+///
+/// # Raises
+/// `SetBlinkRate needs a positive time.` for an Ms of zero or less.
+///
+/// # Examples
+/// `SetBlinkRate Chooses The Cadence`
+procedure SetBlinkRate (Ms : Integer);
+begin
+    if Ms <= 0 then raise 'SetBlinkRate needs a positive time.';
+
+    BlinkPhaseMs := Ms;
 end
 
 /// Brightens the ink celled text draws with.
@@ -1026,8 +1115,9 @@ end
 /// `NormVideo Restores The Startup Colors`
 procedure NormVideo ();
 begin
-    TextInk  := LightGray;
-    TextBack := Transparent;
+    TextInk      := LightGray;
+    TextBack     := Transparent;
+    TextBlinking := False;
 end
 
 /// Moves the cursor to the start of the next row, scrolling at the bottom.
@@ -1051,6 +1141,10 @@ begin
     if TextBack >= 0 then Fill := TextBack - 16777216;   // 0xFF000000 | bg, signed
 
     ScrollTarget (FontHeight, Fill);
+
+    AimBlink ();
+    ScrollTarget (FontHeight, 0);
+    AimText ();
 end
 
 /// Stamps one codepoint at the cursor and advances it, wrapping first when
@@ -1077,12 +1171,34 @@ begin
     if Cells < 1 then Cells := 1;
     if CursorCol + Cells > TextCols () then NewLine ();
 
-    if Words = nil then
-        StampCell (CursorCol * CellWidth (), CursorRow * FontHeight, nil,
-                   CellWidth (), FontHeight, 1, TextInk, TextBack);
+    var CellX := CursorCol * CellWidth ();
+    var CellY := CursorRow * FontHeight;
+
+    // A blinking glyph's ink goes to the blink layer and only its background
+    // to the text layer, which is why the letters vanish and the cell stays.
+    // A steady stamp clears the blink cell it lands on, so old blink never
+    // lingers under new text.
+    if TextBlinking then
+    begin
+        StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, TextBack);
+        AimBlink ();
+
+        if Words = nil then StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, Transparent);
+        else StampCell (CellX, CellY, Words.Address, Wide, FontHeight, Mode, TextInk, Transparent);
+
+        AimText ();
+    end
     else
-        StampCell (CursorCol * CellWidth (), CursorRow * FontHeight, Words.Address,
-                   Wide, FontHeight, Mode, TextInk, TextBack);
+    begin
+        if Words = nil then
+            StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, TextBack);
+        else
+            StampCell (CellX, CellY, Words.Address, Wide, FontHeight, Mode, TextInk, TextBack);
+
+        AimBlink ();
+        StampCell (CellX, CellY, nil, Wide, FontHeight, 1, TextInk, Transparent);
+        AimText ();
+    end
 
     CursorCol := CursorCol + Cells;
 
@@ -1158,6 +1274,13 @@ begin
         StampCell (Col * CellWidth (), CursorRow * FontHeight, nil,
                    CellWidth (), FontHeight, 1, TextInk, TextBack);
 
+    AimBlink ();
+
+    for var Col := CursorCol; Col < TextCols (); Col := Col + 1 do
+        StampCell (Col * CellWidth (), CursorRow * FontHeight, nil,
+                   CellWidth (), FontHeight, 1, TextInk, Transparent);
+
+    AimText ();
     Present ();
 end
 
@@ -1182,6 +1305,15 @@ begin
         for var Col := 0; Col < TextCols (); Col := Col + 1 do
             StampCell (Col * CellWidth (), Row * FontHeight, nil,
                        CellWidth (), FontHeight, 1, TextInk, TextBack);
+
+    AimBlink ();
+
+    for var Row := 0; Row < TextRows (); Row := Row + 1 do
+        for var Col := 0; Col < TextCols (); Col := Col + 1 do
+            StampCell (Col * CellWidth (), Row * FontHeight, nil,
+                       CellWidth (), FontHeight, 1, TextInk, Transparent);
+
+    AimText ();
 
     CursorCol := 0;
     CursorRow := 0;
@@ -1998,4 +2130,161 @@ begin
 
     AssertEqual (LightGray, TextInk);
     AssertEqual (Transparent, TextBack);
+end
+
+// ------------------------------------------------------------ blink tests --
+
+test 'Blink Rides Bit Twenty Four Of TextColor';
+begin
+    AssertEqual (16777216, Blink);
+
+    TextColor (LightRed + Blink);
+    AssertEqual (LightRed, TextInk);
+    AssertTrue (TextBlinking);
+
+    // Without the flag, blinking ends -- the bit is per-color, as TP's was.
+    TextColor (LightRed);
+    AssertTrue (not TextBlinking);
+
+    NormVideo ();
+end
+
+test 'TextColor Refuses A Color Past Blink';
+begin
+    var Message := '';
+
+    try TextColor (Blink + Blink); except on e : String do Message := e; end
+    AssertEqual ('TextColor wants an RGB color, plus Blink at most.', Message);
+
+    NormVideo ();
+end
+
+/// The letters vanish and the cell stays: ink on the blink layer, background
+/// on the text layer.
+test 'A Blinking Glyph Keeps Its Ink On The Blink Layer';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'blink', False);
+
+    TextBackground (Blue);
+    TextColor (White + Blink);
+    Print ('█');
+
+    // The text layer's cell is pure background -- the white went elsewhere.
+    AssertEqual (Blue - 16777216, TextPixels.GetInt ((16 * GridW + 8) * 4));
+
+    // The blink layer holds the ink, opaque white.
+    AssertEqual (-1, BlinkPixels.GetInt ((16 * GridW + 8) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Steady Stamp Clears The Blink Beneath It';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'steady', False);
+
+    TextColor (White + Blink);
+    Print ('█');
+
+    GotoXY (0, 0);
+    TextColor (White);
+    Print (' ');
+
+    AssertEqual (0, BlinkPixels.GetInt ((16 * GridW + 8) * 4));
+
+    CloseGraph ();
+end
+
+test 'ClrScr Clears The Blink Layer Too';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'clear', False);
+
+    TextColor (White + Blink);
+    Print ('██');
+    ClrScr ();
+
+    var Lit := 0;
+
+    for var Y := 0; Y < 32; Y := Y + 1 do
+        for var X := 0; X < 32; X := X + 1 do
+            if BlinkPixels.GetInt ((Y * GridW + X) * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (0, Lit);
+
+    CloseGraph ();
+end
+
+test 'Scrolling Carries The Blink Layer Along';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'bscroll', False);
+
+    TextMode (4, 2);
+    TextColor (White + Blink);
+    PrintLn ('');
+    PrintLn ('█');           // stamped on the last row, then scrolled up
+
+    // The ink now sits in the top half of the blink layer.
+    var Top := 0;
+
+    for var Y := 0; Y < GridH div 2; Y := Y + 1 do
+        for var X := 0; X < 16; X := X + 1 do
+            if BlinkPixels.GetInt ((Y * GridW + X) * 4) <> 0 then Top := Top + 1;
+
+    AssertTrue (Top > 0);
+
+    CloseGraph ();
+end
+
+test 'NormVideo And TextMode End Blinking';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'end', False);
+
+    TextColor (White + Blink);
+    NormVideo ();
+    AssertTrue (not TextBlinking);
+
+    TextColor (White + Blink);
+    TextMode (40, 25);
+    AssertTrue (not TextBlinking);
+
+    CloseGraph ();
+end
+
+test 'SetBlinkRate Chooses The Cadence';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'cadence', False);
+
+    AssertEqual (267, BlinkPhaseMs);
+
+    SetBlinkRate (533);
+    AssertEqual (533, BlinkPhaseMs);
+
+    // Mode and attribute resets leave the cadence alone...
+    TextMode (80, 25);
+    NormVideo ();
+    AssertEqual (533, BlinkPhaseMs);
+
+    // ... and a fresh window restores the adapter's own.
+    CloseGraph ();
+    InitGraph (320, 200, 'rate', False);
+    AssertEqual (267, BlinkPhaseMs);
+
+    CloseGraph ();
+end
+
+test 'SetBlinkRate Refuses A Time That Is Not Positive';
+begin
+    var Message := '';
+
+    try SetBlinkRate (0); except on e : String do Message := e; end
+    AssertEqual ('SetBlinkRate needs a positive time.', Message);
+
+    Message := '';
+    try SetBlinkRate (-100); except on e : String do Message := e; end
+    AssertEqual ('SetBlinkRate needs a positive time.', Message);
 end

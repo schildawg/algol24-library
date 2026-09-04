@@ -43,7 +43,7 @@ begin
 end
 
 begin
-    InitGraph (640, 480, 'Turbo Algol-24', False);
+    InitGraph (800, 600, 'Turbo Algol-24', False);
 
     // Every position below derives from the grid, so the screen paints
     // correctly at any window size -- 1280x800 is the classic 80x25, and
@@ -113,9 +113,10 @@ begin
     TextColor (White);
     Print (Fill ('═', 2) + '╝');
 
-    // The editing cursor, waiting at the top of the empty file.
+    // The editing cursor, waiting at the top of the empty file -- blinking,
+    // which is the whole reason it reads as a cursor and not a brick.
     GotoXY (1, 2);
-    TextColor (Yellow);
+    TextColor (Yellow + Blink);
     Print ('▄');
 
     // Three lines of the file, one per intensity: the same cyan dimmed and
@@ -161,6 +162,8 @@ begin
             if Kind = 768 then Running := False;
         end
 
+        // An idle present keeps the blink phase beating.
+        Print ('');
         SDL_Delay (16);
     end
 

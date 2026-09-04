@@ -82,6 +82,12 @@ begin
     NormVideo ();
     PrintLn ('');
     PrintLn ('');
+
+    TextColor (LightRed + Blink);
+    Print ('Blink');
+    NormVideo ();
+    PrintLn ('      -- TextColor (LightRed + Blink), on the language''s own clock');
+    PrintLn ('');
     PrintLn ('close the window, or press any key, to finish.');
 
     var Event   := Buffer (64);
@@ -97,6 +103,8 @@ begin
             if Kind = 768 then Running := False;
         end
 
+        // An idle present keeps the blink phase beating.
+        Print ('');
         SDL_Delay (16);
     end
 
