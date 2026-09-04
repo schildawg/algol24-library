@@ -53,6 +53,42 @@ function aliases `Print (W, 'text')` beside the screen-wide `Print ('text')`,
 which is the spelling a Turbo Pascal program would use. The aliases work
 perfectly; they are just too loud to ship.
 
+### L-3 — two methods of one name and arity are accepted, and the first silently wins
+
+**Status:** open, reported 2026-09-03.
+
+A class may declare the same method twice with the same signature. Nothing
+is reported at any stage, and calls go to the **first** declaration:
+
+```algol24
+class C;
+begin
+    procedure Twin (A : Integer, B : Integer); begin N := 1; end
+    procedure Twin (X : Integer, Y : Integer); begin N := 2; end
+end
+```
+```console
+1
+```
+
+The second body is unreachable and unmentioned. A program that grows a
+method and does not notice an older one of the same name will call the old
+one forever, which is the failure this library nearly shipped: `ViewPort`
+wanted `MoveTo` for Turbo Pascal's pen while already having `MoveTo` for
+placing the surface, and had the collision not been noticed by hand the
+result would have been a pen that silently moved the viewport.
+
+Compare [ERR-010]'s treatment of top-level overloads, which at least *warn*.
+A duplicate signature is not an overload at all — nothing could ever select
+the second — so refusing it outright seems the right answer, and it can be
+decided entirely at check time.
+
+⚠️ Not to be confused with the harmless case: a method and a **top-level
+function** of the same name coexist correctly, `O.Ping` reaching the method
+and a bare `Ping` the function. Inside a class an unqualified call reaches
+the *top-level* one, and `this.Ping` is how the method is named — worth
+knowing, because it is easy to write the bare name and mean the method.
+
 ---
 
 ## Hazards

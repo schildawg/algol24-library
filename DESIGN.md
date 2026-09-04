@@ -136,10 +136,12 @@ Settled for both kinds, the first five by the original Canvas decisions:
   grid's alone.
 - **`CloseGraph` invalidates every surface.** A surface belongs to the window
   it was made in; reopening starts clean.
-- **A Window is placed in cells, a ViewPort in pixels** — each kind speaks
-  its own world's coordinates, both counting from 1. Windows live in the
-  root grid's logical cell space and scale with it; ViewPorts live in the
-  screen's pixel space beside the global pixel verbs.
+- **A Window is placed in cells, a ViewPort in pixels — of one shared
+  logical space.** Both count from 1, both scale to the physical window as
+  one, and `CellWidth`/`CellHeight` convert between them, so a chart placed
+  inside a window's frame stays inside it at every window size. Placing a
+  ViewPort in raw screen pixels was tried first and was wrong twice over: it
+  neither lined up with the cells nor scaled with them.
 
 ## Why this costs nothing at present time
 
@@ -184,6 +186,10 @@ Nothing below is designed yet; nothing above blocks any of it.
   scrolls its own celled contents is exactly what a Window is.
 - **ViewPort scaling** — a texture can be presented at other than 1:1, which
   is sprite scaling for free. Sizes stay fixed at creation until wanted.
+- **The rest of the drawing vocabulary** — `Bar`, `Circle`, `Ellipse`, `Arc`,
+  `PieSlice`, `FloodFill`, `GetImage`/`PutImage`. The pen arrived with
+  `Line`; these join it on the ViewPort, and the fill styles are the open
+  question they bring.
 - **CJK vertical writing**, as above.
 - ~~`Blink`~~ — arrived early, because the clock it waited on was the
   language's own `clock ()` [RT-012] all along. The spelling is Turbo
@@ -193,6 +199,34 @@ Nothing below is designed yet; nothing above blocks any of it.
   presents. `ReadKey` and `KeyPressed` now present once a frame while they
   wait, so the idle `Print ('')` tick is retired — a program waiting on
   input blinks for free.
+
+## Speed, and the options if it ever matters
+
+Measured on the IDE demo, which paints two chart windows over a full text
+screen:
+
+| | interpreted | compiled |
+| --- | --- | --- |
+| the whole screen | **4.53 s** | **0.18 s** |
+
+Interpreted, that divides into 0.84 s decoding the 630 KB glyph file, 1.46 s
+for the text half, and 3.07 s for the two charts — the line drawing, where
+every pixel is an interpreted `PutPixel`.
+
+Compiled is 25× faster and instant, which is what `--compile` is for; the
+cost is only ever felt while developing. **Accepted as it stands.** If it
+ever needs addressing, in increasing order of what it spends:
+
+- **A binary glyph cache.** The 0.84 s is pure decode of text that never
+  changes: dump the decoded buffers once and reload them with one read.
+  Costs nothing in design — no logic moves.
+- **`alg_line` in `graphffi.c`.** Bresenham with the pattern and thickness,
+  perhaps forty lines, collapsing the 3 s to nothing. The cost is the one
+  the standing rule guards: line geometry is *logic*, and logic belongs in
+  Algol-24 where it is readable and testable. `alg_trunc` is four lines and
+  a primitive; a line renderer is neither.
+- **A C blitter for whole runs**, if fills and images ever arrive and the
+  same argument repeats.
 
 ## What was measured on the way here
 

@@ -7,6 +7,7 @@
 // Close the window, or press any key in it, to finish.
 
 uses graph;
+uses math;
 
 /// N copies of Ch, joined.
 function Fill (Ch : Char, N : Integer) : String;
@@ -17,6 +18,29 @@ begin
         B.Append (Ch);
 
     Exit B.Text;
+end
+
+/// Frames a window's own cells and titles it.
+procedure Frame (W, Title : String);
+begin
+    W.GotoXY (1, 1);
+    W.Print ('╔' + Fill ('═', W.Cols - 2) + '╗');
+
+    for var R := 2; R < W.Rows; R := R + 1 do
+    begin
+        W.GotoXY (1, R);
+        W.Print ('║');
+        W.GotoXY (W.Cols, R);
+        W.Print ('║');
+    end
+
+    W.GotoXY (1, W.Rows);
+    W.Print ('╚' + Fill ('═', W.Cols - 2) + '╝');
+
+    W.GotoXY (3, 1);
+    W.TextColor (Yellow);
+    W.Print (' ' + Title + ' ');
+    W.TextColor (LightGray);
 end
 
 /// One menu item: hotkey letter red, the rest black.
@@ -129,6 +153,154 @@ begin
     TextColor (Cyan);
     HighVideo ();
     Print ('{ HighVideo -- for the loud parts }');
+
+    // --------------------------------------- two windows that OVERLAP, --
+    // --------------------------------------- each with a chart over it  --
+    //
+    // Four surfaces interleaving text and graphics in one stack:
+    //
+    //   Order 1  the Lines window   -- celled text
+    //   Order 2  its chart          -- a ViewPort over that text
+    //   Order 3  the Chart window   -- celled text over BOTH of those
+    //   Order 4  its chart          -- a ViewPort over everything
+    //
+    // The second window and its chart cut across the first window and its
+    // chart, which is the arrangement a single text plane cannot express:
+    // text, graphic, text, graphic, from the bottom up.
+
+    var Cell := CellWidth ();
+    var Row  := CellHeight ();
+
+    // -- the styles window --------------------------------------------------
+    var Styles := Window (3, 4, 40, 19, 1);
+
+    Styles.TextBackground (Black);
+    Styles.TextColor (LightGray);
+    Styles.ClrScr ();
+    Frame (Styles, 'Lines');
+
+    // Inside the frame: one cell in from the window's own top-left, and two
+    // cells smaller in each direction. Both live in the same logical space,
+    // so the chart holds its place at every window size.
+    var Pens := ViewPort (Styles.PixelLeft () + Cell, Styles.PixelTop () + Row,
+                          (Styles.Cols - 2) * Cell, (Styles.Rows - 2) * Row, 2);
+
+    var Y := 34;
+
+    for var Style in [[SolidLn, 'Solid'], [DottedLn, 'Dotted'],
+                      [CenterLn, 'Center'], [DashedLn, 'Dashed']] do
+    begin
+        Pens.SetColor (LightCyan);
+        Pens.SetTextStyle (0, 1);
+        Pens.OutTextXY (16, Y - 14, Style[1]);
+
+        Pens.SetColor (Yellow);
+        Pens.SetLineStyle (Style[0], 0, NormWidth);
+        Pens.Line (128, Y, Pens.W - 16, Y);
+
+        Y := Y + 38;
+    end
+
+    // Three thicknesses of the same solid line, each its own color.
+    var Colors := [LightRed, LightGreen, LightMagenta];
+    var Thicks := [1, 3, 7];
+
+    for var I := 0; I < 3; I := I + 1 do
+    begin
+        Pens.SetColor (LightCyan);
+        Pens.SetLineStyle (SolidLn, 0, NormWidth);
+        Pens.OutTextXY (16, Y - 14, 'Width ' + Str (Thicks[I]));
+
+        Pens.SetColor (Colors[I]);
+        Pens.SetLineStyle (SolidLn, 0, Thicks[I]);
+        Pens.Line (128, Y, Pens.W - 16, Y);
+
+        Y := Y + 38;
+    end
+
+    // A user pattern, and a fan of diagonals to show the pen turning.
+    Pens.SetColor (LightCyan);
+    Pens.SetLineStyle (SolidLn, 0, NormWidth);
+    Pens.OutTextXY (16, Y - 14, 'UserBit');
+
+    Pens.SetColor (White);
+    Pens.SetLineStyle (UserBitLn, 61455, NormWidth);   // 1111000000001111
+    Pens.Line (128, Y, Pens.W - 16, Y);
+
+    // A fan, drawn from one point -- and deliberately aimed past the edge,
+    // where the viewport clips it rather than letting it reach the window.
+    var FanX := Pens.W div 2;
+    var FanY := Pens.H - 30;
+
+    Pens.SetLineStyle (SolidLn, 0, NormWidth);
+    Pens.SetColor (Cyan);
+
+    for var A := 0; A < 9; A := A + 1 do
+    begin
+        Pens.PenTo (FanX, FanY);
+        Pens.LineTo (FanX + Trunc (300.0 * Cos (A / 8.0 * Pi)),
+                     FanY - Trunc (300.0 * Sin (A / 8.0 * Pi)));
+    end
+
+    Pens.Show ();
+
+    // -- the chart window ---------------------------------------------------
+    // Deliberately overlapping the Lines window, and above it.
+    var Plot := Window (26, 9, 64, 23, 3);
+
+    Plot.TextBackground (Blue);
+    Plot.TextColor (LightGray);
+    Plot.ClrScr ();
+    Frame (Plot, 'Chart -- over the Lines window');
+
+    var Graph := ViewPort (Plot.PixelLeft () + Cell, Plot.PixelTop () + Row,
+                           (Plot.Cols - 2) * Cell, (Plot.Rows - 2) * Row, 4);
+
+    var AxisL := 78;
+    var AxisB := Graph.H - 46;
+    var AxisR := Graph.W - 20;
+    var AxisT := 40;
+
+    // The axes, and their labels -- the Y one turned a quarter, which is the
+    // turn SetTextStyle exists for.
+    Graph.SetColor (LightGray);
+    Graph.SetLineStyle (SolidLn, 0, NormWidth);
+    Graph.Line (AxisL, AxisT, AxisL, AxisB);
+    Graph.Line (AxisL, AxisB, AxisR, AxisB);
+
+    Graph.SetColor (Yellow);
+    Graph.SetTextStyle (90, 1);
+    Graph.OutTextXY (16, AxisB - 30, 'millivolts');
+
+    Graph.SetTextStyle (0, 1);
+    Graph.OutTextXY (AxisL + 90, AxisB + 12, 'seconds ->');
+
+    // A dotted grid behind the data.
+    Graph.SetColor (DarkGray);
+    Graph.SetLineStyle (DottedLn, 0, NormWidth);
+
+    for var G := 1; G < 5; G := G + 1 do
+        Graph.Line (AxisL, AxisB - G * (AxisB - AxisT) div 5, AxisR,
+                    AxisB - G * (AxisB - AxisT) div 5);
+
+    // Two series, plotted with LineTo from point to point.
+    Graph.SetLineStyle (SolidLn, 0, ThickWidth);
+    Graph.SetColor (LightGreen);
+    Graph.PenTo (AxisL, AxisB - 40);
+
+    for var I := 1; I <= 10; I := I + 1 do
+        Graph.LineTo (AxisL + I * (AxisR - AxisL) div 10,
+                      AxisB - Trunc (130.0 + 110.0 * Sin (I / 2.2)));
+
+    Graph.SetColor (LightRed);
+    Graph.SetLineStyle (DashedLn, 0, NormWidth);
+    Graph.PenTo (AxisL, AxisB - 180);
+
+    for var I := 1; I <= 10; I := I + 1 do
+        Graph.LineTo (AxisL + I * (AxisR - AxisL) div 10,
+                      AxisB - Trunc (180.0 - 80.0 * Cos (I / 1.8)));
+
+    Graph.Show ();
 
     // ----------------------------------------------------- the status line --
     TextBackground (LightGray);

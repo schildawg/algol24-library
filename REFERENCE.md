@@ -21,6 +21,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Blink`](#blink) | constant | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
 | [`ClrEol`](#clreol) | procedure | `graph` |
+| [`CellWidth`](#cellwidth) `CellHeight` | functions | `graph` |
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Cos`](#cos) | function | `math` |
 | [`Exp`](#exp) | function | `math` |
@@ -35,6 +36,8 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Int`](#int) | function | `math` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
+| [`Line`](#line) and the pen | methods | `graph` |
+| [`LineStyles`](#linestyles) | constants | `graph` |
 | [`KeyPressed`](#keypressed) | function | `graph` |
 | [`KeyUp` … `KeyClose`](#keys) | constants | `graph` |
 | [`Ln`](#ln) | function | `math` |
@@ -350,6 +353,76 @@ WriteLn ('closed without complaint');
 
 ```console
 closed without complaint
+```
+
+---
+
+## CellWidth
+
+*functions* — unit `graph`
+
+**Function**
+
+The size of one text cell, in the logical space surfaces live in.
+
+**Declaration**
+
+```algol24
+function CellWidth () : Integer;
+function CellHeight () : Integer;
+```
+
+**Remarks**
+
+Cells are half as wide as they are tall — 16 × 32 for the shipped font — and
+a wide (CJK) glyph takes two of them.
+
+⚠️ **Both surface kinds share one logical space**, and these are its ruler.
+A [`Window`](#window) is placed in cells and a [`ViewPort`](#viewport) in
+that space's pixels, so cell `Col, Row` begins at
+`(Col - 1) * CellWidth (), (Row - 1) * CellHeight ()` — which is exactly what
+[`Window.PixelLeft`](#window) and `PixelTop` answer. A viewport placed there
+stays there at **every** window size, because the whole space scales to the
+physical window as one.
+
+The physical window's own pixels are a different ruler:
+[`GetMaxX`](#getmaxx) measures those, and the background that the global
+[`OutTextXY`](#outtextxy) draws on lives in them.
+
+An `InstallUserFont` of a different cell size changes both answers.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`ViewPort`](#viewport), [`Window`](#window)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'cells', False);
+
+var W := Window (4, 5, 38, 20, 1);
+
+// A chart one cell inside the window's frame, in the same logical space.
+var Chart := ViewPort (W.PixelLeft () + CellWidth (),
+                       W.PixelTop () + CellHeight (),
+                       (W.Cols - 2) * CellWidth (),
+                       (W.Rows - 2) * CellHeight (), 2);
+
+WriteLn (CellWidth ());
+WriteLn (CellHeight ());
+WriteLn (Chart.X);
+WriteLn (Chart.Y);
+
+CloseGraph ();
+```
+
+```console
+16
+32
+64
+160
 ```
 
 ---
@@ -1272,14 +1345,14 @@ The keys that are not characters, each as one Char of its own.
 **Declaration**
 
 ```algol24
-const KeyUp     := #57344;    const KeyF1  := #57360;
-const KeyDown   := #57345;    const KeyF2  := #57361;
-const KeyLeft   := #57346;    ...
-const KeyRight  := #57347;    const KeyF12 := #57371;
-const KeyHome   := #57348;
-const KeyEnd    := #57349;    const KeyClose := #57384;
+const KeyUp     := #57344;    const KeyF1  := #57360;   const KeyF7  := #57366;
+const KeyDown   := #57345;    const KeyF2  := #57361;   const KeyF8  := #57367;
+const KeyLeft   := #57346;    const KeyF3  := #57362;   const KeyF9  := #57368;
+const KeyRight  := #57347;    const KeyF4  := #57363;   const KeyF10 := #57369;
+const KeyHome   := #57348;    const KeyF5  := #57364;   const KeyF11 := #57370;
+const KeyEnd    := #57349;    const KeyF6  := #57365;   const KeyF12 := #57371;
 const KeyPgUp   := #57350;
-const KeyPgDn   := #57351;
+const KeyPgDn   := #57351;    const KeyClose := #57384;
 const KeyInsert := #57352;
 const KeyDelete := #57353;
 ```
@@ -1302,6 +1375,152 @@ it.
 **Example**
 
 See [`ReadKey`](#readkey).
+
+---
+
+## Line
+
+*methods of [`ViewPort`](#viewport)* — unit `graph`
+
+**Function**
+
+Draws straight lines, with a pen that has a position, a color, a pattern and
+a thickness.
+
+**Declaration**
+
+```algol24
+procedure Line (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+procedure LineTo (PX : Integer, PY : Integer);
+procedure LineRel (DX : Integer, DY : Integer);
+procedure Rectangle (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+
+procedure PenTo (PX : Integer, PY : Integer);
+procedure PenRel (DX : Integer, DY : Integer);
+function  GetX () : Integer;
+function  GetY () : Integer;
+
+procedure SetColor (Color : Integer);
+function  GetColor () : Integer;
+procedure SetLineStyle (Style : Integer, Pattern : Integer, Thickness : Integer);
+```
+
+**Remarks**
+
+`Line` draws between two points and leaves the pen at the far end, so a
+series is `PenTo` once and `LineTo` after — which is how the chart in
+`examples/ide.a24` is plotted.
+
+⚠️ **`PenTo` moves the pen; [`MoveTo`](#viewport) moves the viewport.** Turbo
+Pascal spelled the pen's move `MoveTo`, but a viewport is a thing that can
+itself be moved, and that reading wins the shorter name. `PenTo` and `PenRel`
+pair with `LineTo` and `LineRel` — the same two destinations, one drawing and
+one not — which is a clarity Turbo Pascal's naming did not have.
+
+Coordinates are the viewport's own, counting from 1, and its edges are the
+clip: a line running far outside is drawn for the part that lands and
+discarded for the rest, never raising.
+
+`SetColor` governs **everything this surface draws** — the pen and the
+[`OutText`](#viewport) pair alike. A fresh viewport draws in `White`.
+
+`SetLineStyle` takes a [style](#linestyles), a pattern, and a thickness. The
+pattern's sixteen bits are walked along the line, one bit to the pixel and
+repeating, so a `DottedLn` hundred-pixel line paints fifty. `Pattern` is
+consulted only for `UserBitLn`; the other styles carry their own bits.
+Thickness spreads across the axis the line runs **least** along, which is
+what keeps a thick diagonal from breaking into blobs — `NormWidth` is 1,
+`ThickWidth` is 3, and any positive count is allowed where Turbo Pascal
+permitted only those two.
+
+`Rectangle` is four lines in the current style, and returns the pen to the
+corner it began at.
+
+Drawing does not appear until something presents; `Show` is that.
+
+**See also**
+
+[`LineStyles`](#linestyles), [`SetTextStyle`](#settextstyle), [`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'lines', False);
+
+var V := ViewPort (100, 100, 400, 300, 1);
+
+// A solid axis, then a dashed thick series plotted point to point.
+V.SetColor (LightGray);
+V.Line (40, 20, 40, 260);
+V.Line (40, 260, 380, 260);
+
+V.SetColor (LightGreen);
+V.SetLineStyle (DashedLn, 0, ThickWidth);
+V.PenTo (40, 200);
+V.LineTo (140, 90);
+V.LineTo (240, 160);
+V.LineTo (380, 40);
+
+V.SetColor (Yellow);
+V.SetLineStyle (SolidLn, 0, NormWidth);
+V.Rectangle (40, 20, 380, 260);
+V.Show ();
+
+WriteLn (V.GetX ());
+WriteLn (V.GetY ());
+WriteLn (V.GetColor () = Yellow);
+
+CloseGraph ();
+```
+
+```console
+40
+20
+true
+```
+
+---
+
+## LineStyles
+
+*constants* — unit `graph`
+
+**Function**
+
+The line styles [`SetLineStyle`](#line) takes, and the two thicknesses.
+
+**Declaration**
+
+```algol24
+const SolidLn   := 0;      const NormWidth  := 1;
+const DottedLn  := 1;      const ThickWidth := 3;
+const CenterLn  := 2;
+const DashedLn  := 3;
+const UserBitLn := 4;
+```
+
+**Remarks**
+
+A style is a sixteen-bit pattern walked along the line, one bit to the pixel
+and repeating: a set bit paints, a clear one skips. The four named patterns
+are this library's own — Turbo Pascal's exact bits were a BGI implementation
+detail rather than a promise — and `UserBitLn` says the pattern comes from
+the caller's own `Pattern` argument instead.
+
+The thicknesses are Turbo Pascal's two names for 1 and 3. They are ordinary
+numbers, and `SetLineStyle` accepts any positive thickness, so a 7-pixel
+rule needs no constant.
+
+**See also**
+
+[`Line`](#line)
+
+**Example**
+
+See [`Line`](#line); `examples/ide.a24` shows all five styles and three
+thicknesses side by side.
 
 ---
 
@@ -2949,6 +3168,19 @@ procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
 procedure SetTextStyle (Direction : Integer, CharSize : Integer);
 procedure Show ();
 
+// the pen -- see Line
+procedure SetColor (Color : Integer);
+function  GetColor () : Integer;
+procedure SetLineStyle (Style : Integer, Pattern : Integer, Thickness : Integer);
+procedure PenTo (PX : Integer, PY : Integer);
+procedure PenRel (DX : Integer, DY : Integer);
+function  GetX () : Integer;
+function  GetY () : Integer;
+procedure Line (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+procedure LineTo (PX : Integer, PY : Integer);
+procedure LineRel (DX : Integer, DY : Integer);
+procedure Rectangle (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+
 // readable, and the first four settable
 X, Y : Integer          the top-left pixel on screen
 Order : Integer         under the root grid when negative, over it when positive
@@ -2960,8 +3192,10 @@ Dir, Size : Integer     the text turn and magnification -- see SetTextStyle
 **Remarks**
 
 Turbo Pascal's `SetViewPort` named a clipped drawing region; this is that
-grown into an object. `X, Y` place it on screen in pixels, `W, H` size it,
-and `Order` stacks it — negative under the root grid, positive over it, and
+grown into an object. `X, Y` place it in the **logical space the grid lives in** — the same space
+a [`Window`](#window)'s cells are measured in, so the two scale together and
+a chart placed inside a window stays inside it at every window size; see
+[`CellWidth`](#cellwidth). `W, H` size it, and `Order` stacks it — negative under the root grid, positive over it, and
 0 is refused because that is the root grid's own.
 
 ⚠️ **Coordinates inside a viewport are local**, counting from 1: `1, 1` is
@@ -2972,6 +3206,9 @@ nothing redraws.
 ⚠️ **Local is also the clip.** A pixel outside the viewport is discarded
 silently rather than raising, so a drawing cannot scribble on its neighbours
 and there is no clipping rectangle to maintain.
+
+The pen — [`Line`](#line) and its family — draws in these coordinates too.
+`MoveTo` moves the **viewport**; [`PenTo`](#line) moves the **pen**.
 
 Unpainted pixels are transparent, so a fresh viewport shows everything
 beneath it; `Alpha` ghosts the whole surface at once. Both `Alpha` and
@@ -3147,8 +3384,8 @@ beneath later. Because text is a stackable surface, a window may sit **over**
 a graphic that is itself over other text, which no single text plane can
 express.
 
-`MoveTo` drags the window, keeping its size; any position is allowed, off
-the grid included, and what falls outside is clipped at present time.
+`MoveTo` drags the window, keeping its size; any position is allowed, off the
+grid included, and what falls outside is clipped at present time.
 
 ⚠️ **The wrap is deferred**, as text mode always had it: a line that exactly
 fills the last column leaves the cursor resting *on* that column with the

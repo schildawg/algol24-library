@@ -111,10 +111,10 @@ begin
         if K = KeyClose then Halt (0);
         if K = #27 then Halt (0);
 
-        if K = KeyLeft  then B.MoveTo (B.X1 - 1, B.Y1);
-        if K = KeyRight then B.MoveTo (B.X1 + 1, B.Y1);
-        if K = KeyUp    then B.MoveTo (B.X1, B.Y1 - 1);
-        if K = KeyDown  then B.MoveTo (B.X1, B.Y1 + 1);
+        if K = KeyLeft  then B.Place (B.X1 - 1, B.Y1);
+        if K = KeyRight then B.Place (B.X1 + 1, B.Y1);
+        if K = KeyUp    then B.Place (B.X1, B.Y1 - 1);
+        if K = KeyDown  then B.Place (B.X1, B.Y1 + 1);
 
         if K = #9 then
         begin

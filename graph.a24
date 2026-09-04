@@ -144,6 +144,21 @@ const Transparent := -1;
 /// survives unchanged.
 const Blink := 16777216;
 
+/// The line styles `SetLineStyle` takes, and the two thicknesses.
+///
+/// A style is a sixteen-bit pattern walked along the line, one bit to the
+/// pixel, repeating: a set bit paints and a clear one skips. The four named
+/// patterns are this library's own -- Turbo Pascal's exact bits were a BGI
+/// detail -- and `UserBitLn` says the pattern comes from the caller instead.
+const SolidLn   := 0;
+const DottedLn  := 1;
+const CenterLn  := 2;
+const DashedLn  := 3;
+const UserBitLn := 4;
+
+const NormWidth  := 1;
+const ThickWidth := 3;
+
 /// The keys that are not characters, each as one Char of its own.
 ///
 /// Turbo Pascal's ReadKey answered an extended key as #0 and then a scan code
@@ -384,6 +399,8 @@ begin
 end
 
 /// The value of one hex digit; anything else is zero.
+///
+/// Private to this unit.
 function HexDigit (C : Char) : Integer;
 begin
     if C >= '0' then if C <= '9' then Exit Ord (C) - Ord ('0');
@@ -394,6 +411,9 @@ begin
 end
 
 /// Count hex digits of Text starting at At, as one number.
+///
+/// Private to this unit; only the font header's cell height is read this
+/// way now, the glyph rows going through `UnhexWords`.
 function HexAt (Text : String, At : Integer, Count : Integer) : Integer;
 begin
     var Value := 0;
@@ -557,7 +577,10 @@ begin
     Exit R * 65536 + G * 256 + B;
 end
 
-/// Blends one pixel into the framebuffer, clipped at the window's edge.
+/// Blends one pixel into the background framebuffer, clipped at its edge.
+///
+/// Private to this unit; the surfaces have their own buffers and reach them
+/// through `StampCell` and `PutPixel`.
 procedure Wash (X : Integer, Y : Integer, Ink : Integer, Cover : Integer);
 begin
     if X >= 1 then
@@ -1083,13 +1106,33 @@ end
 
 // ------------------------------------------------------------- text mode --
 
-/// The width of one text cell, in pixels.
+/// The width of one text cell, in the logical space surfaces live in.
 ///
-/// Private to this unit; half the font's height, which is the cell shape the
-/// shipped fonts are drawn for.
+/// Half the font's height, which is the cell shape the shipped fonts are
+/// drawn for. A program needs this and `CellHeight` to place a viewport
+/// against a window's cells: cell `Col, Row` begins at
+/// `(Col - 1) * CellWidth (), (Row - 1) * CellHeight ()`.
+///
+/// # Examples
+/// `The Cell Metrics Place A Viewport Against A Window`
 function CellWidth () : Integer;
 begin
+    EnsureFont ();
+
     Exit FontHeight div 2;
+end
+
+/// The height of one text cell, in the logical space surfaces live in.
+///
+/// The font's own cell height -- 32 for the shipped default.
+///
+/// # Examples
+/// `The Cell Metrics Place A Viewport Against A Window`
+function CellHeight () : Integer;
+begin
+    EnsureFont ();
+
+    Exit FontHeight;
 end
 
 // --------------------------------------------------------------- surfaces --
@@ -1225,6 +1268,26 @@ begin
         Y2 := Row + Rows - 1;
         X1 := Col;
         Y1 := Row;
+    end
+
+    /// This window's left edge in logical pixels, for placing a viewport.
+    ///
+    /// A viewport at `PixelLeft () + CellWidth (), PixelTop () + CellHeight ()`
+    /// begins inside a one-cell frame, and scales with the window because
+    /// both live in the same space.
+    function PixelLeft () : Integer;
+    begin
+        Check ();
+
+        Exit (X1 - 1) * CellWidth ();
+    end
+
+    /// This window's top edge in logical pixels.
+    function PixelTop () : Integer;
+    begin
+        Check ();
+
+        Exit (Y1 - 1) * CellHeight ();
     end
 
     /// Moves this window's cursor, one-based within its own cells.
@@ -1492,12 +1555,12 @@ begin
         if Dead then Exit;
 
         var LogW := GridCols * CellWidth ();
-        var LogH := GridRows * FontHeight;
+        var LogH := GridRows * CellHeight ();
 
         if DstRect = nil then DstRect := Buffer (16);
 
         DstRect.PutInt (0,  (X1 - 1) * CellWidth () * WindowWidth div LogW);
-        DstRect.PutInt (4,  (Y1 - 1) * FontHeight * WindowHeight div LogH);
+        DstRect.PutInt (4,  (Y1 - 1) * CellHeight () * WindowHeight div LogH);
         DstRect.PutInt (8,  PxW * WindowWidth div LogW);
         DstRect.PutInt (12, PxH * WindowHeight div LogH);
 
@@ -1533,6 +1596,12 @@ var
     CurY   : Integer;
     Dir    : Integer;
     Size   : Integer;
+    PenX   : Integer;
+    PenY   : Integer;
+    Pen    : Integer;
+    Style  : Integer;
+    Bits   : Integer;
+    Thick  : Integer;
     Order  : Integer;
     Alpha  : Integer;
     Serial : Integer;
@@ -1557,6 +1626,12 @@ begin
         CurY   := 1;
         Dir    := 0;
         Size   := 1;
+        PenX   := 1;
+        PenY   := 1;
+        Pen    := 16777215;      // White, as a fresh screen's ink
+        Style  := SolidLn;
+        Bits   := 65535;
+        Thick  := NormWidth;
         Serial := NextSerial;
         Dead   := False;
 
@@ -1588,7 +1663,9 @@ begin
         Dead := True;
     end
 
-    /// Moves the viewport so its top-left pixel is at PX, PY on screen.
+    /// Moves the viewport so its top-left pixel is at PX, PY.
+    ///
+    /// The viewport, not the pen: `PenTo` moves that.
     procedure MoveTo (PX : Integer, PY : Integer);
     begin
         Check ();
@@ -1610,6 +1687,218 @@ begin
             if PX <= W then
               if PY <= H then
                   Buf.PutInt (((PY - 1) * W + (PX - 1)) * 4, Color - 16777216);
+    end
+
+
+    /// Sets the color the pen draws and free text is written in.
+    ///
+    /// Turbo Pascal's `SetColor`, and it governs `Line`, `LineTo`, `LineRel`
+    /// and the `OutText` pair alike -- one pen for everything this surface
+    /// draws. A fresh viewport draws in White.
+    ///
+    /// # Raises
+    /// `SetColor wants an RGB color.` for a negative, there being no
+    /// transparent ink.
+    procedure SetColor (Color : Integer);
+    begin
+        Check ();
+
+        if Color < 0 then raise 'SetColor wants an RGB color.';
+
+        Pen := Color;
+    end
+
+    /// The color the pen is drawing in.
+    function GetColor () : Integer;
+    begin
+        Check ();
+
+        Exit Pen;
+    end
+
+    /// Sets the pattern and thickness lines are drawn with.
+    ///
+    /// Style is one of `SolidLn`, `DottedLn`, `CenterLn`, `DashedLn` or
+    /// `UserBitLn`; with `UserBitLn` the sixteen bits of Pattern are walked
+    /// along the line instead, one bit to the pixel, and any other style
+    /// ignores Pattern. Thickness is `NormWidth` or `ThickWidth`, or any
+    /// positive count of pixels -- Turbo Pascal allowed only the two, and
+    /// there is no reason here to refuse a fourth.
+    ///
+    /// # Raises
+    /// `SetLineStyle wants a known style.` and `SetLineStyle needs a
+    /// thickness of 1 or more.`
+    procedure SetLineStyle (AStyle : Integer, Pattern : Integer, Thickness : Integer);
+    begin
+        Check ();
+
+        if AStyle < SolidLn or AStyle > UserBitLn then
+            raise 'SetLineStyle wants a known style.';
+
+        if Thickness < 1 then raise 'SetLineStyle needs a thickness of 1 or more.';
+
+        Style := AStyle;
+        Thick := Thickness;
+
+        if AStyle = SolidLn then Bits := 65535;
+        else if AStyle = DottedLn then Bits := 52428;      // 1100110011001100
+        else if AStyle = CenterLn then Bits := 64632;      // 1111110001111000
+        else if AStyle = DashedLn then Bits := 61680;      // 1111000011110000
+        else Bits := Pattern;
+    end
+
+    /// Moves the pen to PX, PY without drawing.
+    ///
+    /// Turbo Pascal called this `MoveTo`, which here places the viewport
+    /// itself. `PenTo` and `PenRel` pair with `LineTo` and `LineRel` -- the
+    /// same two destinations, one drawing and one not.
+    procedure PenTo (PX : Integer, PY : Integer);
+    begin
+        Check ();
+
+        PenX := PX;
+        PenY := PY;
+    end
+
+    /// Moves the pen by DX, DY without drawing.
+    procedure PenRel (DX : Integer, DY : Integer);
+    begin
+        Check ();
+
+        PenX := PenX + DX;
+        PenY := PenY + DY;
+    end
+
+    /// The pen's X.
+    function GetX () : Integer;
+    begin
+        Check ();
+
+        Exit PenX;
+    end
+
+    /// The pen's Y.
+    function GetY () : Integer;
+    begin
+        Check ();
+
+        Exit PenY;
+    end
+
+    /// Paints one pixel of the pen's thickness around PX, PY.
+    ///
+    /// Private to this unit. A thickness above one spreads across the axis
+    /// the line runs least along, which is what keeps a thick diagonal from
+    /// looking like a staircase of blobs.
+    procedure Nib (PX : Integer, PY : Integer, Steep : Boolean);
+    begin
+        if Thick <= 1 then
+        begin
+            this.PutPixel (PX, PY, Pen);
+
+            Exit;
+        end
+
+        var Half := Thick div 2;
+
+        for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
+            if Steep then this.PutPixel (PX + K, PY, Pen);
+            else this.PutPixel (PX, PY + K, Pen);
+    end
+
+    /// Draws a line from AX1, AY1 to AX2, AY2, leaving the pen at the end.
+    ///
+    /// Bresenham, in the viewport's own coordinates, clipped at its edges.
+    /// The current style patterns it and the current thickness widens it.
+    procedure Line (AX1 : Integer, AY1 : Integer, AX2 : Integer, AY2 : Integer);
+    begin
+        Check ();
+
+        var X0 := AX1;
+        var Y0 := AY1;
+        var DX := AX2 - AX1;
+        var DY := AY2 - AY1;
+
+        if DX < 0 then DX := 0 - DX;
+        if DY < 0 then DY := 0 - DY;
+
+        var SX := -1;
+        var SY := -1;
+
+        if AX1 < AX2 then SX := 1;
+        if AY1 < AY2 then SY := 1;
+
+        // A steep line steps in Y and spreads its thickness in X.
+        var Steep := DY > DX;
+        var Err   := DX - DY;
+        var Tick  := 0;
+
+        while True do
+        begin
+            // The pattern repeats every sixteen pixels; bit 15 leads.
+            var Place := 1;
+
+            for var K := 0; K < 15 - Tick mod 16; K := K + 1 do
+                Place := Place * 2;
+
+            if Bits div Place mod 2 = 1 then Nib (X0, Y0, Steep);
+
+            Tick := Tick + 1;
+
+            if X0 = AX2 then if Y0 = AY2 then
+            begin
+                PenX := AX2;
+                PenY := AY2;
+
+                Present ();
+
+                Exit;
+            end
+
+            var E2 := 2 * Err;
+
+            if E2 > 0 - DY then
+            begin
+                Err := Err - DY;
+                X0  := X0 + SX;
+            end
+
+            if E2 < DX then
+            begin
+                Err := Err + DX;
+                Y0  := Y0 + SY;
+            end
+        end
+    end
+
+    /// Draws from the pen to PX, PY, leaving the pen there.
+    procedure LineTo (PX : Integer, PY : Integer);
+    begin
+        Check ();
+
+        this.Line (PenX, PenY, PX, PY);
+    end
+
+    /// Draws from the pen by DX, DY, leaving the pen at the far end.
+    procedure LineRel (DX : Integer, DY : Integer);
+    begin
+        Check ();
+
+        this.Line (PenX, PenY, PenX + DX, PenY + DY);
+    end
+
+    /// Draws the outline of a rectangle with opposite corners at the points.
+    ///
+    /// Four lines in the current style and thickness; the pen ends where it
+    /// began, which is what makes the four sides one figure.
+    procedure Rectangle (AX1 : Integer, AY1 : Integer, AX2 : Integer, AY2 : Integer);
+    begin
+        Check ();
+
+        this.Line (AX1, AY1, AX2, AY1);
+        this.Line (AX2, AY1, AX2, AY2);
+        this.Line (AX2, AY2, AX1, AY2);
+        this.Line (AX1, AY2, AX1, AY1);
     end
 
     /// Sets the direction and size free text on this viewport is drawn in.
@@ -1638,7 +1927,7 @@ begin
         Size := CharSize;
     end
 
-    /// Draws free text with its top-left at local PX, PY; the ink is white.
+    /// Draws free text with its top-left at local PX, PY, in the pen's color.
     ///
     /// This is a graphic that happens to be letters: no cursor, no wrap, no
     /// text verb will ever erase it. `SetTextStyle` turns and magnifies it.
@@ -1671,7 +1960,7 @@ begin
 
             if Words <> nil then
                 StampCell (AtX, AtY, Words.Address, Wide, FontHeight, Mode,
-                           16777215, Transparent);
+                           Pen, Transparent);
 
             // The advance follows the turn: right, up, left or down.
             var Step := Wide * Size;
@@ -1720,12 +2009,19 @@ begin
     begin
         if Dead then Exit;
 
+        // A viewport lives in the same logical space the grid does, so it
+        // scales with the window exactly as a Window does -- which is what
+        // lets one be placed against the other's cells and stay there at
+        // every window size.
+        var LogW := GridCols * CellWidth ();
+        var LogH := GridRows * CellHeight ();
+
         if DstRect = nil then DstRect := Buffer (16);
 
-        DstRect.PutInt (0, X - 1);
-        DstRect.PutInt (4, Y - 1);
-        DstRect.PutInt (8, W);
-        DstRect.PutInt (12, H);
+        DstRect.PutInt (0,  (X - 1) * WindowWidth div LogW);
+        DstRect.PutInt (4,  (Y - 1) * WindowHeight div LogH);
+        DstRect.PutInt (8,  W * WindowWidth div LogW);
+        DstRect.PutInt (12, H * WindowHeight div LogH);
 
         SDL_UpdateTexture (Tex, nil, Buf.Address, W * 4);
         SDL_SetTextureAlphaMod (Tex, Alpha);
@@ -3727,6 +4023,310 @@ begin
 
     AssertTrue (Row > 0);
     AssertTrue (Row <= 16);
+
+    CloseGraph ();
+end
+
+// ------------------------------------------------------------- line tests --
+
+/// A solid horizontal line paints exactly the pixels between its ends --
+/// no more, which a fencepost error would betray at once.
+test 'A Line Paints Exactly The Pixels Between Its Ends';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'line', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (Red);
+    V.Line (10, 10, 109, 10);
+
+    var Lit := 0;
+
+    for var X := 0; X < 200; X := X + 1 do
+        if V.Buf.GetInt ((9 * 200 + X) * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (100, Lit);
+    AssertEqual (Red - 16777216, V.Buf.GetInt ((9 * 200 + 9) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Line Leaves The Pen At Its Far End';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'pen', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.Line (10, 10, 60, 40);
+
+    AssertEqual (60, V.GetX ());
+    AssertEqual (40, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'PenTo And LineTo Draw From Where The Pen Was';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'moveto', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.PenTo (20, 20);
+
+    AssertEqual (20, V.GetX ());
+    AssertEqual (0, V.Buf.GetInt ((19 * 200 + 19) * 4));   // PenTo draws nothing
+
+    V.LineTo (40, 20);
+
+    AssertTrue (V.Buf.GetInt ((19 * 200 + 19) * 4) <> 0);
+    AssertEqual (40, V.GetX ());
+
+    V.PenRel (0, 10);
+    AssertEqual (40, V.GetX ());
+    AssertEqual (30, V.GetY ());
+
+    V.LineRel (-20, 0);
+    AssertEqual (20, V.GetX ());
+    AssertEqual (30, V.GetY ());
+
+    CloseGraph ();
+end
+
+/// The pattern is walked one bit to the pixel, so a dotted line of a
+/// hundred paints the half its pattern sets.
+test 'A Styled Line Paints Fewer Pixels Than A Solid One';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'style2', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetLineStyle (DottedLn, 0, NormWidth);
+    V.Line (10, 10, 109, 10);
+
+    var Dots := 0;
+
+    for var X := 0; X < 200; X := X + 1 do
+        if V.Buf.GetInt ((9 * 200 + X) * 4) <> 0 then Dots := Dots + 1;
+
+    AssertEqual (50, Dots);
+
+    // A user pattern of all ones is a solid line by another road.
+    var W := ViewPort (1, 1, 200, 200, 2);
+
+    W.SetLineStyle (UserBitLn, 65535, NormWidth);
+    W.Line (10, 10, 109, 10);
+
+    var Full := 0;
+
+    for var X := 0; X < 200; X := X + 1 do
+        if W.Buf.GetInt ((9 * 200 + X) * 4) <> 0 then Full := Full + 1;
+
+    AssertEqual (100, Full);
+
+    CloseGraph ();
+end
+
+/// Thickness spreads across the axis the line runs LEAST along, so a
+/// horizontal line thickens downward and a vertical one sideways.
+test 'Thickness Spreads Across The Line''s Minor Axis';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'thick', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetLineStyle (SolidLn, 0, ThickWidth);
+    V.Line (10, 50, 109, 50);
+
+    var Rows := 0;
+
+    for var Y := 0; Y < 200; Y := Y + 1 do
+        if V.Buf.GetInt ((Y * 200 + 50) * 4) <> 0 then Rows := Rows + 1;
+
+    AssertEqual (3, Rows);
+
+    V.Line (150, 10, 150, 109);
+
+    // A row the vertical line crosses and the horizontal one does not --
+    // row 50 would count both and answer 103.
+    var Cols := 0;
+
+    for var X := 0; X < 200; X := X + 1 do
+        if V.Buf.GetInt ((15 * 200 + X) * 4) <> 0 then Cols := Cols + 1;
+
+    AssertEqual (3, Cols);
+
+    CloseGraph ();
+end
+
+test 'A Line Is Clipped At The Viewport''s Edges';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'clipline', False);
+
+    var V := ViewPort (1, 1, 50, 50, 1);
+
+    // Well outside in both directions: clipped, not fatal.
+    V.Line (-100, -100, 200, 200);
+    V.Line (-50, 25, 300, 25);
+
+    var Row := 0;
+
+    for var X := 0; X < 50; X := X + 1 do
+        if V.Buf.GetInt ((24 * 50 + X) * 4) <> 0 then Row := Row + 1;
+
+    AssertEqual (50, Row);
+
+    CloseGraph ();
+end
+
+test 'Rectangle Draws Four Sides And Returns The Pen';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'rect', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.Rectangle (10, 10, 60, 40);
+
+    // The four corners are painted...
+    AssertTrue (V.Buf.GetInt ((9 * 100 + 9) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((9 * 100 + 59) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((39 * 100 + 9) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((39 * 100 + 59) * 4) <> 0);
+
+    // ... the middle is not ...
+    AssertEqual (0, V.Buf.GetInt ((25 * 100 + 30) * 4));
+
+    // ... and the pen ended where it began.
+    AssertEqual (10, V.GetX ());
+    AssertEqual (10, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'SetColor Governs Free Text As Well As Lines';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'ink', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    V.SetColor (Green);
+    V.OutTextXY (1, 1, '█');
+
+    AssertEqual (Green - 16777216, V.Buf.GetInt ((16 * 200 + 8) * 4));
+
+    CloseGraph ();
+end
+
+test 'The Pen Verbs Refuse What They Should';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'refuse2', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+    var Message := '';
+
+    try V.SetColor (-1); except on e : String do Message := e; end
+    AssertEqual ('SetColor wants an RGB color.', Message);
+
+    Message := '';
+    try V.SetLineStyle (9, 0, 1); except on e : String do Message := e; end
+    AssertEqual ('SetLineStyle wants a known style.', Message);
+
+    Message := '';
+    try V.SetLineStyle (SolidLn, 0, 0); except on e : String do Message := e; end
+    AssertEqual ('SetLineStyle needs a thickness of 1 or more.', Message);
+
+    CloseGraph ();
+end
+
+/// The two complaints a chart inside a window found: a viewport placed in
+/// raw screen pixels neither lined up with the window's cells nor stayed
+/// inside them. Both surfaces live in one logical space now, so a viewport
+/// placed against a window's cells holds that place at any window size.
+test 'The Cell Metrics Place A Viewport Against A Window';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'align', False);
+
+    AssertEqual (16, CellWidth ());
+    AssertEqual (32, CellHeight ());
+
+    var W := Window (4, 5, 38, 20, 1);
+
+    // The window's own top-left, in the space a viewport is placed in.
+    AssertEqual (3 * 16, W.PixelLeft ());
+    AssertEqual (4 * 32, W.PixelTop ());
+
+    // A viewport one cell inside it, sized to the frame's interior.
+    var V := ViewPort (W.PixelLeft () + CellWidth (), W.PixelTop () + CellHeight (),
+                       (W.Cols - 2) * CellWidth (), (W.Rows - 2) * CellHeight (), 2);
+
+    AssertEqual (64, V.X);
+    AssertEqual (160, V.Y);
+    AssertEqual (33 * 16, V.W);
+    AssertEqual (14 * 32, V.H);
+
+    CloseGraph ();
+end
+
+/// The alignment must survive the window it is shown in changing size,
+/// which is what putting both surfaces in the logical space buys.
+test 'A Viewport Holds Its Place Against A Window At Any Window Size';
+begin
+    for var Size in [[640, 480], [1280, 800], [320, 200]] do
+    begin
+        CloseGraph ();
+        InitGraph (Size[0], Size[1], 'sizes', False);
+
+        var W := Window (10, 4, 30, 12, 1);
+        var V := ViewPort (W.PixelLeft (), W.PixelTop (),
+                           W.Cols * CellWidth (), W.Rows * CellHeight (), 2);
+
+        // Same logical rectangle, whatever the physical window.
+        AssertEqual (9 * 16, V.X);
+        AssertEqual (3 * 32, V.Y);
+        AssertEqual (21 * 16, V.W);
+        AssertEqual (9 * 32, V.H);
+    end
+
+    CloseGraph ();
+end
+
+/// And what a viewport draws stays inside it, however far the line reaches.
+test 'A Viewport Clips What Reaches Past Its Edges';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'clips', False);
+
+    var V := ViewPort (100, 100, 60, 40, 1);
+
+    V.SetColor (White);
+    V.SetLineStyle (SolidLn, 0, ThickWidth);
+
+    // A fan far past every edge, as the demo's does.
+    for var A := 0; A < 12; A := A + 1 do
+    begin
+        V.PenTo (30, 20);
+        V.LineTo (30 + Trunc (400.0 * Cos (A / 6.0 * Pi)),
+                  20 - Trunc (400.0 * Sin (A / 6.0 * Pi)));
+    end
+
+    // Every painted pixel is inside the buffer, and the buffer is exactly
+    // the viewport: nothing can have reached the surface beneath it.
+    var Painted := 0;
+
+    for var I := 0; I < 60 * 40; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Painted := Painted + 1;
+
+    AssertTrue (Painted > 0);
+    AssertTrue (Painted <= 60 * 40);
 
     CloseGraph ();
 end
