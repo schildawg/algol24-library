@@ -146,9 +146,10 @@ Nothing below is designed yet; nothing above blocks any of it.
   language's own `clock ()` [RT-012] all along. The spelling is Turbo
   Pascal's with the flag moved to bit 24; blinking ink lives on its own
   texture that `Present` shows and hides at the VGA's 267ms cadence. What
-  remains true: the phase advances only when something presents, so an idle
-  program ticks `Print ('')` — until input's event loop takes that job over
-  properly.
+  remained true until input arrived: the phase advances only when something
+  presents. `ReadKey` and `KeyPressed` now present once a frame while they
+  wait, so the idle `Print ('')` tick is retired — a program waiting on
+  input blinks for free.
 
 ## What was measured on the way here
 
