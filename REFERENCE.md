@@ -27,6 +27,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
 | [`GotoXY`](#gotoxy) | procedure | `graph` |
+| [`HighVideo`](#highvideo) | procedure | `graph` |
 | [`Infinity`](#infinity) | constant | `math` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
@@ -34,9 +35,11 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
 | [`Ln`](#ln) | function | `math` |
+| [`LowVideo`](#lowvideo) | procedure | `graph` |
 | [`Max`](#max) | function | `math` |
 | [`Min`](#min) | function | `math` |
 | [`NaN`](#nan) | constant | `math` |
+| [`NormVideo`](#normvideo) | procedure | `graph` |
 | [`Odd`](#odd) | function | `math` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
@@ -731,6 +734,64 @@ CloseGraph ();
 
 ---
 
+## HighVideo
+
+*procedure* — unit `graph`
+
+**Function**
+
+Brightens the ink celled text draws with.
+
+**Declaration**
+
+```algol24
+procedure HighVideo ();
+```
+
+**Remarks**
+
+A dim palette color becomes its bright partner — `Blue` to `LightBlue`,
+`Red` to `LightRed` — and a bright one stays itself, which is the idempotence
+Turbo Pascal's intensity bit had. The famous odd couple is preserved:
+`Brown`'s bright partner is `Yellow`, because the original adapter's brown
+was a special circuit and the bright version of that slot came out yellow.
+
+⚠️ **Off the palette there is no intensity bit**, so any other RGB moves
+halfway toward white — and calling again moves it further, which repeated
+`LowVideo` mirrors toward black. A 16-color idea, read honestly in 24 bits.
+
+The background is never touched; [`NormVideo`](#normvideo) restores both.
+
+**See also**
+
+[`Colors`](#colors), [`LowVideo`](#lowvideo), [`NormVideo`](#normvideo), [`TextColor`](#textcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'video', False);
+
+TextColor (Brown);
+HighVideo ();
+Print ('now yellow');
+
+NormVideo ();
+PrintLn (' and back to normal');
+
+WriteLn (WhereY ());
+
+CloseGraph ();
+```
+
+```console
+1
+```
+
+
+---
+
 ## Infinity
 
 *constant* — unit `math`
@@ -1140,6 +1201,38 @@ WriteLn (Ln (0.0));
 
 ---
 
+## LowVideo
+
+*procedure* — unit `graph`
+
+**Function**
+
+Dims the ink celled text draws with.
+
+**Declaration**
+
+```algol24
+procedure LowVideo ();
+```
+
+**Remarks**
+
+The mirror of [`HighVideo`](#highvideo): a bright palette color becomes its
+dim partner and a dim one stays itself; any other RGB moves halfway toward
+black, again further on each call.
+
+**See also**
+
+[`HighVideo`](#highvideo), [`NormVideo`](#normvideo)
+
+**Example**
+
+See [`HighVideo`](#highvideo); `examples/video.a24` shows the whole palette
+both ways.
+
+
+---
+
 ## Max
 
 *function* — unit `math`
@@ -1275,6 +1368,37 @@ false
 true
 true
 ```
+
+---
+
+## NormVideo
+
+*procedure* — unit `graph`
+
+**Function**
+
+Restores the ink and background a text mode wakes up in.
+
+**Declaration**
+
+```algol24
+procedure NormVideo ();
+```
+
+**Remarks**
+
+`LightGray` on `Transparent` — the defaults `InitGraph` and
+[`TextMode`](#textmode) set — which is what Turbo Pascal's `NormVideo` did
+with the attribute the program started under. The one of the three that
+touches the background.
+
+**See also**
+
+[`HighVideo`](#highvideo), [`LowVideo`](#lowvideo), [`TextBackground`](#textbackground)
+
+**Example**
+
+See [`HighVideo`](#highvideo).
 
 ---
 

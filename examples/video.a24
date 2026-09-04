@@ -1,0 +1,104 @@
+// HighVideo, LowVideo and NormVideo, demonstrated on the grid: the sixteen
+// palette colors in their dim and bright rows, the odd couple Brown/Yellow,
+// and an off-palette color stepped toward white and toward black.
+//
+//     algc examples/video.a24
+//
+// Close the window, or press any key in it, to finish.
+
+uses graph;
+
+function SDL_PollEvent (E : Pointer) : Integer;
+    external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
+procedure SDL_Delay (Ms : Integer);
+    external 'SDL_Delay' in '/opt/homebrew/lib/libSDL2.dylib';
+
+begin
+    InitGraph (1280, 800, 'HighVideo and LowVideo', False);
+
+    PrintLn ('NormVideo: LightGray on Transparent, the startup colors.');
+    PrintLn ('');
+
+    // Every dim color, then the same colors through HighVideo.
+    Print ('LowVideo   ');
+
+    for var C in [Blue, Green, Cyan, Red, Magenta, Brown, LightGray, DarkGray] do
+    begin
+        TextColor (C);
+        LowVideo ();
+        Print ('████ ');
+    end
+
+    NormVideo ();
+    PrintLn ('');
+    Print ('HighVideo  ');
+
+    for var C in [Blue, Green, Cyan, Red, Magenta, Brown, LightGray, DarkGray] do
+    begin
+        TextColor (C);
+        HighVideo ();
+        Print ('████ ');
+    end
+
+    NormVideo ();
+    PrintLn ('');
+    PrintLn ('');
+
+    // The adapter's odd couple.
+    Print ('Brown      ');
+    TextColor (Brown);
+    Print ('████  ');
+    NormVideo ();
+    Print ('HighVideo makes it ');
+    TextColor (Brown);
+    HighVideo ();
+    PrintLn ('Yellow ████');
+    NormVideo ();
+    PrintLn ('');
+
+    // Off the palette there is no intensity bit, so each call moves halfway.
+    PrintLn ('An off-palette color, stepped by repeated calls:');
+    PrintLn ('');
+    Print ('darker     ');
+
+    TextColor (8405024);           // 0x804020
+
+    for var Step := 0; Step < 5; Step := Step + 1 do
+    begin
+        Print ('████');
+        LowVideo ();
+    end
+
+    TextColor (8405024);
+    PrintLn ('');
+    Print ('brighter   ');
+
+    for var Step := 0; Step < 5; Step := Step + 1 do
+    begin
+        Print ('████');
+        HighVideo ();
+    end
+
+    NormVideo ();
+    PrintLn ('');
+    PrintLn ('');
+    PrintLn ('close the window, or press any key, to finish.');
+
+    var Event   := Buffer (64);
+    var Running := True;
+
+    while Running do
+    begin
+        while SDL_PollEvent (Event.Address) <> 0 do
+        begin
+            var Kind := Event.GetInt (0);
+
+            if Kind = 256 then Running := False;
+            if Kind = 768 then Running := False;
+        end
+
+        SDL_Delay (16);
+    end
+
+    CloseGraph ();
+end

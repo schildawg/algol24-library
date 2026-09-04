@@ -118,6 +118,23 @@ begin
     TextColor (Yellow);
     Print ('▄');
 
+    // Three lines of the file, one per intensity: the same cyan dimmed and
+    // brightened around NormVideo's everyday LightGray.
+    GotoXY (2, 4);
+    TextColor (LightCyan);
+    LowVideo ();
+    Print ('{ LowVideo  -- for the quiet aside }');
+
+    GotoXY (2, 5);
+    NormVideo ();
+    TextBackground (Blue);     // NormVideo resets the background too --
+    Print ('{ NormVideo -- the everyday text }');   // Transparent would let
+                                                    // the black show through
+    GotoXY (2, 6);
+    TextColor (Cyan);
+    HighVideo ();
+    Print ('{ HighVideo -- for the loud parts }');
+
     // ----------------------------------------------------- the status line --
     TextBackground (LightGray);
     GotoXY (0, Rows - 1);

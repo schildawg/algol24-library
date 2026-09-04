@@ -175,6 +175,18 @@ var CursorRow   := 0;
 var TextInk     := 11184810;      // LightGray, the text-mode default
 var TextBack    := -1;            // Transparent
 
+// The intensity pairs of the CGA palette, both ways. Brown's partner is
+// Yellow rather than a brighter brown, because the original adapter's brown
+// was a special circuit and the bright version of that slot came out yellow.
+var BrightPartner := [Black : DarkGray,   Blue    : LightBlue,
+                      Green : LightGreen, Cyan    : LightCyan,
+                      Red   : LightRed,   Magenta : LightMagenta,
+                      Brown : Yellow,     LightGray : White];
+var DimPartner    := [DarkGray  : Black,  LightBlue    : Blue,
+                      LightGreen : Green, LightCyan    : Cyan,
+                      LightRed  : Red,    LightMagenta : Magenta,
+                      Yellow    : Brown,  White        : LightGray];
+
 // The installed font. One map from codepoint to a Buffer of four-byte words,
 // one to widths, one marking the glyphs that are pictures (emoji) rather than
 // ink. A grey or picture glyph holds one word per pixel, row-major; a 1-bit
@@ -945,6 +957,77 @@ begin
     if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
 
     TextBack := Color;
+end
+
+/// Brightens the ink celled text draws with.
+///
+/// A dim palette color becomes its bright partner -- `Blue` to `LightBlue`,
+/// and `Brown` to `Yellow`, the adapter's famous odd couple -- and a bright
+/// one stays itself, which is the idempotence Turbo Pascal's intensity bit
+/// had. Any other RGB moves halfway toward white, so calling again brightens
+/// further; that is the 24-bit reading of a 16-color idea, and it is stated
+/// rather than hidden.
+///
+/// The background is never touched.
+///
+/// # Examples
+/// `HighVideo Brightens The Ink And LowVideo Dims It`
+procedure HighVideo ();
+begin
+    if TextInk in BrightPartner then
+    begin
+        TextInk := BrightPartner[TextInk];
+
+        Exit;
+    end
+
+    if TextInk in DimPartner then Exit;
+
+    var R := TextInk div 65536;
+    var G := TextInk div 256 mod 256;
+    var B := TextInk mod 256;
+
+    TextInk := (R + (255 - R) div 2) * 65536
+             + (G + (255 - G) div 2) * 256
+             + (B + (255 - B) div 2);
+end
+
+/// Dims the ink celled text draws with.
+///
+/// The mirror of `HighVideo`: a bright palette color becomes its dim partner
+/// and a dim one stays itself; any other RGB moves halfway toward black,
+/// again further on each call.
+///
+/// # Examples
+/// `HighVideo Brightens The Ink And LowVideo Dims It`
+procedure LowVideo ();
+begin
+    if TextInk in DimPartner then
+    begin
+        TextInk := DimPartner[TextInk];
+
+        Exit;
+    end
+
+    if TextInk in BrightPartner then Exit;
+
+    TextInk := (TextInk div 65536 div 2) * 65536
+             + (TextInk div 256 mod 256 div 2) * 256
+             + (TextInk mod 256 div 2);
+end
+
+/// Restores the ink and background a text mode wakes up in.
+///
+/// LightGray on Transparent -- the defaults `InitGraph` and `TextMode` set --
+/// which is what Turbo Pascal's `NormVideo` did with the attribute the
+/// program started under.
+///
+/// # Examples
+/// `NormVideo Restores The Startup Colors`
+procedure NormVideo ();
+begin
+    TextInk  := LightGray;
+    TextBack := Transparent;
 end
 
 /// Moves the cursor to the start of the next row, scrolling at the bottom.
@@ -1862,4 +1945,57 @@ begin
     AssertEqual (3, T.GetInt (4));
     AssertEqual (4, T.GetInt (8));
     AssertEqual (9, T.GetInt (12));
+end
+
+test 'HighVideo Brightens The Ink And LowVideo Dims It';
+begin
+    TextColor (Blue);
+    HighVideo ();
+    AssertEqual (LightBlue, TextInk);
+
+    // Idempotent on the palette, as the intensity bit was.
+    HighVideo ();
+    AssertEqual (LightBlue, TextInk);
+
+    LowVideo ();
+    AssertEqual (Blue, TextInk);
+
+    LowVideo ();
+    AssertEqual (Blue, TextInk);
+end
+
+/// The adapter's odd couple: brown's bright partner is yellow, not a
+/// brighter brown.
+test 'HighVideo Sends Brown To Yellow And Back';
+begin
+    TextColor (Brown);
+    HighVideo ();
+    AssertEqual (Yellow, TextInk);
+
+    LowVideo ();
+    AssertEqual (Brown, TextInk);
+end
+
+/// Off the palette there is no intensity bit, so the 24-bit reading is
+/// halfway toward white or black -- exact values pinned.
+test 'Off The Palette The Videos Move Halfway';
+begin
+    TextColor (8405024);          // 0x804020
+    HighVideo ();
+    AssertEqual (12558223, TextInk);   // 0xBF9F8F
+
+    TextColor (8405024);
+    LowVideo ();
+    AssertEqual (4202512, TextInk);    // 0x402010
+end
+
+test 'NormVideo Restores The Startup Colors';
+begin
+    TextColor (Yellow);
+    TextBackground (Blue);
+
+    NormVideo ();
+
+    AssertEqual (LightGray, TextInk);
+    AssertEqual (Transparent, TextBack);
 end
