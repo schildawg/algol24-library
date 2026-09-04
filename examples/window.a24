@@ -32,7 +32,7 @@ begin
 
     OutTextXY (24, 444, 'close the window, or press any key, to finish.');
 
-    WriteLn ('window:  ' + Str (GetMaxX () + 1) + ' x ' + Str (GetMaxY () + 1));
+    WriteLn ('window:  ' + Str (GetMaxX ()) + ' x ' + Str (GetMaxY ()));
     WriteLn ('desktop: ' + Str (ScreenWidth ()) + ' x ' + Str (ScreenHeight ()));
     WriteLn ('close the window, or press any key in it, to finish.');
 
