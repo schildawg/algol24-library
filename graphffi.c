@@ -63,6 +63,23 @@ static int32_t *target       = 0;
 static int64_t  target_w     = 0;
 static int64_t  target_h     = 0;
 
+/* Style for the next stamps: a whole-number magnification and a quarter
+ * turn counterclockwise.  State rather than parameters because a foreign
+ * call takes at most eight arguments and the stamp already uses all eight.
+ * The grid never sets it, so cells stay 1:1 and upright; a viewport sets it
+ * around its own drawing and puts it back.
+ */
+static int64_t stamp_scale = 1;
+static int64_t stamp_rot   = 0;
+
+void alg_stamp_style (int64_t scale, int64_t rotation)
+{
+    stamp_scale = scale > 0 ? scale : 1;
+
+    rotation = ((rotation % 360) + 360) % 360;
+    stamp_rot = (rotation / 90) * 90;
+}
+
 void alg_stamp_target (void *pixels, int64_t w, int64_t h)
 {
     target   = (int32_t *) pixels;
@@ -102,17 +119,8 @@ void alg_stamp_cell (int64_t x, int64_t y, void *glyph,
     if (target == 0 || gw <= 0 || gh <= 0) return;
 
     for (int64_t r = 0; r < gh; r++)
-    {
-        int64_t ty = y + r;
-
-        if (ty < 0 || ty >= target_h) continue;
-
         for (int64_t c = 0; c < gw; c++)
         {
-            int64_t tx = x + c;
-
-            if (tx < 0 || tx >= target_w) continue;
-
             int64_t cover = 0;
             int64_t color = ink;
 
@@ -131,18 +139,41 @@ void alg_stamp_cell (int64_t x, int64_t y, void *glyph,
                 }
             }
 
-            int32_t *out = target + ty * target_w + tx;
+            /* Where this source pixel lands, before magnification.  A quarter
+             * turn counterclockwise sends the glyph's top edge to the left
+             * edge, which is what a chart's Y-axis label wants. */
+            int64_t dx = c;
+            int64_t dy = r;
 
-            if (bg >= 0)
-                *out = mixed (bg, color, cover);
-            else if (cover >= 255)
-                *out = (int32_t) (0xFF000000u | (uint32_t) color);
-            else if (cover > 0)
-                *out = (int32_t) (((uint32_t) cover << 24) | (uint32_t) color);
-            else
-                *out = 0;
+            if (stamp_rot == 90)       { dx = r;          dy = gw - 1 - c; }
+            else if (stamp_rot == 180) { dx = gw - 1 - c; dy = gh - 1 - r; }
+            else if (stamp_rot == 270) { dx = gh - 1 - r; dy = c;          }
+
+            for (int64_t sy = 0; sy < stamp_scale; sy++)
+            {
+                int64_t ty = y + dy * stamp_scale + sy;
+
+                if (ty < 0 || ty >= target_h) continue;
+
+                for (int64_t sx = 0; sx < stamp_scale; sx++)
+                {
+                    int64_t tx = x + dx * stamp_scale + sx;
+
+                    if (tx < 0 || tx >= target_w) continue;
+
+                    int32_t *out = target + ty * target_w + tx;
+
+                    if (bg >= 0)
+                        *out = mixed (bg, color, cover);
+                    else if (cover >= 255)
+                        *out = (int32_t) (0xFF000000u | (uint32_t) color);
+                    else if (cover > 0)
+                        *out = (int32_t) (((uint32_t) cover << 24) | (uint32_t) color);
+                    else
+                        *out = 0;
+                }
+            }
         }
-    }
 }
 
 /* Scroll the target up by dy pixel rows, filling the vacated band.

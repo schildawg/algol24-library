@@ -59,6 +59,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
+| [`SetTextStyle`](#settextstyle) | method | `graph` |
 | [`TextBackground`](#textbackground) | procedure | `graph` |
 | [`TextColor`](#textcolor) | procedure | `graph` |
 | [`TextMode`](#textmode) | procedure | `graph` |
@@ -2399,6 +2400,85 @@ WriteLn (RandomInteger (1000));
 
 ---
 
+## SetTextStyle
+
+*method of [`ViewPort`](#viewport)* — unit `graph`
+
+**Function**
+
+Sets the direction and size free text on a viewport is drawn in.
+
+**Declaration**
+
+```algol24
+procedure SetTextStyle (Direction : Integer, CharSize : Integer);
+```
+
+**Remarks**
+
+`Direction` is a quarter turn **counterclockwise** in degrees — `0`, `90`,
+`180` or `270`, and anything else raises. A turn of 90° sends the glyph's top
+edge to the left, so the text reads bottom to top: a chart's Y-axis label,
+which is what the turn was wanted for.
+
+`CharSize` magnifies the glyphs by a whole number, `1` being the font's own
+size. Magnification replicates pixels, so a doubled glyph covers four times
+the area and the antialiasing doubles with it — crisp rather than blurred,
+and unmistakably scaled rather than redrawn.
+
+⚠️ **The turned text is anchored at the same corner.** A 90° turn puts a 16
+× 32 glyph into a 32 × 16 box whose top-left is the `OutTextXY` position, so
+the text grows *right and down* from that point as it always does; only the
+letters lie on their side. The advance follows the turn — right, up, left or
+down — so successive [`OutText`](#viewport) calls read in the direction set.
+
+⚠️ **Celled text has neither setting, and cannot.** A rotated glyph does not
+fit a half-width cell, and a magnified one does not fit at all — which is why
+these live on the viewport and not beside [`TextColor`](#textcolor). The
+style is the viewport's own; the grid never inherits it.
+
+Turbo Pascal's `SetTextStyle` took a font as its first argument, selecting
+among `.CHR` stroked-font files. Here the glyph file installed by
+[`InstallUserFont`](#installuserfont) *is* the font, so selecting one is
+installing one and the parameter has nothing left to choose.
+
+Raises `SetTextStyle wants 0, 90, 180 or 270 degrees.` and `SetTextStyle
+needs a CharSize of 1 or more.`
+
+**See also**
+
+[`InstallUserFont`](#installuserfont), [`OutTextXY`](#outtextxy), [`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'style', False);
+
+var Chart := ViewPort (1, 1, 400, 300, 1);
+
+// A Y-axis label, reading bottom to top, at double size.
+Chart.SetTextStyle (90, 2);
+Chart.OutTextXY (20, 280, 'millivolts');
+
+Chart.SetTextStyle (0, 1);
+Chart.OutTextXY (60, 290, 'seconds');
+Chart.Show ();
+
+WriteLn (Chart.Dir);
+WriteLn (Chart.Size);
+
+CloseGraph ();
+```
+
+```console
+0
+1
+```
+
+---
+
 ## Sin
 
 *function* — unit `math`
@@ -2866,6 +2946,7 @@ procedure MoveTo (PX : Integer, PY : Integer);
 procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
 procedure OutText (Text : String);
 procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
+procedure SetTextStyle (Direction : Integer, CharSize : Integer);
 procedure Show ();
 
 // readable, and the first four settable
@@ -2873,6 +2954,7 @@ X, Y : Integer          the top-left pixel on screen
 Order : Integer         under the root grid when negative, over it when positive
 Alpha : Integer         0 invisible .. 255 opaque
 W, H : Integer          the size, fixed at creation
+Dir, Size : Integer     the text turn and magnification -- see SetTextStyle
 ```
 
 **Remarks**
@@ -2899,6 +2981,8 @@ beneath it; `Alpha` ghosts the whole surface at once. Both `Alpha` and
 no cursor, no wrap, and no text verb that will ever erase it — see
 [`Print`](#print) for the celled kind. `OutText` draws at the viewport's own
 current position and advances it.
+[`SetTextStyle`](#settextstyle) turns that text by a quarter and magnifies
+it, neither of which celled text can have.
 
 Drawing does not appear until something presents; `Show` is that, and
 [`ReadKey`](#readkey) does it too while waiting.

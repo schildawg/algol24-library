@@ -94,6 +94,15 @@ procedure StampCell (X : Integer, Y : Integer, Glyph : Pointer,
                      Mode : Integer, Ink : Integer, Back : Integer);
     external 'alg_stamp_cell' in 'libgraphffi.dylib';
 
+/// Sets the magnification and quarter turn the next stamps use.
+///
+/// Private to this unit. State rather than parameters because a foreign call
+/// takes at most eight arguments and `StampCell` already uses all eight. The
+/// grid never sets it, so cells stay 1:1 and upright; a viewport sets it
+/// around its own drawing and puts it back.
+procedure StampStyle (Scale : Integer, Rotation : Integer);
+    external 'alg_stamp_style' in 'libgraphffi.dylib';
+
 /// Scrolls the stamp target up by DY pixel rows, filling the vacated band.
 ///
 /// Private to this unit.
@@ -1522,6 +1531,8 @@ var
     Tex    : Any;
     CurX   : Integer;
     CurY   : Integer;
+    Dir    : Integer;
+    Size   : Integer;
     Order  : Integer;
     Alpha  : Integer;
     Serial : Integer;
@@ -1544,6 +1555,8 @@ begin
         Alpha  := 255;
         CurX   := 1;
         CurY   := 1;
+        Dir    := 0;
+        Size   := 1;
         Serial := NextSerial;
         Dead   := False;
 
@@ -1599,17 +1612,46 @@ begin
                   Buf.PutInt (((PY - 1) * W + (PX - 1)) * 4, Color - 16777216);
     end
 
+    /// Sets the direction and size free text on this viewport is drawn in.
+    ///
+    /// Direction is a quarter turn counterclockwise in degrees -- 0, 90, 180
+    /// or 270 -- and CharSize magnifies the glyphs by a whole number, 1
+    /// being the font's own size. Turbo Pascal's `SetTextStyle` took a font
+    /// as well; here the glyph file installed by `InstallUserFont` is the
+    /// font, so selecting one is installing one and the parameter has
+    /// nothing to choose.
+    ///
+    /// Celled text has neither setting and cannot: a rotated glyph does not
+    /// fit a half-width cell, and a magnified one does not fit at all. That
+    /// is why these live on the viewport.
+    procedure SetTextStyle (Direction : Integer, CharSize : Integer);
+    begin
+        Check ();
+
+        if Direction <> 0 and Direction <> 90 and Direction <> 180
+           and Direction <> 270 then
+            raise 'SetTextStyle wants 0, 90, 180 or 270 degrees.';
+
+        if CharSize < 1 then raise 'SetTextStyle needs a CharSize of 1 or more.';
+
+        Dir  := Direction;
+        Size := CharSize;
+    end
+
     /// Draws free text with its top-left at local PX, PY; the ink is white.
     ///
     /// This is a graphic that happens to be letters: no cursor, no wrap, no
-    /// text verb will ever erase it. Present it with `Show`.
+    /// text verb will ever erase it. `SetTextStyle` turns and magnifies it.
+    /// Present it with `Show`.
     procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
     begin
         Check ();
         EnsureFont ();
         StampTarget (Buf.Address, W, H);
+        StampStyle (Size, Dir);
 
-        var At := PX - 1;
+        var AtX := PX - 1;
+        var AtY := PY - 1;
 
         for var I := 0; I < Length (Text); I := I + 1 do
         begin
@@ -1628,11 +1670,20 @@ begin
             end
 
             if Words <> nil then
-                StampCell (At, PY - 1, Words.Address, Wide, FontHeight, Mode,
+                StampCell (AtX, AtY, Words.Address, Wide, FontHeight, Mode,
                            16777215, Transparent);
 
-            At := At + Wide;
+            // The advance follows the turn: right, up, left or down.
+            var Step := Wide * Size;
+
+            if Dir = 0 then AtX := AtX + Step;
+            else if Dir = 90 then AtY := AtY - Step;
+            else if Dir = 180 then AtX := AtX - Step;
+            else AtY := AtY + Step;
         end
+
+        // The grid stamps 1:1 and upright, and never sets the style itself.
+        StampStyle (1, 0);
 
         Present ();
     end
@@ -1646,8 +1697,15 @@ begin
         // OutTextXY -- which draws on the background, not on this surface.
         this.OutTextXY (CurX, CurY, Text);
 
+        var Step := 0;
+
         for var I := 0; I < Length (Text); I := I + 1 do
-            CurX := CurX + GlyphWidthOf (Ord (Text[I]));
+            Step := Step + GlyphWidthOf (Ord (Text[I])) * Size;
+
+        if Dir = 0 then CurX := CurX + Step;
+        else if Dir = 90 then CurY := CurY - Step;
+        else if Dir = 180 then CurX := CurX - Step;
+        else CurY := CurY + Step;
     end
 
     /// Pushes the pixels to the screen.
@@ -3511,6 +3569,164 @@ begin
 
     AssertEqual (2, WhereX ());
     AssertEqual (2, WhereY ());
+
+    CloseGraph ();
+end
+
+// ------------------------------------------------------ text style tests --
+
+test 'SetTextStyle Refuses A Turn That Is Not A Quarter';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'style', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+    var Message := '';
+
+    try V.SetTextStyle (45, 1); except on e : String do Message := e; end
+    AssertEqual ('SetTextStyle wants 0, 90, 180 or 270 degrees.', Message);
+
+    Message := '';
+    try V.SetTextStyle (0, 0); except on e : String do Message := e; end
+    AssertEqual ('SetTextStyle needs a CharSize of 1 or more.', Message);
+
+    // The four turns are all accepted.
+    for var D in [0, 90, 180, 270] do
+    begin
+        V.SetTextStyle (D, 2);
+
+        AssertEqual (D, V.Dir);
+    end
+
+    AssertEqual (2, V.Size);
+
+    CloseGraph ();
+end
+
+/// A doubled glyph covers four times the pixels of a single one, which is
+/// the whole of what CharSize means.
+test 'CharSize Magnifies A Glyph By Whole Numbers';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'size', False);
+
+    var One := ViewPort (1, 1, 200, 100, 1);
+    var Two := ViewPort (1, 1, 200, 100, 2);
+
+    One.OutTextXY (1, 1, 'A');
+
+    Two.SetTextStyle (0, 2);
+    Two.OutTextXY (1, 1, 'A');
+
+    var LitOne := 0;
+    var LitTwo := 0;
+
+    for var Y := 0; Y < 100; Y := Y + 1 do
+        for var X := 0; X < 200; X := X + 1 do
+        begin
+            if One.Buf.GetInt ((Y * 200 + X) * 4) <> 0 then LitOne := LitOne + 1;
+            if Two.Buf.GetInt ((Y * 200 + X) * 4) <> 0 then LitTwo := LitTwo + 1;
+        end
+
+    AssertEqual (4 * LitOne, LitTwo);
+
+    CloseGraph ();
+end
+
+/// A quarter turn counterclockwise sends the glyph's top edge to the left:
+/// the pixel at the source's top-right lands at the destination's top-left.
+test 'A Quarter Turn Puts The Glyph On Its Side';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'turn', False);
+
+    var Flat := ViewPort (1, 1, 100, 100, 1);
+    var Side := ViewPort (1, 1, 100, 100, 2);
+
+    // A full block fills its cell, so its footprint shows the turn plainly:
+    // 16 wide by 32 tall upright, 32 by 16 on its side.
+    Flat.OutTextXY (1, 1, '█');
+
+    Side.SetTextStyle (90, 1);
+    Side.OutTextXY (1, 1, '█');           // the turned box is anchored here too
+
+    var FlatW := 0;
+    var SideW := 0;
+
+    for var X := 0; X < 100; X := X + 1 do
+    begin
+        if Flat.Buf.GetInt ((0 * 100 + X) * 4) <> 0 then FlatW := FlatW + 1;
+        if Side.Buf.GetInt ((0 * 100 + X) * 4) <> 0 then SideW := SideW + 1;
+    end
+
+    AssertEqual (16, FlatW);
+    AssertEqual (32, SideW);
+
+    CloseGraph ();
+end
+
+/// Each turn advances along its own axis: right, up, left, down.
+test 'The Advance Follows The Turn';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'advance', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+    var Wide := GlyphWidthOf (Ord ('A'));
+
+    V.CurX := 100;
+    V.CurY := 100;
+    V.SetTextStyle (0, 1);
+    V.OutText ('A');
+    AssertEqual (100 + Wide, V.CurX);
+    AssertEqual (100, V.CurY);
+
+    V.CurX := 100;
+    V.CurY := 100;
+    V.SetTextStyle (90, 1);
+    V.OutText ('A');
+    AssertEqual (100, V.CurX);
+    AssertEqual (100 - Wide, V.CurY);
+
+    V.CurX := 100;
+    V.CurY := 100;
+    V.SetTextStyle (180, 1);
+    V.OutText ('A');
+    AssertEqual (100 - Wide, V.CurX);
+
+    V.CurX := 100;
+    V.CurY := 100;
+    V.SetTextStyle (270, 2);
+    V.OutText ('A');
+    AssertEqual (100 + 2 * Wide, V.CurY);
+
+    CloseGraph ();
+end
+
+/// The style is the viewport's own, and the grid never inherits it: a
+/// magnified viewport must not leave the screen's cells double-sized.
+test 'A Viewport''s Style Does Not Leak To The Grid';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'leak', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.SetTextStyle (90, 3);
+    V.OutTextXY (1, 90, 'X');
+
+    // The grid stamps its cell 1:1 and upright afterward: one cell wide.
+    Print ('A');
+
+    AssertEqual (2, WhereX ());
+
+    var Row := 0;
+
+    for var X := 0; X < Root.PxW; X := X + 1 do
+        if Root.Buf.GetInt ((10 * Root.PxW + X) * 4) <> 0 then Row := Row + 1;
+
+    AssertTrue (Row > 0);
+    AssertTrue (Row <= 16);
 
     CloseGraph ();
 end

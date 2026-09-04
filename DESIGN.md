@@ -91,7 +91,8 @@ meets a string index as `Text[Col - 1]`.
 | cursor, wrap, scroll | yes | no |
 | erased by `ClrEol` / `ClrScr` | yes | no — text verbs ignore it |
 | background color | yes, per cell; transparent by default | no — ink only |
-| orientation | upright only | 0° / 90° / 180° / 270° |
+| magnification | none; the cell is the size | any whole number, by `SetTextStyle` |
+| orientation | upright only | 0° / 90° / 180° / 270°, by `SetTextStyle` |
 | written by | `WriteLn` | `OutText`, `OutTextXY` |
 
 Two of those rows are forced rather than chosen. A cell is half as wide as it

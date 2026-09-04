@@ -1,0 +1,63 @@
+// SetTextStyle on a ViewPort: four quarter turns and five magnifications of
+// free text, which celled text can have neither of.
+//
+//     algc examples/textstyle.a24
+//
+// Esc, or the close button, finishes.
+
+uses graph;
+
+begin
+    InitGraph (1280, 800, 'SetTextStyle', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+    TextColor (White);
+    GotoXY (2, 1);
+    Print ('Free text on a ViewPort turns and scales.  Celled text does neither.');
+
+    // The turns, drawn from the middle of a viewport outward.
+    var Turns := ViewPort (60, 80, 560, 560, 1);
+
+    Turns.SetTextStyle (0, 2);
+    Turns.OutTextXY (290, 264, '  0 degrees ->');
+
+    Turns.SetTextStyle (90, 2);
+    Turns.OutTextXY (250, 260, '  90 degrees ->');
+
+    Turns.SetTextStyle (180, 2);
+    Turns.OutTextXY (270, 300, '  180 degrees ->');
+
+    Turns.SetTextStyle (270, 2);
+    Turns.OutTextXY (310, 300, '  270 degrees ->');
+
+    Turns.Show ();
+
+    // The sizes, each line double the last.
+    var Sizes := ViewPort (660, 80, 560, 560, 1);
+    var Y := 10;
+
+    for var S in [1, 2, 3, 4] do
+    begin
+        Sizes.SetTextStyle (0, S);
+        Sizes.OutTextXY (10, Y, 'CharSize ' + Str (S));
+
+        Y := Y + 40 * S;
+    end
+
+    Sizes.Show ();
+
+    // And a chart's Y-axis label, which is what the quarter turn is for.
+    var Axis := ViewPort (60, 660, 1160, 120, 1);
+
+    Axis.SetTextStyle (90, 1);
+    Axis.OutTextXY (10, 110, 'millivolts');
+
+    Axis.SetTextStyle (0, 1);
+    Axis.OutTextXY (60, 50, 'a Y-axis label reads bottom to top -- the turn it was wanted for');
+
+    Axis.Show ();
+
+    ReadKey ();
+    CloseGraph ();
+end
