@@ -125,6 +125,17 @@ procedure FillSector (CX : Integer, CY : Integer, XRadius : Integer,
                       Pattern : Pointer, Color : Integer);
     external 'alg_fill_sector' in 'libgraphffi.dylib';
 
+/// Fills the region around a seed of the stamp target, stopping at a border.
+///
+/// Private to this unit, and the third of the fill primitives -- the one that
+/// reads the surface rather than computing from parameters alone. Every pixel
+/// of the region must be examined whether or not it is painted, which is the
+/// same bargain `FillRect` struck. A boundary fill: the region is what is
+/// reachable from the seed without crossing the border colour.
+procedure Flood (X : Integer, Y : Integer, Border : Integer,
+                 Pattern : Pointer, Color : Integer);
+    external 'alg_flood_fill' in 'libgraphffi.dylib';
+
 /// Scrolls the stamp target up by DY pixel rows, filling the vacated band.
 ///
 /// Private to this unit.
@@ -1818,6 +1829,76 @@ begin
     end
 
 
+
+    /// The color of the pixel at PX, PY, or `Transparent` where none is set.
+    ///
+    /// The read `PutPixel` writes, and the only way to ask what a surface
+    /// already holds. A position off the viewport answers `Transparent`
+    /// rather than raising, the edge being the clip as it is for `PutPixel`.
+    ///
+    /// `Transparent` and `Black` are different answers: a pixel painted black
+    /// is opaque and answers `Black`, while a pixel never painted answers
+    /// `Transparent` and shows whatever surface lies beneath.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetPixel Reads Back What PutPixel Wrote`
+    function GetPixel (PX : Integer, PY : Integer) : Integer;
+    begin
+        Check ();
+
+        if PX < 1 or PY < 1 or PX > W or PY > H then Exit Transparent;
+
+        var Word := Buf.GetInt (((PY - 1) * W + (PX - 1)) * 4);
+
+        if Word = 0 then Exit Transparent;
+
+        Exit Word + 16777216;
+    end
+
+    /// Fills the region around X, Y, stopping at pixels of the border color.
+    ///
+    /// Turbo Pascal's flood, and a boundary fill as that one was: the region
+    /// is every pixel reachable from the seed without crossing one of the
+    /// border color, rather than every pixel matching the seed's own. That is
+    /// the fill an outlined figure wants, and an outlined figure is what a
+    /// flood is usually aimed at -- `Circle` then `FloodFill` inside it is the
+    /// filled disc drawn the long way.
+    ///
+    /// Border is a color or `Transparent`, and `Transparent` is the useful
+    /// one on a fresh surface: the untouched pixels are the border, so the
+    /// flood spreads exactly as far as the paint already there.
+    ///
+    /// The current fill pattern and color are used, tiled from the surface's
+    /// origin as every other fill is, and `EmptyFill` paints nothing. The pen
+    /// is not moved.
+    ///
+    /// A seed off the viewport, or one already standing on the border color,
+    /// fills nothing and does not raise.
+    ///
+    /// # Raises
+    /// `FloodFill wants a color or Transparent.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `FloodFill Fills Within An Outline And Stops At It`
+    procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
+    begin
+        Check ();
+
+        if Border < Transparent then
+            raise 'FloodFill wants a color or Transparent.';
+
+        if Filling = EmptyFill then Exit;
+
+        StampTarget (Buf.Address, W, H);
+        Flood (X, Y, Border, FillBuf.Address, FillInk);
+
+        Present ();
+    end
+
     /// Sets the color the pen draws and free text is written in.
     ///
     /// Turbo Pascal's `SetColor`, and it governs `Line`, `LineTo`, `LineRel`
@@ -3301,6 +3382,18 @@ end
 procedure PutPixel (V : ViewPort, X : Integer, Y : Integer, Color : Integer);
 begin
     V.PutPixel (X, Y, Color);
+end
+
+/// The color of a pixel of a viewport. See `ViewPort`.
+function GetPixel (V : ViewPort, X : Integer, Y : Integer) : Integer;
+begin
+    Exit V.GetPixel (X, Y);
+end
+
+/// Fills the region around a point of a viewport. See `FloodFill`.
+procedure FloodFill (V : ViewPort, X : Integer, Y : Integer, Border : Integer);
+begin
+    V.FloodFill (X, Y, Border);
 end
 
 /// Draws free text at a viewport's current position. See `ViewPort`.
@@ -5527,6 +5620,15 @@ begin
 
     AssertEqual (20, V.GetX ());        // unmoved by the figure
 
+    V.PutPixel (PX: 50, PY: 40, Color: Red);
+
+    AssertEqual (Red, V.GetPixel (PX: 50, PY: 40));
+
+    V.SetFillStyle (Style: SolidFill, Color: Green);
+    V.FloodFill (X: 60, Y: 40, Border: Red);
+
+    AssertEqual (Green, V.GetPixel (PX: 60, PY: 40));
+
     CloseGraph ();
 end
 
@@ -7375,6 +7477,351 @@ begin
     FillEllipse (V, 100, 100, 70, 40);
 
     AssertEqual (LightCyan - 16777216, V.Buf.GetInt ((99 * 200 + 99) * 4));
+
+    CloseGraph ();
+end
+
+test 'GetPixel Reads Back What PutPixel Wrote';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'getpixel', False);
+
+    var V := ViewPort (1, 1, 20, 10, 1);
+
+    AssertEqual (Transparent, V.GetPixel (5, 5));
+
+    V.PutPixel (5, 5, Red);
+    AssertEqual (Red, V.GetPixel (5, 5));
+
+    V.PutPixel (6, 5, White);
+    AssertEqual (White, V.GetPixel (6, 5));
+
+    // Black is a color, and an unpainted pixel is not: the two must not
+    // answer alike, or nothing could tell paint from the gap in it.
+    V.PutPixel (7, 5, Black);
+    AssertEqual (Black, V.GetPixel (7, 5));
+    AssertTrue (V.GetPixel (7, 5) <> V.GetPixel (8, 5));
+    AssertEqual (Transparent, V.GetPixel (8, 5));
+
+    CloseGraph ();
+end
+
+test 'GetPixel Answers Transparent Off The Viewport';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'gpoff', False);
+
+    var V := ViewPort (1, 1, 20, 10, 1);
+
+    V.SetFillStyle (SolidFill, Yellow);
+    V.Bar (1, 1, 20, 10);              // every pixel painted
+
+    AssertEqual (Yellow, V.GetPixel (1, 1));
+    AssertEqual (Yellow, V.GetPixel (20, 10));
+
+    // One step past each edge, where nothing is: the edge is the clip, as it
+    // is for PutPixel, so this answers rather than raising.
+    AssertEqual (Transparent, V.GetPixel (0, 5));
+    AssertEqual (Transparent, V.GetPixel (5, 0));
+    AssertEqual (Transparent, V.GetPixel (21, 5));
+    AssertEqual (Transparent, V.GetPixel (5, 11));
+
+    CloseGraph ();
+end
+
+test 'GetPixel Reads What The Figures Painted';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'gpfig', False);
+
+    var V := ViewPort (1, 1, 60, 40, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (10, 10, 29, 19);
+
+    AssertEqual (Red, V.GetPixel (10, 10));
+    AssertEqual (Red, V.GetPixel (29, 19));
+    AssertEqual (Transparent, V.GetPixel (9, 10));
+    AssertEqual (Transparent, V.GetPixel (30, 19));
+
+    V.SetColor (LightGreen);
+    V.Line (40, 5, 40, 35);
+
+    AssertEqual (LightGreen, V.GetPixel (40, 20));
+
+    CloseGraph ();
+end
+
+test 'GetPixel And FloodFill Refuse A Closed Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'gpdead', False);
+
+    var V := ViewPort (1, 1, 20, 10, 1);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.GetPixel (1, 1); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.FloodFill (1, 1, Red); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'FloodFill Fills Within An Outline And Stops At It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'flood', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+
+    V.SetFillStyle (SolidFill, Green);
+    V.FloodFill (15, 15, Red);
+
+    // The interior is 18 by 13, and every pixel of it is Green.
+    AssertEqual (Green, V.GetPixel (11, 11));
+    AssertEqual (Green, V.GetPixel (28, 23));
+    AssertEqual (Green, V.GetPixel (20, 17));
+
+    // The outline is untouched, and so is everything beyond it.
+    AssertEqual (Red, V.GetPixel (10, 10));
+    AssertEqual (Red, V.GetPixel (29, 24));
+    AssertEqual (Transparent, V.GetPixel (9, 10));
+    AssertEqual (Transparent, V.GetPixel (1, 1));
+
+    var Filled := 0;
+
+    for var Y := 1; Y <= 30; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+            if V.GetPixel (X, Y) = Green then Filled := Filled + 1;
+
+    AssertEqual (18 * 13, Filled);
+
+    CloseGraph ();
+end
+
+test 'An Outline Divides Its Surface Into Exactly Two Floods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'flooddiv', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+
+    // Inside, then outside, each stopping at the same border. Between them
+    // and the outline they must account for every pixel of the surface --
+    // which is the property a boundary fill exists to have.
+    V.SetFillStyle (SolidFill, Green);
+    V.FloodFill (15, 15, Red);
+
+    V.SetFillStyle (SolidFill, Blue);
+    V.FloodFill (1, 1, Red);
+
+    var Inside  := 0;
+    var Outside := 0;
+    var Border  := 0;
+
+    for var Y := 1; Y <= 30; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+        begin
+            var C := V.GetPixel (X, Y);
+
+            if C = Green then Inside := Inside + 1;
+            else if C = Blue then Outside := Outside + 1;
+            else if C = Red then Border := Border + 1;
+        end
+
+    AssertEqual (18 * 13, Inside);
+    AssertEqual (2 * 20 + 2 * 15 - 4, Border);
+    AssertEqual (40 * 30, Inside + Outside + Border);
+
+    CloseGraph ();
+end
+
+test 'FloodFill Leaks Through A Gap In The Outline';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodgap', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+
+    // Rub two pixels of the right wall out. A boundary fill follows what is
+    // actually drawn, so the paint escapes -- as it should.
+    V.PutPixel (29, 16, Black);
+    V.PutPixel (29, 17, Black);
+
+    V.SetFillStyle (SolidFill, Green);
+    V.FloodFill (15, 15, Red);
+
+    AssertEqual (Green, V.GetPixel (20, 17));
+    AssertEqual (Green, V.GetPixel (35, 17));
+    AssertEqual (Green, V.GetPixel (1, 1));
+
+    CloseGraph ();
+end
+
+test 'FloodFill Takes Transparent As A Border';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodtr', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (10, 10, 29, 24);
+
+    // The untouched pixels are the border, so the flood spreads exactly as
+    // far as the paint already there -- a recolor of the blob and nothing
+    // else.
+    V.SetFillStyle (SolidFill, Green);
+    V.FloodFill (15, 15, Transparent);
+
+    AssertEqual (Green, V.GetPixel (10, 10));
+    AssertEqual (Green, V.GetPixel (29, 24));
+    AssertEqual (Transparent, V.GetPixel (9, 10));
+
+    var Filled := 0;
+
+    for var Y := 1; Y <= 30; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+            if V.GetPixel (X, Y) = Green then Filled := Filled + 1;
+
+    AssertEqual (20 * 15, Filled);
+
+    CloseGraph ();
+end
+
+test 'FloodFill Honours The Fill Pattern';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodpat', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+
+    V.SetFillStyle (InterleaveFill, Yellow);
+    V.FloodFill (15, 15, Red);
+
+    // A checker leaves half the interior unpainted -- and the flood still
+    // crossed all of it, or the far corner would not be lit.
+    var Filled := 0;
+
+    for var Y := 11; Y <= 23; Y := Y + 1 do
+        for var X := 11; X <= 28; X := X + 1 do
+            if V.GetPixel (X, Y) = Yellow then Filled := Filled + 1;
+
+    AssertEqual (18 * 13 div 2, Filled);
+
+    // The pattern tiles from the surface's origin, so which pixels are lit
+    // is a fact about the surface rather than about the region.
+    AssertEqual (V.GetPixel (11, 11) = Yellow, V.GetPixel (27, 23) = Yellow);
+    AssertTrue (V.GetPixel (11, 11) <> V.GetPixel (12, 11));
+
+    CloseGraph ();
+end
+
+test 'FloodFill With An Empty Fill Paints Nothing';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodempty', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+
+    V.SetFillStyle (EmptyFill, Green);
+    V.FloodFill (15, 15, Red);
+
+    AssertEqual (Transparent, V.GetPixel (15, 15));
+    AssertEqual (Red, V.GetPixel (10, 10));
+
+    CloseGraph ();
+end
+
+test 'FloodFill Does Nothing From Off The Surface Or From The Border';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodseed', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+
+    V.SetFillStyle (SolidFill, Green);
+
+    V.FloodFill (0, 5, Red);           // off the left edge
+    V.FloodFill (5, 31, Red);          // off the bottom
+    V.FloodFill (10, 10, Red);         // standing on the border itself
+
+    var Filled := 0;
+
+    for var Y := 1; Y <= 30; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+            if V.GetPixel (X, Y) = Green then Filled := Filled + 1;
+
+    AssertEqual (0, Filled);
+    AssertEqual (Red, V.GetPixel (10, 10));
+
+    CloseGraph ();
+end
+
+test 'FloodFill Refuses A Color Below Transparent And Leaves The Pen';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodraise', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    var Message := '';
+
+    try V.FloodFill (5, 5, -2); except on e : String do Message := e; end
+    AssertEqual ('FloodFill wants a color or Transparent.', Message);
+
+    V.PenTo (7, 8);
+    V.SetColor (Red);
+    V.Rectangle (10, 10, 29, 24);
+    V.PenTo (7, 8);
+
+    V.SetFillStyle (SolidFill, Green);
+    V.FloodFill (15, 15, Red);
+
+    AssertEqual (7, V.GetX ());
+    AssertEqual (8, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'The GetPixel And FloodFill Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'floodalias', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    SetColor (V, Red);
+    Rectangle (V, 10, 10, 29, 24);
+
+    SetFillStyle (V, SolidFill, LightCyan);
+    FloodFill (V, 15, 15, Red);
+
+    AssertEqual (LightCyan, GetPixel (V, 20, 17));
+    AssertEqual (Red, GetPixel (V, 10, 10));
+    AssertEqual (Transparent, GetPixel (V, 1, 1));
 
     CloseGraph ();
 end

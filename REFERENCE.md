@@ -16,29 +16,31 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` |
-| [`Arc`](#arc) | procedure, alias of `ViewPort.Arc` | `graph` |
+| [`Arc`](#arc) | procedure, alias | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
-| [`Bar`](#bar) | procedure, alias of `ViewPort.Bar` | `graph` |
-| [`Bar3D`](#bar3d) | procedure, alias of `ViewPort.Bar3D` | `graph` |
+| [`Bar`](#bar) | procedure, alias | `graph` |
+| [`Bar3D`](#bar3d) | procedure, alias | `graph` |
 | [`Blink`](#blink) | constant | `graph` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
-| [`Circle`](#circle) | procedure, alias of `ViewPort.Circle` | `graph` |
+| [`Circle`](#circle) | procedure, alias | `graph` |
 | [`ClrEol`](#clreol) | procedure | `graph` |
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Black` … `White`](#colors) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
-| [`DrawPoly`](#drawpoly) | procedure, alias of `ViewPort.DrawPoly` | `graph` |
-| [`Ellipse`](#ellipse) | procedure, alias of `ViewPort.Ellipse` | `graph` |
+| [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
+| [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`Exp`](#exp) | function | `math` |
-| [`FillEllipse`](#fillellipse) | procedure, alias of `ViewPort.FillEllipse` | `graph` |
-| [`FillPoly`](#fillpoly) | procedure, alias of `ViewPort.FillPoly` | `graph` |
+| [`FillEllipse`](#fillellipse) | procedure, alias | `graph` |
+| [`FillPoly`](#fillpoly) | procedure, alias | `graph` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
+| [`FloodFill`](#floodfill) | procedure, alias | `graph` |
 | [`Frac`](#frac) | function | `math` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
+| [`GetPixel`](#getpixel) | function, alias | `graph` |
 | [`GetX`](#getx) | function, alias | `graph` |
 | [`GetY`](#gety) | function, alias | `graph` |
 | [`GotoXY`](#gotoxy) | procedure | `graph` |
@@ -67,7 +69,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`PenRel`](#penrel) | procedure, alias | `graph` |
 | [`PenTo`](#pento) | procedure, alias | `graph` |
-| [`PieSlice`](#pieslice) | procedure, alias of `ViewPort.PieSlice` | `graph` |
+| [`PieSlice`](#pieslice) | procedure, alias | `graph` |
 | [`Pi`](#pi) | constant | `math` |
 | [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
@@ -79,10 +81,10 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
-| [`Sector`](#sector) | procedure, alias of `ViewPort.Sector` | `graph` |
+| [`Sector`](#sector) | procedure, alias | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
-| [`SetFillStyle`](#setfillstyle) | procedures, aliases of `ViewPort.SetFillStyle` and `SetFillPattern` | `graph` |
+| [`SetFillStyle`](#setfillstyle) | procedures, aliases | `graph` |
 | [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
@@ -178,7 +180,7 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the twenty-seven surface methods has a
+is Turbo Pascal's — so each of the forty-five surface methods has a
 free-function twin. Each is a one-line delegate adding no behaviour whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
@@ -1475,6 +1477,97 @@ See [`SetFillStyle`](#setfillstyle).
 
 ---
 
+## FloodFill
+
+*procedure, alias of `ViewPort.FloodFill`* — unit `graph`
+
+**Function**
+
+Fills the region around a point, stopping at pixels of the border color.
+
+**Declaration**
+
+```algol24
+procedure FloodFill (V : ViewPort, X : Integer, Y : Integer, Border : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `FloodFill (V, …)` is `V.FloodFill (…)`.
+
+The only figure that **reads** the surface. Every other one knows the pixels
+it covers from its parameters — [`Bar`](#bar) from its corners,
+[`Sector`](#sector) from its radii and angles — while a flood has to look at
+what is already drawn and follow it.
+
+⚠️ **A boundary fill, as Turbo Pascal's was.** The region is every pixel
+reachable from the seed without crossing one of the **border** color — not
+every pixel matching the seed's own. That is the fill an outlined figure
+wants, and an outlined figure is what a flood is usually aimed at:
+[`Circle`](#circle) and then `FloodFill` inside it is the filled disc drawn
+the long way round.
+
+Follow that definition and two consequences fall out, both of them the point
+rather than surprises. A **gap in the outline leaks** — the paint escapes
+through it and floods whatever lies beyond, because the paint goes exactly
+where the drawn border does not stop it. And an outline **divides the surface
+in two**: flood inside it, flood outside it, and between them and the border
+every pixel is accounted for.
+
+`Border` may be [`Transparent`](#colors), which is the useful one on a fresh
+surface — the untouched pixels are then the border, so the flood spreads
+exactly as far as the paint already there and recolors a blob without
+touching what surrounds it.
+
+The current [fill pattern and color](#setfillstyle) are used, tiled from the
+surface's origin as every fill is, so a patterned flood leaves most of the
+region unpainted while still crossing all of it. `EmptyFill` paints nothing.
+The pen is not moved, a flood being a figure rather than a journey.
+
+A seed off the viewport, or one already standing on the border color, fills
+nothing and does not raise — the edge is the clip, as it is for
+[`PutPixel`](#putpixel).
+
+Raises `FloodFill wants a color or Transparent.` and `CloseGraph has closed
+this surface.`
+
+**See also**
+
+[`Bar`](#bar), [`Circle`](#circle), [`GetPixel`](#getpixel),
+[`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'flood', False);
+
+var V := ViewPort (100, 60, 200, 200, 1);
+
+// An outline, and then the paint poured inside it.
+SetColor (V, LightCyan);
+Circle (V, 100, 100, 80);
+
+SetFillStyle (V, SolidFill, Blue);
+FloodFill (V, 100, 100, LightCyan);
+Show (V);
+
+System.WriteLn (GetPixel (V, 100, 100) = Blue);        // the middle is filled
+System.WriteLn (GetPixel (V, 100, 25) = Blue);         // and so is the top
+System.WriteLn (GetPixel (V, 5, 5) = Transparent);     // outside is untouched
+
+CloseGraph ();
+```
+
+```console
+true
+true
+true
+```
+
+---
+
 ## Frac
 
 *function* — unit `math`
@@ -1656,6 +1749,81 @@ Raises `Graph is not open.` when there is no window.
 **Example**
 
 See [`GetMaxX`](#getmaxx) and [`InitGraph`](#initgraph), which show both.
+
+---
+
+## GetPixel
+
+*function, alias of `ViewPort.GetPixel`* — unit `graph`
+
+**Function**
+
+The color of one pixel of a viewport.
+
+**Declaration**
+
+```algol24
+function GetPixel (V : ViewPort, X : Integer, Y : Integer) : Integer;
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `GetPixel (V, …)` is `V.GetPixel (…)`.
+
+The read [`PutPixel`](#putpixel) writes, and the only way to ask what a
+surface already holds. Coordinates are the viewport's own, counting from 1.
+
+⚠️ **`Transparent` and `Black` are different answers.** A pixel painted black
+is opaque and answers [`Black`](#colors); a pixel never painted answers
+[`Transparent`](#colors) and shows whatever surface lies beneath it. Nothing
+else on a stack of surfaces could tell paint from the gap in it.
+
+A position **off the viewport answers `Transparent`** rather than raising, the
+edge being the clip here exactly as it is for `PutPixel`.
+
+The value is what was written, not what the screen finally shows: a pixel of a
+viewport that some other surface covers still answers its own color.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to has
+gone.
+
+**See also**
+
+[`Colors`](#colors), [`FloodFill`](#floodfill), [`PutPixel`](#putpixel),
+[`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'read', False);
+
+var V := ViewPort (50, 50, 40, 30, 1);
+
+PutPixel (V, 1, 1, White);
+PutPixel (V, 2, 1, Black);
+
+System.WriteLn (GetPixel (V, 1, 1) = White);
+System.WriteLn (GetPixel (V, 2, 1) = Black);          // paint, and opaque
+System.WriteLn (GetPixel (V, 3, 1) = Transparent);    // never painted
+System.WriteLn (GetPixel (V, 41, 1) = Transparent);   // past the edge
+
+SetFillStyle (V, SolidFill, Red);
+Bar (V, 10, 10, 20, 20);
+
+System.WriteLn (GetPixel (V, 15, 15) = Red);
+
+CloseGraph ();
+```
+
+```console
+true
+true
+true
+true
+true
+```
 
 ---
 
@@ -3197,7 +3365,8 @@ has gone.
 
 **See also**
 
-[`Line`](#line), [`Show`](#show), [`ViewPort`](#viewport)
+[`GetPixel`](#getpixel), [`Line`](#line), [`Show`](#show),
+[`ViewPort`](#viewport)
 
 **Example**
 
@@ -3213,13 +3382,15 @@ PutPixel (V, 40, 30, Yellow);
 PutPixel (V, 41, 1, Red);          // past the edge: clipped, silently
 Show (V);
 
-System.WriteLn (V.Buf.GetInt (0) = White - 16777216);
-System.WriteLn (V.Buf.GetInt ((29 * 40 + 39) * 4) = Yellow - 16777216);
+System.WriteLn (GetPixel (V, 1, 1) = White);
+System.WriteLn (GetPixel (V, 40, 30) = Yellow);
+System.WriteLn (GetPixel (V, 41, 1) = Transparent);
 
 CloseGraph ();
 ```
 
 ```console
+true
 true
 true
 ```
@@ -4678,6 +4849,8 @@ constructor ViewPort (X : Integer, Y : Integer, W : Integer, H : Integer,
 
 procedure MoveTo (PX : Integer, PY : Integer);
 procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
+function  GetPixel (PX : Integer, PY : Integer) : Integer;
+procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
 procedure OutText (Text : String);
 procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
 procedure SetTextStyle (Direction : Integer, CharSize : Integer);
@@ -4756,7 +4929,8 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
 [`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),
-[`PutPixel`](#putpixel), [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
+[`PutPixel`](#putpixel), [`GetPixel`](#getpixel), [`FloodFill`](#floodfill),
+[`OutText`](#outtext), [`OutTextXY`](#outtextxy),
 [`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto).
 
 [`CellWidth`](#cellwidth), [`ReadKey`](#readkey), [`Window`](#window)

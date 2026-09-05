@@ -1,0 +1,263 @@
+// The figures, the fills, and the flood -- drawn so each can be checked by
+// eye against the one beside it.
+//
+//     algc examples/figures.a24
+//
+// Esc, or the close button, finishes.
+//
+// Three panels, each answering a different question:
+//
+//   the thirteen fills  what every pattern actually looks like, woven
+//   outline and fill    which verb draws the edge and which fills the middle
+//   the flood           what a BOUNDARY fill does, including when it leaks
+//
+// The flood panel is the interesting one. A flood is the only figure that
+// reads the surface back rather than computing its pixels from parameters,
+// so it follows what is actually drawn -- and a gap in an outline is a way
+// out. The screen mixes the two kinds of surface throughout: the labels are
+// celled text on the root grid, everything else is pixels on a ViewPort
+// above it.
+
+uses graph;
+uses math;
+
+// A five-pointed star as DrawPoly and FillPoly take one: a List of pairs,
+// closed by repeating the first point -- which DrawPoly needs, and FillPoly
+// does not mind.
+function Star (CX : Integer, CY : Integer, Outer : Integer,
+               Inner : Integer) : List;
+begin
+    var Points := [];
+
+    for var K := 0; K <= 10; K := K + 1 do
+    begin
+        var A := (90 + K * 36) * Pi / 180.0;
+        var R := Outer;
+
+        if K mod 2 <> 0 then R := Inner;
+
+        Points.Add ([CX + Round (R * Cos (A)), CY - Round (R * Sin (A))]);
+    end
+
+    Exit Points;
+end
+
+begin
+    InitGraph (1280, 800, 'Figures', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+
+    TextColor (Yellow);
+    GotoXY (2, 1);
+    Write ('The figures, the fills, and the flood.');
+
+    TextColor (DarkGray);
+    GotoXY (65, 1);
+    Write ('Esc to finish.');
+
+    TextColor (LightGray);
+    GotoXY (3, 2);
+    Write ('the thirteen fills');
+    GotoXY (26, 2);
+    Write ('outline and fill');
+    GotoXY (54, 2);
+    Write ('the flood: a boundary fill');
+
+    // ------------------------------------------------ the thirteen fills --
+    //
+    // Every pattern tiles from the SURFACE's origin rather than the figure's,
+    // which is why the swatches look cut from one cloth rather than each
+    // starting its own weave.
+    var Fills := ViewPort (24, 72, 360, 580, 1);
+
+    var Styles := [[EmptyFill,      'EmptyFill'],
+                   [SolidFill,      'SolidFill'],
+                   [LineFill,       'LineFill'],
+                   [LtSlashFill,    'LtSlashFill'],
+                   [SlashFill,      'SlashFill'],
+                   [BkSlashFill,    'BkSlashFill'],
+                   [LtBkSlashFill,  'LtBkSlashFill'],
+                   [HatchFill,      'HatchFill'],
+                   [XHatchFill,     'XHatchFill'],
+                   [InterleaveFill, 'InterleaveFill'],
+                   [WideDotFill,    'WideDotFill'],
+                   [CloseDotFill,   'CloseDotFill']];
+
+    var Inks := [LightCyan, Yellow, LightGreen, LightMagenta,
+                 LightRed, White, LightBlue];
+
+    for var I := 0; I < Styles.Length; I := I + 1 do
+    begin
+        var Top := 4 + I * 44;
+
+        SetFillStyle (Fills, Styles[I][0], Inks[I mod Inks.Length]);
+        Bar (Fills, 4, Top, 104, Top + 32);
+
+        // EmptyFill paints nothing at all, so without an outline there would
+        // be nothing to see -- which is the honest picture of it.
+        SetColor (Fills, DarkGray);
+        Rectangle (Fills, 4, Top, 104, Top + 32);
+
+        SetColor (Fills, LightGray);
+        OutTextXY (Fills, 112, Top + 6, Styles[I][1]);
+    end
+
+    // The thirteenth is not chosen by name: SetFillPattern supplies the bits
+    // and sets UserFill along with them. Eight rows, high bit leftmost -- a
+    // diamond, here.
+    SetFillPattern (Fills, [24, 60, 126, 255, 255, 126, 60, 24], LightRed);
+    Bar (Fills, 4, 532, 104, 564);
+
+    SetColor (Fills, DarkGray);
+    Rectangle (Fills, 4, 532, 104, 564);
+    SetColor (Fills, LightGray);
+    OutTextXY (Fills, 112, 538, 'UserFill');
+
+    Show (Fills);
+
+    // ------------------------------------------------- outline and fill --
+    //
+    // One row per shape: the verb that draws the edge on the left, the verb
+    // that fills the middle on the right, so the pair can be told apart at a
+    // glance.
+    var Shapes := ViewPort (400, 72, 440, 580, 1);
+
+    SetColor (Shapes, DarkGray);
+    OutTextXY (Shapes, 4, 44,  'Circle');
+    OutTextXY (Shapes, 4, 138, 'Ellipse');
+    OutTextXY (Shapes, 4, 233, 'Arc/Slice');
+    OutTextXY (Shapes, 4, 328, 'Sector');
+    OutTextXY (Shapes, 4, 414, 'Bar/Bar3D');
+    OutTextXY (Shapes, 4, 508, 'Poly');
+
+    // Circle, and the disc that is FillEllipse with its two radii equal.
+    SetColor (Shapes, LightCyan);
+    SetFillStyle (Shapes, SolidFill, Blue);
+    Circle (Shapes, 230, 56, 44);
+    FillEllipse (Shapes, 350, 56, 44, 44);
+    Circle (Shapes, 350, 56, 44);
+
+    // Ellipse, and FillEllipse proper.
+    SetColor (Shapes, LightGreen);
+    SetFillStyle (Shapes, HatchFill, Green);
+    Ellipse (Shapes, 230, 150, 0, 360, 50, 30);
+    FillEllipse (Shapes, 350, 150, 50, 30);
+    Ellipse (Shapes, 350, 150, 0, 360, 50, 30);
+
+    // Arc, and the wedge that closes it to the centre.
+    SetColor (Shapes, Yellow);
+    SetFillStyle (Shapes, SlashFill, Brown);
+    Arc (Shapes, 230, 245, 30, 300, 44);
+    PieSlice (Shapes, 350, 245, 30, 300, 44);
+
+    // Sector: PieSlice with two radii, as Ellipse is Circle with two.
+    SetColor (Shapes, LightMagenta);
+    SetFillStyle (Shapes, XHatchFill, Magenta);
+    Sector (Shapes, 290, 340, 30, 300, 60, 38);
+
+    // Bar, and Bar3D -- a Bar given a lid and a side.
+    SetColor (Shapes, White);
+    SetFillStyle (Shapes, LineFill, LightBlue);
+    Bar (Shapes, 186, 396, 274, 456);
+    Bar3D (Shapes, 306, 396, 394, 456, 20, True);
+
+    // DrawPoly and FillPoly, on the very same eleven points.
+    SetColor (Shapes, LightRed);
+    SetFillStyle (Shapes, InterleaveFill, Red);
+    DrawPoly (Shapes, Star (230, 520, 40, 16));
+    FillPoly (Shapes, Star (350, 520, 40, 16));
+
+    Show (Shapes);
+
+    // ------------------------------------------------------- the flood --
+    //
+    // Each scene gets a viewport of its own, so a flood that escapes fills
+    // that surface and stops at its edge rather than running over the whole
+    // screen. Local is the clip, here as everywhere.
+
+    // Sealed: the outline is closed, and the paint stays inside it.
+    var Sealed := ViewPort (856, 72, 190, 176, 1);
+
+    SetColor (Sealed, LightCyan);
+    Circle (Sealed, 95, 95, 74);
+
+    SetFillStyle (Sealed, SolidFill, Blue);
+    FloodFill (Sealed, 95, 95, LightCyan);
+    Show (Sealed);
+
+    // Open: a notch rubbed out of the wall, and the paint finds it. Nothing
+    // has gone wrong here -- a boundary fill goes exactly where the drawn
+    // border does not stop it, and there is no border across the notch.
+    var Leaky := ViewPort (1062, 72, 190, 176, 1);
+
+    SetColor (Leaky, LightCyan);
+    Circle (Leaky, 95, 95, 74);
+
+    for var X := 88; X <= 102; X := X + 1 do
+        for var Y := 16; Y <= 28; Y := Y + 1 do
+            PutPixel (Leaky, X, Y, Transparent);
+
+    SetFillStyle (Leaky, SolidFill, Red);
+    FloodFill (Leaky, 95, 95, LightCyan);
+    Show (Leaky);
+
+    TextColor (LightGray);
+    GotoXY (57, 9);
+    Write ('kept in');
+    GotoXY (70, 9);
+    Write ('leaked');
+
+    // A patterned flood crosses the whole region and paints half of it; and
+    // Transparent serves as a border too, which on a fresh surface is the
+    // useful one -- the untouched pixels ARE the edge, so the flood recolours
+    // a blob and stops exactly where the paint already stops.
+    var Woven := ViewPort (856, 296, 396, 356, 1);
+
+    SetColor (Woven, Yellow);
+    DrawPoly (Woven, Star (110, 130, 100, 40));
+
+    SetFillStyle (Woven, HatchFill, LightGreen);
+    FloodFill (Woven, 110, 130, Yellow);
+
+    SetFillStyle (Woven, SolidFill, LightMagenta);
+    Bar (Woven, 230, 70, 330, 200);
+    Circle (Woven, 280, 135, 60);
+
+    SetFillStyle (Woven, CloseDotFill, White);
+    FloodFill (Woven, 280, 135, Transparent);
+
+    SetColor (Woven, DarkGray);
+    OutTextXY (Woven, 10, 250, 'left: border Yellow');
+    OutTextXY (Woven, 10, 280, 'right: Transparent');
+    Show (Woven);
+
+    // ----------------------------------------------- GetPixel reads back --
+    //
+    // The flood is the figure that reads the surface; GetPixel is that same
+    // read offered to the caller. Counting what the flood actually covered
+    // measures the circle's area with no mathematics in it at all.
+    var Painted := 0;
+
+    for var Y := 1; Y <= 176; Y := Y + 1 do
+        for var X := 1; X <= 190; X := X + 1 do
+            if GetPixel (Sealed, X, Y) = Blue then Painted := Painted + 1;
+
+    var Exact := Pi * 74.0 * 74.0;
+
+    TextColor (White);
+    GotoXY (3, 24);
+    Write ('GetPixel counted ', Painted, ' pixels inside a circle of radius ',
+           '74;  pi r^2 is ', Round (Exact), '.');
+
+    // The shortfall is the outline itself. A boundary fill stops AT the
+    // border, so the stroke is not part of what it painted -- the definition
+    // showing up as a number.
+    TextColor (DarkGray);
+    GotoXY (3, 25);
+    Write ('The 1% short is the outline: a flood stops at the border, ',
+           'not on it.');
+
+    ReadKey ();
+    CloseGraph ();
+end

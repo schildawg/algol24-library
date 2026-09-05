@@ -10,6 +10,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 static int hex_value (char c)
 {
@@ -331,4 +332,135 @@ void alg_fill_sector (int64_t cx, int64_t cy, int64_t xr, int64_t yr,
     }
 
     (void) bound;
+}
+
+/* Fill the region around a seed with an eight-by-eight pattern, stopping at
+ * pixels of the border colour.
+ *
+ * The first primitive here that READS the surface.  Every other figure knows
+ * which pixels it covers from its parameters alone; a flood has to look, and
+ * looking is the whole cost -- a region is thousands of pixels and each one
+ * must be examined whether or not it is painted.  That is the same bargain
+ * alg_fill_rect struck, so it is struck the same way.  The unit still decides
+ * everything that is a decision: the seed, the border, the pattern, the
+ * colour, and whether an empty fill should look at all.
+ *
+ * A BOUNDARY fill, as Turbo Pascal's was: the region is every pixel reachable
+ * from the seed without crossing one of the border colour -- not every pixel
+ * matching the seed's own colour.  That is the one an outlined figure wants,
+ * and an outlined figure is what a flood is usually aimed at.
+ *
+ * Colours arrive as this screen's own: an RGB from zero up, or Transparent as
+ * a negative, which is the untouched pixel's stored zero.
+ *
+ * Painted pixels cannot serve as the record of where the flood has been,
+ * because a patterned fill leaves most of them unpainted -- so a visited byte
+ * per pixel is kept alongside.  Spans rather than pixels go on the stack, one
+ * per contiguous run of the neighbouring row, which is what keeps it bounded.
+ *
+ * Total: no target, no pattern, a seed off the surface, a seed already on the
+ * border, or no memory writes nothing.
+ */
+void alg_flood_fill (int64_t sx, int64_t sy, int64_t border,
+                     void *pattern, int64_t color)
+{
+    const int32_t *rows = (const int32_t *) pattern;
+
+    if (target == 0 || rows == 0) return;
+    if (sx < 1 || sy < 1 || sx > target_w || sy > target_h) return;
+
+    int32_t edge = border < 0
+                 ? 0
+                 : (int32_t) (0xFF000000u | (uint32_t) border);
+
+    if (target[(sy - 1) * target_w + (sx - 1)] == edge) return;
+
+    int64_t count = target_w * target_h;
+
+    unsigned char *seen = (unsigned char *) calloc ((size_t) count, 1);
+
+    if (seen == 0) return;
+
+    int64_t  cap   = 256;
+    int64_t  top   = 0;
+    int64_t *stack = (int64_t *) malloc ((size_t) cap * 2 * sizeof (int64_t));
+
+    if (stack == 0) { free (seen); return; }
+
+    int32_t ink = (int32_t) (0xFF000000u | (uint32_t) color);
+
+    stack[top * 2] = sx; stack[top * 2 + 1] = sy; top++;
+
+    while (top > 0)
+    {
+        top--;
+
+        int64_t x = stack[top * 2];
+        int64_t y = stack[top * 2 + 1];
+
+        int64_t base = (y - 1) * target_w;
+
+        if (seen[base + x - 1] || target[base + x - 1] == edge) continue;
+
+        /* The run this seed sits in, walked out to both edges. */
+        int64_t lx = x;
+        int64_t rx = x;
+
+        while (lx > 1 && !seen[base + lx - 2] && target[base + lx - 2] != edge)
+            lx--;
+
+        while (rx < target_w && !seen[base + rx] && target[base + rx] != edge)
+            rx++;
+
+        uint32_t row = (uint32_t) rows[(y - 1) % 8];
+
+        for (int64_t i = lx; i <= rx; i++)
+        {
+            seen[base + i - 1] = 1;
+
+            if ((row >> (7 - (i - 1) % 8)) & 1) target[base + i - 1] = ink;
+        }
+
+        /* One seed per contiguous run of each neighbouring row, rather than
+         * one per pixel, so the stack stays a fraction of the region. */
+        for (int64_t d = -1; d <= 1; d += 2)
+        {
+            int64_t ny = y + d;
+
+            if (ny < 1 || ny > target_h) continue;
+
+            int64_t nbase = (ny - 1) * target_w;
+            int64_t i     = lx;
+
+            while (i <= rx)
+            {
+                while (i <= rx
+                       && (seen[nbase + i - 1] || target[nbase + i - 1] == edge))
+                    i++;
+
+                if (i > rx) break;
+
+                if (top == cap)
+                {
+                    int64_t  grown = cap * 2;
+                    int64_t *bigger = (int64_t *) realloc
+                        (stack, (size_t) grown * 2 * sizeof (int64_t));
+
+                    if (bigger == 0) { free (stack); free (seen); return; }
+
+                    stack = bigger;
+                    cap   = grown;
+                }
+
+                stack[top * 2] = i; stack[top * 2 + 1] = ny; top++;
+
+                while (i <= rx
+                       && !seen[nbase + i - 1] && target[nbase + i - 1] != edge)
+                    i++;
+            }
+        }
+    }
+
+    free (stack);
+    free (seen);
 }
