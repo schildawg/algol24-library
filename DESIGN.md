@@ -115,9 +115,12 @@ not conflated, addable later without touching orientation.
 Settled for both kinds, the first five by the original Canvas decisions:
 
 - **Every verb is a method on its surface.** `Chart.OutTextXY (…)`,
-  `B.Print (…)` — where a thing draws or writes is unaskable, because the
+  `B.Write (…)` — where a thing draws or writes is unaskable, because the
   receiver says. The globals are the root Window's methods, kept as the
-  words programs already use.
+  words programs already use, and every method is *also* a surface-first
+  free function — `GotoXY (W, 3, 2)` — because verb-first is how a Turbo
+  Pascal program reads. The aliases add no behaviour; they became possible
+  in 0.1.4, which settles an overload on arity when arity is enough.
 - **Coordinates are local.** (1,1) is the surface's own top-left — cell for
   a Window, pixel for a ViewPort — which is what makes its contents
   portable: move the surface and everything on it moves, nothing redraws.

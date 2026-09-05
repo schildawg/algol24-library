@@ -16,6 +16,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`ArcTan`](#arctan) | function | `math` |
+| [`Aliases`](#aliases) | procedures | `graph` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Black` … `White`](#colors) | constants | `graph` |
 | [`Blink`](#blink) | constant | `graph` |
@@ -132,6 +133,100 @@ WriteLn (Abs (-170141183460469231731687303715884105728));
 42
 2.5
 170141183460469231731687303715884105728
+```
+
+---
+
+## Aliases
+
+*procedures* — unit `graph`
+
+**Function**
+
+Every surface method again as a free function, the surface first.
+
+**Declaration**
+
+```algol24
+MoveTo (Surface, X, Y)              // a Window in cells, a ViewPort in pixels
+
+GotoXY (W, Col, Row)                WhereX (W)          WhereY (W)
+TextColor (W, Color)                TextBackground (W, Color)
+HighVideo (W)   LowVideo (W)        NormVideo (W)
+Write (W, …)    WriteLn (W, …)      ClrEol (W)          ClrScr (W)
+
+PutPixel (V, X, Y, Color)           Show (V)
+OutText (V, Text)                   OutTextXY (V, X, Y, Text)
+SetTextStyle (V, Direction, CharSize)
+SetColor (V, Color)                 GetColor (V)
+SetLineStyle (V, Style, Pattern, Thickness)
+PenTo (V, X, Y)   PenRel (V, DX, DY)   GetX (V)   GetY (V)
+Line (V, X1, Y1, X2, Y2)            LineTo (V, X, Y)    LineRel (V, DX, DY)
+Rectangle (V, X1, Y1, X2, Y2)
+```
+
+**Remarks**
+
+`GotoXY (W, 3, 2)` and `W.GotoXY (3, 2)` are the same call. The aliases add
+no behaviour whatever — each is a one-line delegate — and exist because
+verb-first is how a Turbo Pascal program reads, and this library's vocabulary
+is Turbo Pascal's.
+
+They work because the screen-wide verb and the surface-first one differ in
+**arity**: `GotoXY (Col, Row)` is the screen and `GotoXY (W, Col, Row)` is
+that window. Before 0.1.4 every one of these calls warned; the compiler now
+settles a choice on arity when arity is enough, silently.
+
+Two exceptions, both forced:
+
+⚠️ **`Write` and `WriteLn` are not overloads but one variadic each**, which
+inspects its first value: a leading [`Window`](#window) is the surface written
+*to*, not a value written. A variadic already matches every arity, so a second
+declaration could only be ambiguous against it.
+
+⚠️ **`MoveTo` takes an untyped surface** and asks what it is, rather than
+being declared once per class. Two declarations of one arity would put the
+choice back on the argument's *type*, which is decided at run time and warns
+at every call site — correctly, since a gradual type system cannot know. It
+raises `MoveTo wants a Window or a ViewPort.` for anything else.
+
+The screen-wide verbs are untouched: a bare `Write` still means the screen,
+and `System.Write` still means the console.
+
+**See also**
+
+[`ViewPort`](#viewport), [`Window`](#window), [`Write`](#write)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'aliases', False);
+
+var Panel := Window (2, 2, 30, 10, 1);
+var Chart := ViewPort (100, 100, 80, 60, 2);
+
+TextBackground (Panel, Blue);
+ClrScr (Panel);
+GotoXY (Panel, 3, 2);
+TextColor (Panel, Yellow);
+Write (Panel, 'verb first');
+
+SetColor (Chart, LightGreen);
+PenTo (Chart, 4, 4);
+LineTo (Chart, 70, 50);
+Show (Chart);
+
+System.WriteLn (WhereX (Panel));
+System.WriteLn (GetX (Chart));
+
+CloseGraph ();
+```
+
+```console
+13
+70
 ```
 
 ---

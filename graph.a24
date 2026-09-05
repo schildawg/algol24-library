@@ -2303,6 +2303,24 @@ procedure Write (Values : List of Any);
 begin
     if SdlWin = nil then raise 'Graph is not open.';
 
+    // A leading Window is the surface written to, not a value written --
+    // `Write (W, 'text')`, which is how a Turbo Pascal program would spell
+    // it. One variadic rather than an overload, because a variadic already
+    // matches every arity and a second declaration could only be ambiguous
+    // against it.
+    if Values.Length > 0 then
+      if Values[0] is Window then
+      begin
+          var Target := Values[0];
+
+          for var I := 1; I < Values.Length; I := I + 1 do
+              Target.Emit (Str (Values[I]));
+
+          Present ();
+
+          Exit;
+      end
+
     EnsureRoot ();
 
     for var V in Values do
@@ -2324,6 +2342,20 @@ end
 procedure WriteLn (Values : List of Any);
 begin
     if SdlWin = nil then raise 'Graph is not open.';
+
+    if Values.Length > 0 then
+      if Values[0] is Window then
+      begin
+          var Target := Values[0];
+
+          for var I := 1; I < Values.Length; I := I + 1 do
+              Target.Emit (Str (Values[I]));
+
+          Target.NewLine ();
+          Present ();
+
+          Exit;
+      end
 
     EnsureRoot ();
 
@@ -2362,6 +2394,196 @@ begin
 
     EnsureRoot ();
     Root.ClrScr ();
+end
+
+
+// --------------------------------------------------------------- aliases --
+//
+// The same verbs with the surface first, which is how a Turbo Pascal program
+// would spell them: `GotoXY (W, 3, 2)` beside `W.GotoXY (3, 2)`. Each is a
+// one-line delegate and they add no behaviour whatever; they exist because
+// `Print (W, 'text')` reads the way the rest of this vocabulary reads.
+//
+// They became possible in 0.1.4, which settles an overload on arity when
+// arity is enough -- before it, every one of these calls would have warned.
+// `Write` and `WriteLn` are not here because a variadic already matches
+// every arity: those two take a leading surface themselves.
+//
+// `MoveTo` takes an untyped surface rather than being declared twice, since
+// a Window and a ViewPort would give two candidates of one arity and put the
+// choice back on the argument's type at run time.
+
+/// Moves a surface: a Window in cells, a ViewPort in pixels.
+///
+/// # Raises
+/// `MoveTo wants a Window or a ViewPort.` for anything else.
+///
+/// # Examples
+/// `The Aliases Reach The Same Methods`
+procedure MoveTo (Surface, X : Integer, Y : Integer);
+begin
+    if Surface is Window then Surface.MoveTo (X, Y);
+    else if Surface is ViewPort then Surface.MoveTo (X, Y);
+    else raise 'MoveTo wants a Window or a ViewPort.';
+end
+
+/// Moves a window's cursor. See `Window`.
+procedure GotoXY (W : Window, Col : Integer, Row : Integer);
+begin
+    W.GotoXY (Col, Row);
+end
+
+/// A window's cursor column. See `Window`.
+function WhereX (W : Window) : Integer;
+begin
+    Exit W.WhereX ();
+end
+
+/// A window's cursor row. See `Window`.
+function WhereY (W : Window) : Integer;
+begin
+    Exit W.WhereY ();
+end
+
+/// Sets a window's ink. See `Window`.
+procedure TextColor (W : Window, Color : Integer);
+begin
+    W.TextColor (Color);
+end
+
+/// Sets a window's cell background. See `Window`.
+procedure TextBackground (W : Window, Color : Integer);
+begin
+    W.TextBackground (Color);
+end
+
+/// Brightens a window's ink. See `Window`.
+procedure HighVideo (W : Window);
+begin
+    W.HighVideo ();
+end
+
+/// Dims a window's ink. See `Window`.
+procedure LowVideo (W : Window);
+begin
+    W.LowVideo ();
+end
+
+/// Restores a window's startup colors. See `Window`.
+procedure NormVideo (W : Window);
+begin
+    W.NormVideo ();
+end
+
+/// Clears a window's row from its cursor. See `Window`.
+procedure ClrEol (W : Window);
+begin
+    W.ClrEol ();
+end
+
+/// Clears a window and homes its cursor. See `Window`.
+procedure ClrScr (W : Window);
+begin
+    W.ClrScr ();
+end
+
+/// Paints one pixel of a viewport. See `ViewPort`.
+procedure PutPixel (V : ViewPort, X : Integer, Y : Integer, Color : Integer);
+begin
+    V.PutPixel (X, Y, Color);
+end
+
+/// Draws free text at a viewport's current position. See `ViewPort`.
+procedure OutText (V : ViewPort, Text : String);
+begin
+    V.OutText (Text);
+end
+
+/// Draws free text on a viewport at X, Y. See `ViewPort`.
+procedure OutTextXY (V : ViewPort, X : Integer, Y : Integer, Text : String);
+begin
+    V.OutTextXY (X, Y, Text);
+end
+
+/// Sets a viewport's text turn and magnification. See `SetTextStyle`.
+procedure SetTextStyle (V : ViewPort, Direction : Integer, CharSize : Integer);
+begin
+    V.SetTextStyle (Direction, CharSize);
+end
+
+/// Pushes a viewport's pixels to the screen. See `ViewPort`.
+procedure Show (V : ViewPort);
+begin
+    V.Show ();
+end
+
+/// Sets a viewport's pen color. See `Line`.
+procedure SetColor (V : ViewPort, Color : Integer);
+begin
+    V.SetColor (Color);
+end
+
+/// A viewport's pen color. See `Line`.
+function GetColor (V : ViewPort) : Integer;
+begin
+    Exit V.GetColor ();
+end
+
+/// Sets a viewport's line pattern and thickness. See `Line`.
+procedure SetLineStyle (V : ViewPort, Style : Integer, Pattern : Integer,
+                        Thickness : Integer);
+begin
+    V.SetLineStyle (Style, Pattern, Thickness);
+end
+
+/// Moves a viewport's pen without drawing. See `Line`.
+procedure PenTo (V : ViewPort, X : Integer, Y : Integer);
+begin
+    V.PenTo (X, Y);
+end
+
+/// Moves a viewport's pen by a displacement. See `Line`.
+procedure PenRel (V : ViewPort, DX : Integer, DY : Integer);
+begin
+    V.PenRel (DX, DY);
+end
+
+/// A viewport's pen X. See `Line`.
+function GetX (V : ViewPort) : Integer;
+begin
+    Exit V.GetX ();
+end
+
+/// A viewport's pen Y. See `Line`.
+function GetY (V : ViewPort) : Integer;
+begin
+    Exit V.GetY ();
+end
+
+/// Draws a line on a viewport. See `Line`.
+procedure Line (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
+                Y2 : Integer);
+begin
+    V.Line (X1, Y1, X2, Y2);
+end
+
+/// Draws from a viewport's pen to X, Y. See `Line`.
+procedure LineTo (V : ViewPort, X : Integer, Y : Integer);
+begin
+    V.LineTo (X, Y);
+end
+
+/// Draws from a viewport's pen by a displacement. See `Line`.
+procedure LineRel (V : ViewPort, DX : Integer, DY : Integer);
+begin
+    V.LineRel (DX, DY);
+end
+
+/// Draws a rectangle's outline on a viewport. See `Line`.
+procedure Rectangle (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
+                     Y2 : Integer);
+begin
+    V.Rectangle (X1, Y1, X2, Y2);
 end
 
 // ---------------------------------------------------------------- tests --
@@ -4452,6 +4674,147 @@ begin
     W.Write ('x', 1, True);         // 'x1true'
 
     AssertEqual (7, W.WhereX ());
+
+    CloseGraph ();
+end
+
+// ------------------------------------------------------------ alias tests --
+
+/// Every alias must reach the very method it names -- not a similar one --
+/// so each is checked against the state the method itself would have left.
+test 'The Aliases Reach The Same Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'aliases', False);
+
+    var W := Window (2, 2, 30, 10, 1);
+    var V := ViewPort (100, 100, 80, 60, 2);
+
+    // --- the window's text vocabulary, surface first ---
+    GotoXY (W, 4, 3);
+    AssertEqual (4, WhereX (W));
+    AssertEqual (3, WhereY (W));
+
+    TextColor (W, Yellow);
+    AssertEqual (Yellow, W.Ink);
+
+    TextBackground (W, Blue);
+    AssertEqual (Blue, W.Back);
+
+    LowVideo (W);
+    AssertEqual (Brown, W.Ink);
+    HighVideo (W);
+    AssertEqual (Yellow, W.Ink);
+    NormVideo (W);
+    AssertEqual (LightGray, W.Ink);
+    AssertEqual (Transparent, W.Back);
+
+    // The cursor was left at column 4 by the GotoXY above.
+    Write (W, 'ab');
+    AssertEqual (6, WhereX (W));
+
+    WriteLn (W, 'c');
+    AssertEqual (1, WhereX (W));
+    AssertEqual (4, WhereY (W));
+
+    ClrEol (W);
+    ClrScr (W);
+    AssertEqual (1, WhereX (W));
+    AssertEqual (1, WhereY (W));
+
+    // --- the viewport's pen and pixels, surface first ---
+    SetColor (V, Red);
+    AssertEqual (Red, GetColor (V));
+
+    PutPixel (V, 3, 4, Green);
+    AssertEqual (Green - 16777216, V.Buf.GetInt ((3 * 80 + 2) * 4));
+
+    PenTo (V, 10, 10);
+    AssertEqual (10, GetX (V));
+    AssertEqual (10, GetY (V));
+
+    PenRel (V, 5, 0);
+    AssertEqual (15, GetX (V));
+
+    SetLineStyle (V, DottedLn, 0, ThickWidth);
+    AssertEqual (DottedLn, V.Style);
+    AssertEqual (3, V.Thick);
+
+    SetLineStyle (V, SolidLn, 0, NormWidth);
+    Line (V, 1, 20, 40, 20);
+    AssertEqual (40, GetX (V));
+
+    LineTo (V, 40, 30);
+    AssertEqual (30, GetY (V));
+
+    LineRel (V, -10, 0);
+    AssertEqual (30, GetX (V));
+
+    Rectangle (V, 2, 2, 20, 15);
+    AssertEqual (2, GetX (V));
+
+    SetTextStyle (V, 90, 2);
+    AssertEqual (90, V.Dir);
+    AssertEqual (2, V.Size);
+
+    SetTextStyle (V, 0, 1);
+    OutTextXY (V, 2, 2, 'x');
+    OutText (V, 'y');
+    Show (V);
+
+    CloseGraph ();
+end
+
+/// One MoveTo takes either surface, because two declarations of one arity
+/// would put the choice back on the argument's type at run time.
+test 'One MoveTo Takes Either Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'moveto', False);
+
+    var W := Window (2, 2, 12, 6, 1);
+    var V := ViewPort (10, 10, 40, 40, 2);
+
+    MoveTo (W, 20, 8);
+    AssertEqual (20, W.X1);
+    AssertEqual (8, W.Y1);
+    AssertEqual (30, W.X2);          // the size is kept
+
+    MoveTo (V, 200, 150);
+    AssertEqual (200, V.X);
+    AssertEqual (150, V.Y);
+
+    var Message := '';
+
+    try MoveTo (42, 1, 1); except on e : String do Message := e; end
+    AssertEqual ('MoveTo wants a Window or a ViewPort.', Message);
+
+    CloseGraph ();
+end
+
+/// The screen's own verbs are untouched by the aliases beside them: a bare
+/// call still means the screen, and the built-ins still mean the console.
+test 'The Bare Verbs Still Mean The Screen';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bare', False);
+
+    var W := Window (2, 2, 20, 6, 1);
+
+    Write ('to the screen');
+    Write (W, 'to the window');
+
+    AssertEqual (14, WhereX ());        // the screen's cursor moved...
+    AssertEqual (14, WhereX (W));       // ... and so did the window's, apart
+
+    GotoXY (1, 1);
+    AssertEqual (1, WhereX ());
+    AssertEqual (14, WhereX (W));
+
+    // And the console is still reachable, taking neither cursor with it.
+    System.Write ('');
+    AssertEqual (1, WhereX ());
+    AssertEqual (14, WhereX (W));
 
     CloseGraph ();
 end
