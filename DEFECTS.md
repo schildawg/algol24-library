@@ -8,7 +8,7 @@ Three kinds of thing, and the distinction matters:
 | --- | --- | --- |
 | **Defect** | the language behaves *wrongly* | record here, tell the user, who fixes it in the compiler project |
 | **Gap** | the language does not offer it | answer with an `external`, no ceremony, not recorded here |
-| **Hazard** | the language behaves *as specified*, and the specified behaviour is sharp | record here so the library defends against it; not the compiler's to fix |
+| **Hazard** | the language behaves *as specified*, and the specified behavior is sharp | record here so the library defends against it; not the compiler's to fix |
 
 ---
 
@@ -104,7 +104,7 @@ one, and `this.Ping` names the method.
 
 ### H-1 — a foreign declaration's signature is never checked, and a mismatch is silent
 
-**Status:** specified behaviour, not a defect. Recorded 2026-09-02,
+**Status:** specified behavior, not a defect. Recorded 2026-09-02,
 reclassified the same day on reading [FUN-014], and deliberately left alone
 in 0.1.4 — there is nothing here for the compiler to fix, and the library's
 defences below are the answer.
@@ -142,7 +142,7 @@ Uncaught: No foreign symbol 'no_such_function_anywhere'.
 | `atan2` with one argument | takes two | `atan2(x, whatever was in the register)` |
 
 The `strlen` value is not the answer in the wrong register — its bit pattern is
-`0x070605ffffffffff`, which is uninitialised memory.
+`0x070605ffffffffff`, which is uninitialized memory.
 
 **The wrong value is deterministic**, which is what makes it dangerous rather
 than merely wrong. Five runs gave the identical result, so a test asserting it

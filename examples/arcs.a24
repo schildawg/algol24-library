@@ -39,7 +39,7 @@ begin
     OutTextXY (Dial, 20,  250, '180');
     OutTextXY (Dial, 240, 470, '270');
 
-    // Each quadrant its own colour, so the sweep direction is unmistakable.
+    // Each quadrant its own color, so the sweep direction is unmistakable.
     SetLineStyle (Dial, SolidLn, 0, 7);
 
     SetColor (Dial, LightRed);

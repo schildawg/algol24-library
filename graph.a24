@@ -106,7 +106,7 @@ procedure StampStyle (Scale : Integer, Rotation : Integer);
 /// Fills a rectangle of the stamp target with an eight-by-eight pattern.
 ///
 /// Private to this unit. The unit decides the rectangle, the pattern and the
-/// colour; what is left is a run of pixels, which is what C is for -- the
+/// color; what is left is a run of pixels, which is what C is for -- the
 /// interpreted loop was 7.5 seconds for one 300 by 200 bar.
 procedure FillRect (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
                     Pattern : Pointer, Color : Integer);
@@ -125,13 +125,22 @@ procedure FillSector (CX : Integer, CY : Integer, XRadius : Integer,
                       Pattern : Pointer, Color : Integer);
     external 'alg_fill_sector' in 'libgraphffi.dylib';
 
+/// Fills the whole stamp target with one raw pixel value.
+///
+/// Private to this unit. The one fill `FillRect` cannot do: that one forces
+/// the alpha byte opaque, deliberately, since a figure being filled is being
+/// painted. Clearing is the opposite act and its natural value is a fully
+/// transparent zero, so this takes the pixel as written.
+procedure ClearTarget (Value : Integer);
+    external 'alg_clear_target' in 'libgraphffi.dylib';
+
 /// Fills the region around a seed of the stamp target, stopping at a border.
 ///
 /// Private to this unit, and the third of the fill primitives -- the one that
 /// reads the surface rather than computing from parameters alone. Every pixel
 /// of the region must be examined whether or not it is painted, which is the
 /// same bargain `FillRect` struck. A boundary fill: the region is what is
-/// reachable from the seed without crossing the border colour.
+/// reachable from the seed without crossing the border color.
 procedure Flood (X : Integer, Y : Integer, Border : Integer,
                  Pattern : Pointer, Color : Integer);
     external 'alg_flood_fill' in 'libgraphffi.dylib';
@@ -380,10 +389,10 @@ var DimPartner    := [DarkGray  : Black,  LightBlue    : Blue,
 
 // The installed font. One map from codepoint to a Buffer of four-byte words,
 // one to widths, one marking the glyphs that are pictures (emoji) rather than
-// ink. A grey or picture glyph holds one word per pixel, row-major; a 1-bit
+// ink. A gray or picture glyph holds one word per pixel, row-major; a 1-bit
 // glyph holds one word per row, the row's pixels packed as bits.
 var FontLoaded   := False;
-var FontGrey     := False;
+var FontGray     := False;
 var FontHeight   := 16;
 var FontGlyphs   := [:];
 var FontWidths   := [:];
@@ -401,7 +410,7 @@ begin
         raise 'Graph could not start: ' + SDL_GetError ();
 
     // The text grid is a logical surface scaled to the window; nearest-
-    // neighbour scaling would decimate its antialiasing, linear keeps it.
+    // neighbor scaling would decimate its antialiasing, linear keeps it.
     SDL_SetHint ('SDL_RENDER_SCALE_QUALITY', 'linear');
 
     VideoReady := True;
@@ -565,7 +574,7 @@ begin
     FontGlyphs   := [:];
     FontWidths   := [:];
     FontPictures := [:];
-    FontGrey     := False;
+    FontGray     := False;
     FontHeight   := 16;
 
     while not F.Eof do
@@ -582,12 +591,12 @@ begin
             if Sep >= 0 then Painted := True;
         end
 
-        // '# gray8 32' -- the header a grey font opens with, and the only
+        // '# gray8 32' -- the header a gray font opens with, and the only
         // line in either format that is not a glyph.
         if Length (Line) > 0 then
           if Line[0] = '#' then
           begin
-              FontGrey   := True;
+              FontGray   := True;
               FontHeight := 0;
 
               var I := Pos (Line, '8') + 1;
@@ -606,12 +615,12 @@ begin
             var Bits := Copy (Line, Sep + 1, Length (Line) - Sep - 1);
 
             // One decoder call per glyph. The group size is the format:
-            // eight digits to a picture pixel, two to a grey one, and a whole
+            // eight digits to a picture pixel, two to a gray one, and a whole
             // row at once for 1-bit ink.
             var Group := 2;
 
             if Painted then Group := 8;
-            if not Painted then if not FontGrey then Group := Length (Bits) div FontHeight;
+            if not Painted then if not FontGray then Group := Length (Bits) div FontHeight;
 
             var Words := Buffer ((Length (Bits) div Group) * 4);
 
@@ -622,7 +631,7 @@ begin
                 FontWidths[Code]   := Length (Bits) div 8 div FontHeight;
                 FontPictures[Code] := True;
             end
-            else if FontGrey then
+            else if FontGray then
                 FontWidths[Code] := Length (Bits) div 2 div FontHeight;
             else
                 FontWidths[Code] := (Length (Bits) div FontHeight) * 4;
@@ -730,7 +739,7 @@ begin
 
                 if Alpha > 0 then Wash (X + C, Y + R, Pixel div 256, Alpha);
             end
-            else if FontGrey then
+            else if FontGray then
             begin
                 var Cover := Words.GetInt ((R * Wide + C) * 4);
 
@@ -772,7 +781,7 @@ end
 
 /// Opens the graphics window.
 ///
-/// The window is Width by Height pixels, centred, with Title in its title bar.
+/// The window is Width by Height pixels, centered, with Title in its title bar.
 /// With Fullscreen true it instead covers the whole desktop at the desktop's
 /// own resolution -- the borderless kind of fullscreen, which changes no
 /// display mode and cannot leave the screen in one if the program dies -- and
@@ -1253,7 +1262,7 @@ end
 /// stacks by `Order`: negative under the root grid, positive over it, ties
 /// by creation. `Order` and `Alpha` may be assigned after creation;
 /// `MoveTo` drags it. `CloseGraph` invalidates it.
-/// Where the last arc drawn on a surface was centred, began and ended.
+/// Where the last arc drawn on a surface was centered, began and ended.
 ///
 /// Turbo Pascal's `ArcCoordsType`, with its six field names kept whole so a
 /// program written to them still reads. It is answered as an object rather
@@ -1571,7 +1580,7 @@ begin
             Wide  := FontWidths[Code];
 
             if Code in FontPictures then Mode := 2;
-            if not FontGrey then if not (Code in FontPictures) then Mode := 0;
+            if not FontGray then if not (Code in FontPictures) then Mode := 0;
         end
 
         var Cells := Wide div CellWidth ();
@@ -1680,7 +1689,23 @@ begin
     end
 
     /// Clears all this window's cells to its background and homes its cursor.
-    procedure ClrScr ();
+    ///
+    /// The clearing verb both kinds of surface answer to. What a surface is
+    /// cleared *to* follows the one rule: a grid is text, so its cells take
+    /// the current `TextBackground` -- where a canvas, being a graphic,
+    /// goes back to transparent.
+    ///
+    /// The cursor goes home. The ink and background colors are not touched:
+    /// this clears the surface, not the settings you drew it with.
+    ///
+    /// Turbo Pascal spells it `ClrScr`, which is the alias.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `ClrScr Fills The Grid With The Background And Homes The Cursor`
+    procedure Clear ();
     begin
         Check ();
 
@@ -1942,7 +1967,7 @@ begin
     end
 
 
-    /// Notes where an arc was centred, began and ended.
+    /// Notes where an arc was centered, began and ended.
     ///
     /// Private to this unit, and called by the two curve primitives rather
     /// than by the six verbs -- `Arc` and `Ellipse` are what actually walk a
@@ -1967,7 +1992,7 @@ begin
         HasArc := True;
     end
 
-    /// Where the last arc on this surface was centred, began and ended.
+    /// Where the last arc on this surface was centered, began and ended.
     ///
     /// Turbo Pascal's `GetArcCoords`, answering an `ArcCoords` rather than
     /// filling a `var` record. What it is for is joining something to a
@@ -2000,6 +2025,45 @@ begin
         if not HasArc then raise 'No arc has been drawn on this surface.';
 
         Exit ArcCoords (ArcX, ArcY, ArcXS, ArcYS, ArcXE, ArcYE);
+    end
+
+    /// Clears every pixel of this viewport back to transparent.
+    ///
+    /// The clearing verb both kinds of surface answer to. What a surface is
+    /// cleared *to* follows the one rule: a canvas is a graphic, so it goes
+    /// back to the transparent it was born as and whatever lies beneath
+    /// shows through again -- where a grid, being text, takes the current
+    /// `TextBackground` instead.
+    ///
+    /// Erasing is not painting, which is why there is no color to pass:
+    /// filling a viewport with one is `Bar` over the whole of it, and that
+    /// leaves an opaque surface rather than a cleared one.
+    ///
+    /// The pen and the free-text position go home to 1, 1, as a window's
+    /// cursor does. The pen's color, the line style and the fill style are
+    /// not touched: this clears the surface, not the settings you drew it
+    /// with.
+    ///
+    /// Turbo Pascal spells it `ClearViewPort`, which is the alias.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `Clear Takes A ViewPort Back To Transparent`
+    procedure Clear ();
+    begin
+        Check ();
+
+        StampTarget (Buf.Address, W, H);
+        ClearTarget (0);
+
+        PenX := 1;
+        PenY := 1;
+        CurX := 1;
+        CurY := 1;
+
+        Present ();
     end
 
     /// Sets the color the pen draws and free text is written in.
@@ -2195,14 +2259,14 @@ begin
     end
 
 
-    /// Draws a circular arc centred on X, Y.
+    /// Draws a circular arc centered on X, Y.
     ///
     /// Angles are **degrees**, zero at three o'clock, counting
     /// counterclockwise -- Turbo Pascal's convention, and the one a reader
     /// expects from `Arc (100, 100, 0, 90, 50)` meaning a quarter turn
     /// upward. Because a screen's Y grows downward, counterclockwise is
     /// reached by *subtracting* the sine: 90 degrees is twelve o'clock, at a
-    /// SMALLER Y than the centre. Getting that sign backwards mirrors every
+    /// SMALLER Y than the center. Getting that sign backwards mirrors every
     /// curve in the library and nothing but a picture would catch it.
     ///
     /// A sweep is measured from StartAngle to EndAngle the counterclockwise
@@ -2262,11 +2326,11 @@ begin
 
 
 
-    /// Fills and outlines a pie slice centred on X, Y.
+    /// Fills and outlines a pie slice centered on X, Y.
     ///
     /// The wedge between two angles: filled with the current fill pattern
     /// and color, then outlined with the pen and the current line style --
-    /// the arc, and the two radii closing it to the centre.
+    /// the arc, and the two radii closing it to the center.
     ///
     /// Angles are `Arc`'s: degrees, zero at three o'clock, counterclockwise,
     /// ninety at twelve. A sweep of 360 is the whole disc, and its two radii
@@ -2377,23 +2441,23 @@ begin
         PenY := WasY;
     end
 
-    /// Draws an elliptical arc centred on X, Y.
+    /// Draws an elliptical arc centered on X, Y.
     ///
     /// Turbo Pascal's Ellipse takes angles, so a whole ellipse is the sweep
     /// `0, 360` and anything less is an arc of one. Everything the angles
     /// mean is `Arc`'s: degrees, zero at three o'clock, counterclockwise,
-    /// which on a screen puts ninety degrees ABOVE the centre.
+    /// which on a screen puts ninety degrees ABOVE the center.
     ///
     /// The angle is the **parametric** one, not a bearing. On a wide ellipse
     /// the point at forty-five degrees is not forty-five degrees from the
-    /// centre as a protractor would have it -- it is where the circle's
+    /// center as a protractor would have it -- it is where the circle's
     /// forty-five lands once the circle is stretched. That is what Turbo
     /// Pascal drew and what makes `Ellipse (X, Y, 0, 90, A, B)` the quadrant
     /// a reader expects, but it is worth knowing before computing an angle
     /// from a slope.
     ///
     /// Drawn in the pen's color, patterned by the line style, and thickened
-    /// by drawing the neighbouring ellipses -- which keeps a thick ellipse an
+    /// by drawing the neighboring ellipses -- which keeps a thick ellipse an
     /// ellipse. The pen is not moved.
     ///
     /// Where the curve began and ended is remembered for `GetArcCoords`,
@@ -2445,7 +2509,7 @@ begin
 
 
 
-    /// Fills and outlines a whole ellipse centred on X, Y.
+    /// Fills and outlines a whole ellipse centered on X, Y.
     ///
     /// `Sector` swept the whole way round, exactly as `Circle` is `Arc`:
     /// filled with the current fill pattern and color, then outlined with
@@ -2660,7 +2724,7 @@ begin
         PenY := WasY;
     end
 
-    /// Draws a circle centred on X, Y.
+    /// Draws a circle centered on X, Y.
     ///
     /// `Arc` swept the whole way round, and everything said there holds: the
     /// pen's color, the line style's pattern, thickness spreading along the
@@ -2868,12 +2932,12 @@ begin
     end
 
 
-    /// Fills and outlines an elliptical sector centred on X, Y.
+    /// Fills and outlines an elliptical sector centered on X, Y.
     ///
     /// `PieSlice` with two radii, exactly as `Ellipse` is `Circle` with two:
     /// the wedge is filled with the current fill pattern and color, then
     /// outlined with the pen -- the elliptical arc, and the two radii closing
-    /// it to the centre.
+    /// it to the center.
     ///
     /// Angles are the parametric ones `Ellipse` uses, so a sector of a wide
     /// ellipse spans the same fraction of the figure that the same angles
@@ -2983,7 +3047,7 @@ begin
                 Wide  := FontWidths[Code];
 
                 if Code in FontPictures then Mode := 2;
-                if not FontGrey then if not (Code in FontPictures) then Mode := 0;
+                if not FontGray then if not (Code in FontPictures) then Mode := 0;
             end
 
             if Words <> nil then
@@ -3399,7 +3463,7 @@ begin
     if SdlWin = nil then raise 'Graph is not open.';
 
     EnsureRoot ();
-    Root.ClrScr ();
+    Root.Clear ();
 end
 
 
@@ -3407,7 +3471,7 @@ end
 //
 // The same verbs with the surface first, which is how a Turbo Pascal program
 // would spell them: `GotoXY (W, 3, 2)` beside `W.GotoXY (3, 2)`. Each is a
-// one-line delegate and they add no behaviour whatever; they exist because
+// one-line delegate and they add no behavior whatever; they exist because
 // `Print (W, 'text')` reads the way the rest of this vocabulary reads.
 //
 // They became possible in 0.1.4, which settles an overload on arity when
@@ -3490,7 +3554,13 @@ end
 /// Clears a window and homes its cursor. See `Window`.
 procedure ClrScr (W : Window);
 begin
-    W.ClrScr ();
+    W.Clear ();
+end
+
+/// Clears a viewport back to transparent. See `ViewPort.Clear`.
+procedure ClearViewPort (V : ViewPort);
+begin
+    V.Clear ();
 end
 
 /// Paints one pixel of a viewport. See `ViewPort`.
@@ -3926,7 +3996,7 @@ begin
 end
 
 /// A picture glyph brings its own colors, so at least one of its pixels must
-/// have unequal channels -- ink from the grey font never does.
+/// have unequal channels -- ink from the gray font never does.
 test 'An Emoji Glyph Arrives In Its Own Colors';
 begin
     CloseGraph ();
@@ -4026,7 +4096,7 @@ begin
 end
 
 /// The decoder is the unit's one C primitive, so its exact values are pinned:
-/// grey pairs, a whole 1-bit row, a picture pixel past the sign bit, junk
+/// gray pairs, a whole 1-bit row, a picture pixel past the sign bit, junk
 /// digits, and the ignored trailing partial group.
 test 'The Hex Decoder Answers Known Values';
 begin
@@ -4293,10 +4363,10 @@ begin
     TextBackground (Blue);
     Write ('█ ');
 
-    // The block's centre pixel is opaque white.
+    // The block's center pixel is opaque white.
     AssertEqual (-1, Root.Buf.GetInt ((16 * Root.PxW + 8) * 4));
 
-    // The space's centre pixel is opaque blue: 0xFF0000AA.
+    // The space's center pixel is opaque blue: 0xFF0000AA.
     AssertEqual (Blue - 16777216, Root.Buf.GetInt ((16 * Root.PxW + 24) * 4));
 
     CloseGraph ();
@@ -5019,7 +5089,7 @@ begin
     var A := Window (1, 1, 10, 3, 3);
 
     A.TextBackground (Blue);
-    A.ClrScr ();
+    A.Clear ();
 
     AssertEqual (Red - 16777216, V.Buf.GetInt ((4 * 40 + 4) * 4));
 
@@ -5219,7 +5289,7 @@ begin
     AssertTrue (not A.Pending);
 
     A.Write ('ABC');
-    A.ClrScr ();
+    A.Clear ();
     AssertTrue (not A.Pending);
     AssertEqual (1, A.WhereX ());
 
@@ -5950,7 +6020,7 @@ end
 
 /// The convention, pinned at the four cardinal points: zero at three
 /// o'clock and counterclockwise, which on a screen whose Y grows downward
-/// puts 90 degrees ABOVE the centre. The sign this asserts is the one that
+/// puts 90 degrees ABOVE the center. The sign this asserts is the one that
 /// would mirror every curve in the library if it were wrong.
 test 'An Arc Puts Ninety Degrees At Twelve O''Clock';
 begin
@@ -6219,7 +6289,7 @@ begin
             AssertEqual (V.FillCovers (X, Y), V.FillCovers (X, Y + 8));
         end
 
-    // Interleave is a checker: neighbours differ.
+    // Interleave is a checker: neighbors differ.
     AssertTrue (V.FillCovers (1, 1) <> V.FillCovers (2, 1));
 
     CloseGraph ();
@@ -6481,7 +6551,7 @@ begin
     V.PenTo (5, 6);
     V.Bar (10, 10, 19, 19);
 
-    // Filled in the fill colour, not the pen's...
+    // Filled in the fill color, not the pen's...
     AssertEqual (LightGreen - 16777216, V.Buf.GetInt ((12 * 40 + 12) * 4));
 
     // ... and the pen has neither moved nor changed.
@@ -6522,7 +6592,7 @@ begin
     V.SetFillStyle (SolidFill, Red);
     V.Bar3D (20, 40, 60, 70, 15, True);
 
-    // The front face is the fill colour...
+    // The front face is the fill color...
     AssertEqual (Red - 16777216, V.Buf.GetInt ((54 * 100 + 39) * 4));
 
     // ... its border the pen's, drawn over the fill.
@@ -6957,7 +7027,7 @@ end
 // --------------------------------------------------------- pieslice tests --
 
 /// The wedge and nothing else: a point inside the sweep is filled, the
-/// opposite quadrant is untouched, and the centre belongs to every slice.
+/// opposite quadrant is untouched, and the center belongs to every slice.
 test 'A Pie Slice Fills Only Its Own Wedge';
 begin
     CloseGraph ();
@@ -6971,7 +7041,7 @@ begin
 
     AssertTrue (V.Buf.GetInt ((79 * 200 + 119) * 4) <> 0);      // inside
     AssertEqual (0, V.Buf.GetInt ((119 * 200 + 79) * 4));       // opposite
-    AssertTrue (V.Buf.GetInt ((99 * 200 + 99) * 4) <> 0);       // the centre
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 99) * 4) <> 0);       // the center
 
     // Beyond the radius, nothing -- 70 out along the zero ray of a 60 slice.
     AssertEqual (0, V.Buf.GetInt ((99 * 200 + 169) * 4));
@@ -6979,9 +7049,9 @@ begin
     CloseGraph ();
 end
 
-/// Two pens: the wedge is laid in the fill colour and edged in the pen's,
+/// Two pens: the wedge is laid in the fill color and edged in the pen's,
 /// drawn over it, which is what a pie chart's labelled slices want.
-test 'A Pie Slice Is Filled In One Colour And Edged In Another';
+test 'A Pie Slice Is Filled In One Color And Edged In Another';
 begin
     CloseGraph ();
     InitGraph (640, 480, 'pie2', False);
@@ -6992,7 +7062,7 @@ begin
     V.SetFillStyle (SolidFill, Red);
     V.PieSlice (100, 100, 0, 90, 60);
 
-    // Well inside the wedge: the fill colour.
+    // Well inside the wedge: the fill color.
     AssertEqual (Red - 16777216, V.Buf.GetInt ((84 * 200 + 114) * 4));
 
     // On the zero-degree radius, which is outline drawn over the fill.
@@ -7026,7 +7096,7 @@ begin
 end
 
 /// EmptyFill leaves the outline alone: the wedge is edged and hollow, which
-/// is how a slice is drawn without a colour.
+/// is how a slice is drawn without a color.
 test 'A Pie Slice With An Empty Fill Is Only Its Outline';
 begin
     CloseGraph ();
@@ -7963,7 +8033,7 @@ begin
     AssertEqual (100, C.Y);
 
     // Three o'clock is the start, twelve o'clock the end -- and Y grows
-    // downward, so the end sits ABOVE the centre.
+    // downward, so the end sits ABOVE the center.
     AssertEqual (150, C.XStart);
     AssertEqual (100, C.YStart);
     AssertEqual (100, C.XEnd);
@@ -8164,6 +8234,178 @@ begin
 
     AssertEqual (150, C.XStart);
     AssertEqual (50,  C.YEnd);
+
+    CloseGraph ();
+end
+
+test 'Clear Takes A ViewPort Back To Transparent';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'vpclear', False);
+
+    var V := ViewPort (1, 1, 60, 40, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (1, 1, 60, 40);
+    V.SetColor (Yellow);
+    V.Line (1, 1, 60, 40);
+
+    AssertEqual (Red, V.GetPixel (10, 30));
+
+    V.Clear ();
+
+    // Every pixel, and back to transparent rather than to any color -- so
+    // whatever surface lies beneath shows through again, which painting it
+    // black could never do.
+    var Lit := 0;
+
+    for var Y := 1; Y <= 40; Y := Y + 1 do
+        for var X := 1; X <= 60; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then Lit := Lit + 1;
+
+    AssertEqual (0, Lit);
+
+    CloseGraph ();
+end
+
+test 'Clear Homes A ViewPort''s Pen And Text Position';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'vphome', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.PenTo (40, 50);
+    V.OutTextXY (20, 30, 'x');
+
+    AssertEqual (40, V.GetX ());
+    AssertEqual (50, V.GetY ());
+
+    V.Clear ();
+
+    // A window's cursor goes home on Clear, so a viewport's pen does too --
+    // or the one verb would mean two things.
+    AssertEqual (1, V.GetX ());
+    AssertEqual (1, V.GetY ());
+    AssertEqual (1, V.CurX);
+    AssertEqual (1, V.CurY);
+
+    CloseGraph ();
+end
+
+test 'Clear Leaves The Settings A Surface Was Drawn With Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'vpkeep', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.SetColor (LightMagenta);
+    V.SetLineStyle (DashedLn, 0, 3);
+    V.SetFillStyle (HatchFill, LightGreen);
+
+    V.Clear ();
+
+    // It clears the surface, not the settings: a redraw after a clear should
+    // not have to say everything over again.
+    AssertEqual (LightMagenta, V.GetColor ());
+    AssertEqual (DashedLn, V.Style);
+    AssertEqual (3, V.Thick);
+    AssertEqual (HatchFill, V.GetFillStyle ());
+    AssertEqual (LightGreen, V.GetFillColor ());
+
+    CloseGraph ();
+end
+
+test 'Clear Means Transparent On A Canvas And The Background On A Grid';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'clearrule', False);
+
+    // The one rule, read off two surfaces: off the grid text is a graphic,
+    // so clearing a canvas erases it; on the grid text behaves like text
+    // mode, so clearing a window paints its cells the background.
+    var W := Window (1, 1, 10, 5, 1);
+
+    W.TextBackground (Blue);
+    W.Clear ();
+
+    AssertEqual (Blue - 16777216, W.Buf.GetInt (0));
+    AssertEqual (1, W.WhereX ());
+    AssertEqual (1, W.WhereY ());
+
+    var V := ViewPort (1, 1, 40, 20, 2);
+
+    V.SetFillStyle (SolidFill, Blue);
+    V.Bar (1, 1, 40, 20);
+    V.Clear ();
+
+    AssertEqual (Transparent, V.GetPixel (1, 1));
+
+    CloseGraph ();
+end
+
+test 'Clearing One Surface Leaves Every Other Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'clearown', False);
+
+    var A := ViewPort (1, 1, 40, 20, 1);
+    var B := ViewPort (1, 1, 40, 20, 2);
+
+    A.SetFillStyle (SolidFill, Red);
+    A.Bar (1, 1, 40, 20);
+    B.SetFillStyle (SolidFill, Green);
+    B.Bar (1, 1, 40, 20);
+
+    A.Clear ();
+
+    AssertEqual (Transparent, A.GetPixel (5, 5));
+    AssertEqual (Green, B.GetPixel (5, 5));
+
+    CloseGraph ();
+end
+
+test 'Clear Refuses A Closed Surface On Either Kind';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'cleardead', False);
+
+    var V := ViewPort (1, 1, 40, 20, 1);
+    var W := Window (1, 1, 10, 5, 2);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.Clear (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try W.Clear (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'The Turbo Pascal Names Reach The One Clearing Verb';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'clearalias', False);
+
+    var W := Window (1, 1, 10, 5, 1);
+    var V := ViewPort (1, 1, 40, 20, 2);
+
+    TextBackground (W, Red);
+    GotoXY (W, 4, 3);
+    ClrScr (W);
+
+    AssertEqual (Red - 16777216, W.Buf.GetInt (0));
+    AssertEqual (1, WhereX (W));
+
+    SetFillStyle (V, SolidFill, Yellow);
+    Bar (V, 1, 1, 40, 20);
+    ClearViewPort (V);
+
+    AssertEqual (Transparent, GetPixel (V, 20, 10));
 
     CloseGraph ();
 end

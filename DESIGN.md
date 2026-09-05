@@ -119,7 +119,7 @@ Settled for both kinds, the first five by the original Canvas decisions:
   receiver says. The globals are the root Window's methods, kept as the
   words programs already use, and every method is *also* a surface-first
   free function — `GotoXY (W, 3, 2)` — because verb-first is how a Turbo
-  Pascal program reads. The aliases add no behaviour; they became possible
+  Pascal program reads. The aliases add no behavior; they became possible
   in 0.1.4, which settles an overload on arity when arity is enough.
 - **Coordinates are local.** (1,1) is the surface's own top-left — cell for
   a Window, pixel for a ViewPort — which is what makes its contents
@@ -174,6 +174,109 @@ A TurboVision-style text window with a pie chart inside it:
 - Stacked windows are stacked canvases, `Order` matching the windows' order.
   `ClrEol` inside the window erases prose and never the chart.
 
+## Color, and the palette that is not a register file
+
+Designed, not built. Nothing here has been implemented; it is written down so
+that when it is, the shape is already settled.
+
+**A color is a 24-bit RGB Integer, and that is the whole of it.** `Blue` is
+`170`, `Red` is `11141120`, `Transparent` is `-1`, and `Blink` is bit 24 added
+to an ink. There is no index space: `4` means RGB `0x000004`, a near-black, and
+not "entry four".
+
+### Why Turbo Pascal's palette is not ported
+
+`SetPalette` was a wrapper over the EGA and VGA palette registers, and the
+shape of the API says so — numbered entries, `GetPaletteSize`, `MaxColors`,
+`GetDefaultPalette`. Those are questions about a chip. Asked here, `MaxColors`
+answers 16,777,216 and `GetPaletteSize` answers the same, which tells a reader
+nothing at all. They are not kept.
+
+**What the palette actually bought was not naming.** The framebuffer stored
+*indices*, so writing one register recolored every pixel already drawn,
+instantly and with no redraw — which is what fades, color cycling, fire and
+water were all made of. That capability is genuinely given up here: a
+ViewPort's buffer holds final ARGB and goes straight to `SDL_UpdateTexture`,
+so there is nothing left to remap. The design does not pretend otherwise, and
+a paletted surface that could do it is a door left open below rather than
+something this section quietly implies.
+
+### What is kept: the sixteen names, rebound per surface
+
+A palette here **rebinds what the sixteen color names mean on one surface,
+and it is consulted when you draw**. Programs written to `LightCyan` and
+`Brown` keep working unchanged; a theme recolors them wholesale.
+
+```algol24
+var Amber := [DarkGray: 4276224, LightGray: 12550144, White: 16768256];
+
+V.SetPalette (Amber);
+V.SetColor (LightGray);      // draws amber, because that is what LightGray means here
+V.SetColor (LightCyan);      // unlisted, so it still means LightCyan
+```
+
+A palette is a Map from one of the sixteen constants to the RGB it should
+mean. `SetPalette` replaces the surface's mapping entirely, and **a name the
+map does not list means itself** — so a partial palette is the ordinary case
+and rebinding one color does not require restating the other fifteen.
+`GetPalette` answers the mapping in force. Whether to also keep Turbo Pascal's
+per-entry `SetPalette (Entry, Color)` as a merge is a detail for the
+assignment that builds this.
+
+### The limitation, which is the first thing any doc comment must say
+
+**A palette governs what is drawn next, not what is already drawn.** Set one
+after painting a screen and the screen does not change; re-theming means
+re-drawing. This is exactly the half of Turbo Pascal's behavior the pixel
+model cannot give, and stating it anywhere but first would let a reader
+discover it by being surprised.
+
+### Where it applies
+
+Exactly five places take a color from a caller and keep it, and the lookup
+belongs at those five and nowhere else:
+
+| | verb |
+| --- | --- |
+| `Window.Ink` | `TextColor` |
+| `Window.Back` | `TextBackground` |
+| `ViewPort.Pen` | `SetColor` |
+| `ViewPort.FillInk` | `SetFillStyle`, `SetFillPattern` |
+
+Free text follows the pen, so `OutText` and `OutTextXY` are themed without
+knowing about it. `PutPixel` is deliberately **not** in the list: it writes a
+color directly and bypasses the pen already, and the two exceptions should be
+the same exception.
+
+Two values must survive the lookup untouched. `Transparent` is not a color
+and has no palette entry. `Blink` is bit 24 *added* to an ink, so
+`Yellow + Blink` must have that bit stripped before the lookup and put back
+after — miss this and blinking text is the one thing on the screen that
+ignores the theme.
+
+`GetColor` answers the name it was given rather than what the name resolved
+to, so save-and-restore round-trips. `GetPixel` answers the resolved color,
+because that is what is actually on the surface.
+
+### The one open question
+
+Under this scheme `SetColor (V, 11141120)` and `SetColor (V, Red)` are
+indistinguishable, so an arbitrary RGB that happens to equal one of the
+sixteen gets rebound too. Sixteen values out of 16.7 million is a small
+surface, and **the remap is inert until a palette is set**, so a program that
+never asks for a theme can never be bitten — but it is magic, and it should be
+ruled on rather than discovered.
+
+The recommendation is to accept it and state the rule plainly: a color equal
+to one of the sixteen is a *name*, anything else is a literal.
+
+The alternative considered was tagging the sixteen constants into a reserved
+range, the way `Blink` uses bit 24, so that names and raw RGBs are genuinely
+different spaces. It is rejected because the constants **are** the CGA RGB
+values, which is both useful and true, and because `Yellow + Blink` is
+arithmetic on a color that the library already invites — tagging would break
+the idiom to fix a collision that costs less than the fix.
+
 ## Doors left open, deliberately
 
 Nothing below is designed yet; nothing above blocks any of it.
@@ -191,6 +294,15 @@ Nothing below is designed yet; nothing above blocks any of it.
   scrolls its own celled contents is exactly what a Window is.
 - **ViewPort scaling** — a texture can be presented at other than 1:1, which
   is sprite scaling for free. Sizes stay fixed at creation until wanted.
+- **Paletted surfaces** — a ViewPort whose buffer holds indices, expanded
+  through a table at `Present` into the texture. This is the half of Turbo
+  Pascal's palette the section above gives up: fades, color cycling and an
+  instant re-theme of a finished screen, none of which need a redraw. The
+  expansion is a per-pixel run and so belongs in `graphffi.c`, but the cost
+  lands on every primitive — `PutPixel` and the three C fills all write
+  `0xFF000000 | color` today and would need an index path, `GetPixel` becomes
+  ambiguous between index and color, and transparency needs a reserved entry.
+  A fork in the surface model, and priced accordingly.
 - **The rest of the drawing vocabulary** — `Bar`, `Circle`, `Ellipse`, `Arc`,
   `PieSlice`, `FloodFill`, `GetImage`/`PutImage`. The pen arrived with
   `Line`; these join it on the ViewPort, and the fill styles are the open
@@ -243,7 +355,7 @@ ever needs addressing, in increasing order of what it spends:
   figure to fill: 7.5 seconds interpreted for one 300 × 200 rectangle, free
   through `alg_fill_rect`. The line drawn is the one the rest of the file
   argues for — the unit decides the rectangle, the corners' order, the
-  pattern, the colour and whether the fill is empty; C receives a run.
+  pattern, the color and whether the fill is empty; C receives a run.
 
 ## What was measured on the way here
 

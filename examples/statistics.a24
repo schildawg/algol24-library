@@ -5,7 +5,7 @@
 ///
 /// The generator is seeded rather than randomized, so every run prints the same
 /// numbers. That is what lets `./check-reference.py` verify the output in
-/// `REFERENCE.md`, and it is the behaviour a program gets by default -- a call
+/// `REFERENCE.md`, and it is the behavior a program gets by default -- a call
 /// to `Randomize` is what buys a different sequence.
 unit statistics;
 

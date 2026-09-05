@@ -201,7 +201,7 @@ void alg_scroll_up (int64_t dy, int64_t fill)
 /* Fill a rectangle of the stamp target with an eight-by-eight pattern.
  *
  * The unit decides everything that is a decision -- which rectangle, which
- * way round its corners were given, which pattern, which colour, and whether
+ * way round its corners were given, which pattern, which color, and whether
  * the fill is empty at all.  What is left is a run of pixels, and a run is
  * what C is for: the interpreted loop was measured at 7.5 seconds for one
  * 300 x 200 bar, of which a bare 60,000 buffer writes are 0.5.
@@ -242,8 +242,8 @@ void alg_fill_rect (int64_t x1, int64_t y1, int64_t x2, int64_t y2,
  *
  * The companion to alg_fill_rect, and there for the same reason: a slice of
  * any size is thousands of pixels and the interpreted loop cannot afford
- * them.  The unit still decides the centre, the radii, the angles, the
- * pattern and the colour.
+ * them.  The unit still decides the center, the radii, the angles, the
+ * pattern and the color.
  *
  * Two radii rather than one, so that PieSlice is the equal-radii case of
  * Sector exactly as Circle is of Ellipse -- one primitive, and the two verbs
@@ -335,7 +335,7 @@ void alg_fill_sector (int64_t cx, int64_t cy, int64_t xr, int64_t yr,
 }
 
 /* Fill the region around a seed with an eight-by-eight pattern, stopping at
- * pixels of the border colour.
+ * pixels of the border color.
  *
  * The first primitive here that READS the surface.  Every other figure knows
  * which pixels it covers from its parameters alone; a flood has to look, and
@@ -343,20 +343,20 @@ void alg_fill_sector (int64_t cx, int64_t cy, int64_t xr, int64_t yr,
  * must be examined whether or not it is painted.  That is the same bargain
  * alg_fill_rect struck, so it is struck the same way.  The unit still decides
  * everything that is a decision: the seed, the border, the pattern, the
- * colour, and whether an empty fill should look at all.
+ * color, and whether an empty fill should look at all.
  *
  * A BOUNDARY fill, as Turbo Pascal's was: the region is every pixel reachable
- * from the seed without crossing one of the border colour -- not every pixel
- * matching the seed's own colour.  That is the one an outlined figure wants,
+ * from the seed without crossing one of the border color -- not every pixel
+ * matching the seed's own color.  That is the one an outlined figure wants,
  * and an outlined figure is what a flood is usually aimed at.
  *
- * Colours arrive as this screen's own: an RGB from zero up, or Transparent as
+ * Colors arrive as this screen's own: an RGB from zero up, or Transparent as
  * a negative, which is the untouched pixel's stored zero.
  *
  * Painted pixels cannot serve as the record of where the flood has been,
  * because a patterned fill leaves most of them unpainted -- so a visited byte
  * per pixel is kept alongside.  Spans rather than pixels go on the stack, one
- * per contiguous run of the neighbouring row, which is what keeps it bounded.
+ * per contiguous run of the neighboring row, which is what keeps it bounded.
  *
  * Total: no target, no pattern, a seed off the surface, a seed already on the
  * border, or no memory writes nothing.
@@ -421,7 +421,7 @@ void alg_flood_fill (int64_t sx, int64_t sy, int64_t border,
             if ((row >> (7 - (i - 1) % 8)) & 1) target[base + i - 1] = ink;
         }
 
-        /* One seed per contiguous run of each neighbouring row, rather than
+        /* One seed per contiguous run of each neighboring row, rather than
          * one per pixel, so the stack stays a fraction of the region. */
         for (int64_t d = -1; d <= 1; d += 2)
         {
@@ -463,4 +463,24 @@ void alg_flood_fill (int64_t sx, int64_t sy, int64_t border,
 
     free (stack);
     free (seen);
+}
+
+/* Fill the whole stamp target with one raw pixel value.
+ *
+ * The one fill that alg_fill_rect cannot do, because that one forces the
+ * alpha byte opaque -- deliberately, since a figure being filled is being
+ * painted.  Clearing is the opposite act, and its natural value is a fully
+ * transparent zero, so it takes the pixel as written rather than an RGB to
+ * make opaque.
+ *
+ * Total: no target writes nothing.
+ */
+void alg_clear_target (int64_t value)
+{
+    if (target == 0) return;
+
+    int32_t v = (int32_t) value;
+    int64_t n = target_w * target_h;
+
+    for (int64_t i = 0; i < n; i++) target[i] = v;
 }

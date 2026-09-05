@@ -24,8 +24,10 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Bar3D`](#bar3d) | procedure, alias | `graph` |
 | [`Blink`](#blink) | constant | `graph` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
-| [`CloseGraph`](#closegraph) | procedure | `graph` |
 | [`Circle`](#circle) | procedure, alias | `graph` |
+| [`Clear`](#clear) | method | `graph` |
+| [`ClearViewPort`](#clearviewport) | procedure, alias | `graph` |
+| [`CloseGraph`](#closegraph) | procedure | `graph` |
 | [`ClrEol`](#clreol) | procedure | `graph` |
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Black` … `White`](#colors) | constants | `graph` |
@@ -71,8 +73,8 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`PenRel`](#penrel) | procedure, alias | `graph` |
 | [`PenTo`](#pento) | procedure, alias | `graph` |
-| [`PieSlice`](#pieslice) | procedure, alias | `graph` |
 | [`Pi`](#pi) | constant | `math` |
+| [`PieSlice`](#pieslice) | procedure, alias | `graph` |
 | [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
@@ -129,13 +131,13 @@ follows from `0 - X` taking its type from its operand rather than from anything
 this routine arranges, which is also why the function is written untyped.
 
 Because an Integer is unbounded, the negation cannot overflow. `Abs` of −2¹²⁷
-answers 2¹²⁷, where C's `abs(INT_MIN)` is undefined behaviour.
+answers 2¹²⁷, where C's `abs(INT_MIN)` is undefined behavior.
 
-Negative zero is normalised: `Abs (-0.0)` is `0.0`, not `-0.0`. The comparison
+Negative zero is normalized: `Abs (-0.0)` is `0.0`, not `-0.0`. The comparison
 is `<=` rather than `<` for exactly this reason — `-0.0 < 0` is false, so `<`
 would hand `-0.0` straight back.
 
-Being untyped, the result cannot initialise a variable of a written type:
+Being untyped, the result cannot initialize a variable of a written type:
 `var N : Integer := Abs (-5);` is refused, while `var N := Abs (-5);`,
 `Abs (-5) + 1` and `Take (Abs (-5))` are all accepted.
 
@@ -182,8 +184,8 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the forty-six surface methods has a
-free-function twin. Each is a one-line delegate adding no behaviour whatever,
+is Turbo Pascal's — so each of the forty-seven surface methods has a
+free-function twin. Each is a one-line delegate adding no behavior whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
 
@@ -291,7 +293,7 @@ SetLineStyle (V, SolidLn, 0, ThickWidth);
 Arc (V, 150, 150, 0, 90, 100);
 Show (V);
 
-// Ninety degrees is twelve o'clock: a SMALLER Y than the centre.
+// Ninety degrees is twelve o'clock: a SMALLER Y than the center.
 System.WriteLn (V.Buf.GetInt ((49 * 300 + 149) * 4) <> 0);
 System.WriteLn (V.Buf.GetInt ((149 * 300 + 149) * 4) = 0);
 
@@ -311,7 +313,7 @@ true
 
 **Function**
 
-Where the last arc on a surface was centred, began and ended.
+Where the last arc on a surface was centered, began and ended.
 
 **Declaration**
 
@@ -320,7 +322,7 @@ constructor ArcCoords (X : Integer, Y : Integer, XStart : Integer,
                        YStart : Integer, XEnd : Integer, YEnd : Integer);
 
 // readable
-X, Y : Integer                  the centre the arc was drawn about
+X, Y : Integer                  the center the arc was drawn about
 XStart, YStart : Integer        where the curve began
 XEnd, YEnd : Integer            where it ended
 ```
@@ -334,7 +336,7 @@ program written to them still reads.
 `var` record and wrote into it; [`GetArcCoords`](#getarccoords) here returns
 one of these. That is the same record with the awkward half of Pascal's
 calling convention left out — there is nothing to declare before the call,
-and nothing to leave uninitialised if the call is skipped.
+and nothing to leave uninitialized if the call is skipped.
 
 ⚠️ **The six are a snapshot.** A later arc makes a new `ArcCoords` rather than
 changing an existing one, so a value held on to still describes the figure it
@@ -518,7 +520,7 @@ InitGraph (640, 480, 'bar', False);
 
 var V := ViewPort (60, 60, 400, 260, 1);
 
-// A chart's bars, each filled and then outlined -- two colours, because the
+// A chart's bars, each filled and then outlined -- two colors, because the
 // fill pen and the drawing pen are separate.
 var Heights := [180, 120, 210, 90, 150];
 
@@ -774,54 +776,6 @@ CloseGraph ();
 
 ---
 
-## CloseGraph
-
-*procedure* — unit `graph`
-
-**Function**
-
-Closes the graphics window.
-
-**Declaration**
-
-```algol24
-procedure CloseGraph ();
-```
-
-**Remarks**
-
-Total: closing when nothing is open does nothing, so a handler or a test may
-call it unconditionally to reach a known state. The window may be reopened
-afterward with [`InitGraph`](#initgraph).
-
-Only the window and its renderer are released. SDL's video subsystem stays up
-for the life of the process, which is why [`ScreenWidth`](#screenwidth) still
-answers after a close.
-
-**See also**
-
-[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph)
-
-**Example**
-
-```algol24
-uses graph;
-
-CloseGraph ();                       // nothing open: does nothing
-
-InitGraph (320, 200, 'brief', False);
-CloseGraph ();
-CloseGraph ();                       // already closed: does nothing
-
-System.WriteLn ('closed without complaint');
-```
-
-```console
-closed without complaint
-```
-
----
-
 ## Circle
 
 *procedure, alias of `ViewPort.Circle`* — unit `graph`
@@ -882,6 +836,188 @@ CloseGraph ();
 ```console
 true
 true
+```
+
+---
+
+## Clear
+
+*method of [`Window`](#window) and [`ViewPort`](#viewport)* — unit `graph`
+
+**Function**
+
+Clears a surface, whichever kind it is.
+
+**Declaration**
+
+```algol24
+procedure Clear ();     // on a Window, and on a ViewPort
+```
+
+**Remarks**
+
+The one clearing verb both kinds of surface answer to. Turbo Pascal had two
+unrelated names for it — `ClrScr` in Crt and `ClearViewPort` in Graph — because
+text and pixels were different worlds there. They are one world here, so the
+verb is one verb, and the Turbo Pascal names are kept as
+[aliases](#aliases): [`ClrScr (W)`](#clrscr) and
+[`ClearViewPort (V)`](#clearviewport).
+
+⚠️ **What a surface is cleared *to* differs, and follows the one rule.** A
+grid is text, so its cells take the current
+[`TextBackground`](#textbackground); a canvas is a graphic, so it goes back to
+the [`Transparent`](#colors) it was born as and whatever lies beneath shows
+through again.
+
+That difference is the point rather than an inconsistency: painting a viewport
+black would hide what is under it, which is the opposite of clearing it.
+Filling one with a color is [`Bar`](#bar) over the whole of it.
+
+The cursor, or the pen and the free-text position, go home to `1, 1`.
+
+⚠️ **The settings are not touched.** [`TextColor`](#textcolor) and
+[`TextBackground`](#textbackground) on a window; [`SetColor`](#setcolor),
+[`SetLineStyle`](#setlinestyle) and [`SetFillStyle`](#setfillstyle) on a
+viewport. This clears the surface, not what you drew it with — a redraw after
+a clear should not have to say everything over again.
+
+Every other surface is left alone, as ever.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`Bar`](#bar), [`ClearViewPort`](#clearviewport), [`ClrEol`](#clreol),
+[`ClrScr`](#clrscr), [`ViewPort`](#viewport), [`Window`](#window)
+
+**Example**
+
+See [`ClearViewPort`](#clearviewport).
+
+---
+
+## ClearViewPort
+
+*procedure, alias of `ViewPort.Clear`* — unit `graph`
+
+**Function**
+
+Clears a viewport back to transparent.
+
+**Declaration**
+
+```algol24
+procedure ClearViewPort (V : ViewPort);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `ClearViewPort (V)` is `V.Clear ()`.
+Turbo Pascal's name for it, kept; [`Clear`](#clear) is the verb.
+
+⚠️ **It erases rather than paints.** The pixels go back to
+[`Transparent`](#colors), so what lies beneath the viewport shows through
+again. There is no color to pass, because a cleared surface and a surface
+painted a color are different things — [`Bar`](#bar) over the whole viewport
+is the second one.
+
+Turbo Pascal cleared to the background color, having no transparency to go
+back to. A stack of surfaces does, and transparent is what a fresh viewport
+already is, so this returns one to how it looked when made.
+
+The pen and the free-text position go home to `1, 1`, as a window's cursor
+does under [`ClrScr`](#clrscr). The pen's color, the line style and the fill
+style are left alone.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`Bar`](#bar), [`Clear`](#clear), [`ClrScr`](#clrscr),
+[`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'clear', False);
+
+var V := ViewPort (50, 50, 120, 80, 1);
+
+SetFillStyle (V, SolidFill, Red);
+Bar (V, 1, 1, 120, 80);
+PenTo (V, 40, 60);
+
+System.WriteLn ('painted:  ', GetPixel (V, 60, 40) = Red);
+
+ClearViewPort (V);
+
+// Back to transparent, not to a color -- so whatever lies beneath a viewport
+// shows through it again.
+System.WriteLn ('cleared:  ', GetPixel (V, 60, 40) = Transparent);
+
+// The pen goes home, as a window's cursor does; what the pen was set to does
+// not change.
+System.WriteLn ('pen home: ', GetX (V), ' ', GetY (V));
+System.WriteLn ('fill kept: ', GetFillStyle (V) = SolidFill);
+
+CloseGraph ();
+```
+
+```console
+painted:  true
+cleared:  true
+pen home: 1 1
+fill kept: true
+```
+
+---
+
+## CloseGraph
+
+*procedure* — unit `graph`
+
+**Function**
+
+Closes the graphics window.
+
+**Declaration**
+
+```algol24
+procedure CloseGraph ();
+```
+
+**Remarks**
+
+Total: closing when nothing is open does nothing, so a handler or a test may
+call it unconditionally to reach a known state. The window may be reopened
+afterward with [`InitGraph`](#initgraph).
+
+Only the window and its renderer are released. SDL's video subsystem stays up
+for the life of the process, which is why [`ScreenWidth`](#screenwidth) still
+answers after a close.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph)
+
+**Example**
+
+```algol24
+uses graph;
+
+CloseGraph ();                       // nothing open: does nothing
+
+InitGraph (320, 200, 'brief', False);
+CloseGraph ();
+CloseGraph ();                       // already closed: does nothing
+
+System.WriteLn ('closed without complaint');
+```
+
+```console
+closed without complaint
 ```
 
 ---
@@ -959,8 +1095,13 @@ procedure ClrScr (W : Window);  // that window
 
 **Remarks**
 
-`ClrScr (W)` is an [alias](#aliases) of `W.ClrScr`, clearing that window
-alone.
+`ClrScr (W)` is an [alias](#aliases) of `W.Clear`, clearing that window
+alone. [`Clear`](#clear) is the verb both kinds of surface answer to;
+`ClrScr` is Turbo Pascal's name for it on a grid, and
+[`ClearViewPort`](#clearviewport) is Turbo Pascal's name for it on a canvas.
+
+The bare `ClrScr ()` is the base console layer — the root grid at Order 0 —
+and clears nothing else in the stack.
 
 Every cell takes the current [`TextBackground`](#textbackground) —
 `TextBackground (Blue); ClrScr;` is how a classic screen paints its field in
@@ -973,7 +1114,8 @@ Raises `Graph is not open.` without a window.
 
 **See also**
 
-[`ClrEol`](#clreol), [`TextBackground`](#textbackground)
+[`Clear`](#clear), [`ClearViewPort`](#clearviewport), [`ClrEol`](#clreol),
+[`TextBackground`](#textbackground)
 
 **Example**
 
@@ -1206,21 +1348,21 @@ An [alias](#aliases) of the method: `Ellipse (V, …)` is `V.Ellipse (…)`.
 ⚠️ **Turbo Pascal's `Ellipse` takes angles**, so it is an elliptical *arc*: a
 whole ellipse is the sweep `0, 360`, and anything less is a piece of one. The
 angles mean what [`Arc`](#arc)'s mean — degrees, zero at three o'clock,
-counterclockwise, which on a screen puts ninety degrees *above* the centre.
+counterclockwise, which on a screen puts ninety degrees *above* the center.
 
 With equal radii it is exactly [`Circle`](#circle): there is a test asserting
 the two paint the same pixels, which is the strongest statement available that
 they compute one curve.
 
 ⚠️ **The angle is the parametric one, not a bearing.** On a wide ellipse the
-point at forty-five degrees is not forty-five degrees from the centre as a
+point at forty-five degrees is not forty-five degrees from the center as a
 protractor would have it — it is where the circle's forty-five lands once the
 circle is stretched. That is what Turbo Pascal drew, and it is what makes
 `Ellipse (V, X, Y, 0, 90, A, B)` the quadrant a reader expects; but it is
 worth knowing before computing an angle from a slope.
 
 Drawn in the pen's [color](#setcolor), patterned by the
-[line style](#setlinestyle), and thickened by drawing the neighbouring
+[line style](#setlinestyle), and thickened by drawing the neighboring
 ellipses — which keeps a thick ellipse an ellipse rather than a ring of
 uneven width. The pen is not moved.
 
@@ -1686,7 +1828,7 @@ WriteLn (Frac (3.7));
 
 **Function**
 
-Where the last arc on a viewport was centred, began and ended.
+Where the last arc on a viewport was centered, began and ended.
 
 **Declaration**
 
@@ -1756,7 +1898,7 @@ Arc (V, 150, 150, 0, 120, 100);
 
 var C := GetArcCoords (V);
 
-System.WriteLn ('centre ', C.X, ' ', C.Y);
+System.WriteLn ('center ', C.X, ' ', C.Y);
 System.WriteLn ('start  ', C.XStart, ' ', C.YStart);
 System.WriteLn ('end    ', C.XEnd, ' ', C.YEnd);
 
@@ -1773,7 +1915,7 @@ CloseGraph ();
 ```
 
 ```console
-centre 150 150
+center 150 150
 start  250 150
 end    100 63
 on the arc: true
@@ -2250,7 +2392,7 @@ procedure InitGraph (Width : Integer, Height : Integer, Title : String, Fullscre
 
 **Remarks**
 
-The window is `Width` by `Height` pixels, centred on the desktop, with `Title`
+The window is `Width` by `Height` pixels, centered on the desktop, with `Title`
 in its title bar — Unicode included. It opens cleared to black.
 
 With `Fullscreen` true the window instead covers the desktop at the desktop's
@@ -2904,7 +3046,7 @@ The result is whichever argument was larger, in that argument's own type. A tie
 answers `B`, which is visible only when the two differ in type: `Max (2, 2.0)`
 is `2.0` and `Max (2.0, 2)` is `2`.
 
-Like `Abs`, `Max` is untyped, so its result cannot initialise a variable of a
+Like `Abs`, `Max` is untyped, so its result cannot initialize a variable of a
 written type. Assigning to a variable whose type was *inferred* is fine, which
 is what makes the running-maximum idiom in the example work.
 
@@ -3349,96 +3491,6 @@ See [`Line`](#line), which begins its series with it.
 
 ---
 
-## PieSlice
-
-*procedure, alias of `ViewPort.PieSlice`* — unit `graph`
-
-**Function**
-
-Fills and outlines a pie slice on a viewport.
-
-**Declaration**
-
-```algol24
-procedure PieSlice (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
-                    EndAngle : Integer, Radius : Integer);
-```
-
-**Remarks**
-
-An [alias](#aliases) of the method: `PieSlice (V, …)` is `V.PieSlice (…)`.
-
-The wedge between two angles: filled with the current fill pattern and color,
-then outlined with the pen and the current line style — the arc, and the two
-radii closing it to the centre.
-
-Angles are [`Arc`](#arc)'s: degrees, zero at three o'clock, counterclockwise,
-ninety at twelve, and the sweep is the counterclockwise one.
-
-⚠️ **A sweep of 360 is the whole disc, and draws no radii.** The two would
-coincide, and a spoke across a full pie is a blemish rather than an edge.
-
-⚠️ **Two pens.** The wedge is laid in the fill color and edged in the drawing
-color — which is exactly what a labelled pie chart wants, and what
-[`SetFillStyle`](#setfillstyle) is separate for. With `EmptyFill` the slice is
-outlined and hollow, which is how to draw one without a colour.
-
-The pen is not moved.
-
-The fill is drawn by C, as [`Bar`](#bar)'s is, and for the same reason. It
-asks whether a point lies within the sweep by **cross product rather than
-arctangent** — a ray divides the plane, and which side a point falls on
-answers the question exactly, with no transcendental per pixel and no need
-for a two-argument `ArcTan` the library does not have.
-
-Raises `PieSlice needs a radius of zero or more.` and `CloseGraph has closed
-this surface.`
-
-**See also**
-
-[`Arc`](#arc), [`Circle`](#circle), [`GetArcCoords`](#getarccoords),
-[`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
-
-**Example**
-
-```algol24
-uses graph;
-
-InitGraph (640, 480, 'pie', False);
-
-var V := ViewPort (60, 40, 400, 400, 1);
-
-// A pie chart: each slice filled in its own colour and edged in white.
-var Shares := [22, 18, 25, 15, 20];
-var Inks   := [LightRed, Yellow, LightCyan, LightGreen, LightMagenta];
-var At     := 0;
-
-SetColor (V, White);
-
-for var I := 0; I < 5; I := I + 1 do
-begin
-    SetFillStyle (V, SolidFill, Inks[I]);
-    PieSlice (V, 200, 200, At * 36 div 10, (At + Shares[I]) * 36 div 10, 150);
-
-    At := At + Shares[I];
-end
-
-Show (V);
-
-// The first slice starts at three o'clock and sweeps upward.
-System.WriteLn (V.Buf.GetInt ((199 * 340 + 259) * 4) <> 0);
-System.WriteLn (GetColor (V) = White);
-
-CloseGraph ();
-```
-
-```console
-true
-true
-```
-
----
-
 ## Pi
 
 *constant* — unit `math`
@@ -3483,6 +3535,96 @@ WriteLn ('area:          ' + Str (Pi * Sqr (Radius)));
 ```console
 circumference: 18.84955592153876
 area:          28.274333882308138
+```
+
+---
+
+## PieSlice
+
+*procedure, alias of `ViewPort.PieSlice`* — unit `graph`
+
+**Function**
+
+Fills and outlines a pie slice on a viewport.
+
+**Declaration**
+
+```algol24
+procedure PieSlice (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                    EndAngle : Integer, Radius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `PieSlice (V, …)` is `V.PieSlice (…)`.
+
+The wedge between two angles: filled with the current fill pattern and color,
+then outlined with the pen and the current line style — the arc, and the two
+radii closing it to the center.
+
+Angles are [`Arc`](#arc)'s: degrees, zero at three o'clock, counterclockwise,
+ninety at twelve, and the sweep is the counterclockwise one.
+
+⚠️ **A sweep of 360 is the whole disc, and draws no radii.** The two would
+coincide, and a spoke across a full pie is a blemish rather than an edge.
+
+⚠️ **Two pens.** The wedge is laid in the fill color and edged in the drawing
+color — which is exactly what a labelled pie chart wants, and what
+[`SetFillStyle`](#setfillstyle) is separate for. With `EmptyFill` the slice is
+outlined and hollow, which is how to draw one without a color.
+
+The pen is not moved.
+
+The fill is drawn by C, as [`Bar`](#bar)'s is, and for the same reason. It
+asks whether a point lies within the sweep by **cross product rather than
+arctangent** — a ray divides the plane, and which side a point falls on
+answers the question exactly, with no transcendental per pixel and no need
+for a two-argument `ArcTan` the library does not have.
+
+Raises `PieSlice needs a radius of zero or more.` and `CloseGraph has closed
+this surface.`
+
+**See also**
+
+[`Arc`](#arc), [`Circle`](#circle), [`GetArcCoords`](#getarccoords),
+[`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'pie', False);
+
+var V := ViewPort (60, 40, 400, 400, 1);
+
+// A pie chart: each slice filled in its own color and edged in white.
+var Shares := [22, 18, 25, 15, 20];
+var Inks   := [LightRed, Yellow, LightCyan, LightGreen, LightMagenta];
+var At     := 0;
+
+SetColor (V, White);
+
+for var I := 0; I < 5; I := I + 1 do
+begin
+    SetFillStyle (V, SolidFill, Inks[I]);
+    PieSlice (V, 200, 200, At * 36 div 10, (At + Shares[I]) * 36 div 10, 150);
+
+    At := At + Shares[I];
+end
+
+Show (V);
+
+// The first slice starts at three o'clock and sweeps upward.
+System.WriteLn (V.Buf.GetInt ((199 * 340 + 259) * 4) <> 0);
+System.WriteLn (GetColor (V) = White);
+
+CloseGraph ();
+```
+
+```console
+true
+true
 ```
 
 ---
@@ -3649,10 +3791,10 @@ uses random;
 
 SetSeed (7);
 
-var Colours := ['red', 'green', 'blue'];
+var Colors := ['red', 'green', 'blue'];
 
 for var I := 0; I < 4; I := I + 1 do
-    WriteLn (Colours[RandomInteger (Colours.Length)]);
+    WriteLn (Colors[RandomInteger (Colors.Length)]);
 ```
 
 ```console
@@ -3894,7 +4036,7 @@ function Round (X : Double) : Integer;
 
 **Remarks**
 
-⚠️ **A tie rounds to the EVEN neighbour, not away from zero.** `Round (2.5)` is
+⚠️ **A tie rounds to the EVEN neighbor, not away from zero.** `Round (2.5)` is
 `2` and `Round (3.5)` is `4`; `Round (0.5)` is `0` and `Round (-2.5)` is `-2`.
 This is not the schoolbook rule, which would answer `3` for `2.5`, and the
 difference shows on exactly the values a test is most likely to try.
@@ -3903,7 +4045,7 @@ Two reasons for it. **Consistency downward:** ties-to-even is what IEEE 754
 already does for every arithmetic result in the language, so a `Round` breaking
 ties the other way would be the one operation disagreeing with the arithmetic
 beneath it. **Bias:** rounding half away from zero sends every tie away from the
-centre and so pushes a column of figures upward on average, where ties-to-even
+center and so pushes a column of figures upward on average, where ties-to-even
 sends half each way and does not drift.
 
 Away from a tie there is no subtlety — `Round (2.4)` is `2` and `Round (2.6)`
@@ -4049,7 +4191,7 @@ An [alias](#aliases) of the method: `Sector (V, …)` is `V.Sector (…)`.
 [`PieSlice`](#pieslice) with two radii, exactly as [`Ellipse`](#ellipse) is
 [`Circle`](#circle) with two — filled with the current fill pattern and color,
 then outlined with the pen: the elliptical arc, and the two radii closing it
-to the centre.
+to the center.
 
 With equal radii it *is* `PieSlice`: there is a test asserting the two paint
 the same pixels. They share one primitive underneath, so they cannot drift
@@ -4100,7 +4242,7 @@ end
 Show (V);
 
 // Wide across, shallow down: the rim is 200 out but only 90 up, so a point
-// 100 above the centre is outside it and one 80 above is not.
+// 100 above the center is outside it and one 80 above is not.
 System.WriteLn (V.Buf.GetInt ((159 * 480 + 429) * 4) <> 0);
 System.WriteLn (V.Buf.GetInt ((79 * 480 + 249) * 4) <> 0);
 System.WriteLn (V.Buf.GetInt ((59 * 480 + 249) * 4) <> 0);
@@ -4642,7 +4784,7 @@ function Sqrt (X : Double) : Double;
 
 **Remarks**
 
-A negative argument answers `NaN` rather than raising, which is libm's behaviour
+A negative argument answers `NaN` rather than raising, which is libm's behavior
 and not this unit's choice. `NaN` is not equal to itself, which is how to detect
 it.
 
@@ -4831,7 +4973,7 @@ procedure TextMode (Cols : Integer, Rows : Integer);
 
 The screen clears, the cursor homes, and the colors return to their defaults
 — which is what Turbo Pascal's `TextMode` did on a mode change, and the
-behaviour a program switching modes wants.
+behavior a program switching modes wants.
 
 Turbo Pascal's argument was a video-card mode — `CO80`, `CO40`, `Font8x8` —
 because the grid was a register setting. Here the grid is logical, so the
@@ -5011,6 +5153,7 @@ procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
 function  GetPixel (PX : Integer, PY : Integer) : Integer;
 procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
 function  GetArcCoords () : ArcCoords;
+procedure Clear ();
 procedure OutText (Text : String);
 procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
 procedure SetTextStyle (Direction : Integer, CharSize : Integer);
@@ -5052,7 +5195,7 @@ portable — [`MoveTo`](#viewport) the viewport and everything on it moves,
 nothing redraws.
 
 ⚠️ **Local is also the clip.** A pixel outside the viewport is discarded
-silently rather than raising, so a drawing cannot scribble on its neighbours
+silently rather than raising, so a drawing cannot scribble on its neighbors
 and there is no clipping rectangle to maintain.
 
 The pen — [`Line`](#line) and its family — draws in these coordinates too.
@@ -5092,7 +5235,10 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`PutPixel`](#putpixel), [`GetPixel`](#getpixel), [`FloodFill`](#floodfill),
 [`GetArcCoords`](#getarccoords),
 [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
-[`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto).
+[`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto),
+[`ClearViewPort`](#clearviewport).
+
+[`Clear`](#clear) is the method `ClearViewPort (V)` reaches.
 
 [`CellWidth`](#cellwidth), [`ReadKey`](#readkey), [`Window`](#window)
 
@@ -5218,7 +5364,7 @@ procedure NormVideo ();
 procedure Write (Text : String);
 procedure WriteLn (Text : String);
 procedure ClrEol ();
-procedure ClrScr ();
+procedure Clear ();
 
 // readable, and Order and Alpha settable
 X1, Y1, X2, Y2 : Integer    the corner cells, inclusive
@@ -5277,6 +5423,8 @@ own: [`Write`](#write), `WriteLn`, [`GotoXY`](#gotoxy), [`WhereX`](#wherex),
 [`LowVideo`](#lowvideo), [`NormVideo`](#normvideo), [`ClrEol`](#clreol),
 [`ClrScr`](#clrscr), [`MoveTo`](#moveto).
 
+[`Clear`](#clear) is the method `ClrScr (W)` reaches.
+
 [`CellWidth`](#cellwidth), [`ViewPort`](#viewport)
 
 **Example**
@@ -5292,7 +5440,7 @@ InitGraph (640, 480, 'windows', False);
 var W := Window (10, 5, 49, 19, 1);
 
 W.TextBackground (Blue);
-W.ClrScr ();
+W.Clear ();
 W.Write ('its own cursor and colors');
 
 System.WriteLn (W.Cols);

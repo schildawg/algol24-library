@@ -68,7 +68,7 @@ mode to ship.
 numbers. That is what lets `check.sh` compare the three runs at all — a program
 choosing its own seed could not be checked against anything.
 
-It also happens to be the default behaviour: a program that never calls
+It also happens to be the default behavior: a program that never calls
 `Randomize` is reproducible, and only becomes unpredictable where it asks to be.
 
 ## What the output shows

@@ -176,7 +176,7 @@ begin
 
     Styles.TextBackground (Black);
     Styles.TextColor (LightGray);
-    Styles.ClrScr ();
+    Styles.Clear ();
     Frame (Styles, 'Lines');
 
     // Inside the frame: one cell in from the window's own top-left, and two
@@ -250,7 +250,7 @@ begin
 
     Plot.TextBackground (Blue);
     Plot.TextColor (LightGray);
-    Plot.ClrScr ();
+    Plot.Clear ();
     Frame (Plot, 'Chart -- over the Lines window');
 
     var Graph := ViewPort (Plot.PixelLeft () + Cell, Plot.PixelTop () + Row,

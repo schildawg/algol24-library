@@ -1,7 +1,7 @@
 /* mathffi.c -- C primitives the `math` unit needs and libm does not offer.
  *
  * An Algol-24 `external` declaration states the C function's signature, and
- * nothing checks it: a declaration that misdescribes one is undefined behaviour
+ * nothing checks it: a declaration that misdescribes one is undefined behavior
  * in the ordinary C sense, which the language specification says outright.  So
  * a foreign declaration can only ever name a C function whose real signature is
  * the one wanted.
@@ -24,7 +24,7 @@
  * math.a24's Trunc rejects NaN, the infinities and anything at or beyond 2^63
  * before calling, so the guards below are never what produces the answer.  They
  * are here so that this function is total on its own: a C cast of an
- * out-of-range double to an integer type is undefined behaviour, and a
+ * out-of-range double to an integer type is undefined behavior, and a
  * primitive that a wrong caller can turn into UB is not one worth having.
  */
 int64_t alg_trunc (double x)

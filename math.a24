@@ -1,7 +1,7 @@
 /// Arithmetic over unbounded Integers and IEEE Doubles.
 ///
 /// The selection is Turbo Pascal's, which is where the names come from, but the
-/// behaviour is decided here: where the two would differ, this unit follows
+/// behavior is decided here: where the two would differ, this unit follows
 /// what the language makes possible rather than what a 16-bit machine made
 /// necessary. `Trunc` answering an exact Integer for any finite Double is the
 /// clearest case.
@@ -57,10 +57,10 @@ const NaN := 0.0 / 0.0;
 /// An Integer answers an Integer and a Double answers a Double, which falls out
 /// of `0 - X` following its operand rather than being arranged. The comparison
 /// is `<=` rather than `<` so that negative zero is run through the subtraction
-/// and normalised: `-0.0 < 0` is false, so `<` would hand `-0.0` straight back.
+/// and normalized: `-0.0 < 0` is false, so `<` would hand `-0.0` straight back.
 ///
 /// Integers are unbounded, so the negation cannot overflow and the undefined
-/// behaviour C has for `abs(INT_MIN)` does not exist here.
+/// behavior C has for `abs(INT_MIN)` does not exist here.
 ///
 /// # Raises
 /// `Operands must be numbers.` for a value the subtraction cannot take, from
@@ -140,7 +140,7 @@ end
 /// The non-negative square root of X.
 ///
 /// # Safety
-/// A negative X answers NaN rather than raising, which is libm's behaviour and
+/// A negative X answers NaN rather than raising, which is libm's behavior and
 /// not this unit's choice.
 ///
 /// # Examples
@@ -340,7 +340,7 @@ begin
     Exit X - Int (X);
 end
 
-/// X rounded to the nearest Integer, with a tie going to the even neighbour.
+/// X rounded to the nearest Integer, with a tie going to the even neighbor.
 ///
 /// A value exactly halfway between two integers rounds to whichever of them is
 /// even, so `Round (2.5)` is `2` and `Round (3.5)` is `4`. This is not the
@@ -353,7 +353,7 @@ end
 /// arithmetic beneath it.
 ///
 /// The second is bias. Rounding half away from zero pushes a column of figures
-/// upward on average, because it sends every tie away from the centre;
+/// upward on average, because it sends every tie away from the center;
 /// ties-to-even sends half of them each way and does not drift.
 ///
 /// The primitive is libm's `llrint`, which rounds by the current floating-point
@@ -401,7 +401,7 @@ end
 
 /// -0.0 = 0.0 is true, so only the rendering distinguishes them. '<' would hand
 /// -0.0 straight back, because -0.0 < 0 is false.
-test 'Abs Normalises Negative Zero';
+test 'Abs Normalizes Negative Zero';
 begin
     AssertEqual ('0.0', Str (Abs (-0.0)));
     AssertEqual ('-0.0', Str (-0.0));
@@ -962,7 +962,7 @@ end
 /// Ties-to-even is what IEEE 754 does for every arithmetic result in the
 /// language, and it does not accumulate a bias. Rounding half away from zero --
 /// the schoolbook rule -- would answer 3 for 2.5.
-test 'Round Sends A Tie To The Even Neighbour';
+test 'Round Sends A Tie To The Even Neighbor';
 begin
     AssertEqual (0, Round (0.5));
     AssertEqual (2, Round (1.5));

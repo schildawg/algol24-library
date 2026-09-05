@@ -11,7 +11,7 @@ SetSeed (2024);
 
 WriteLn (Trunc (1.0E30));            // 1000000000000000019884624838656
 WriteLn (Sqrt (2.0));                // 1.4142135623730951
-WriteLn (Round (2.5));               // 2  -- ties go to the even neighbour
+WriteLn (Round (2.5));               // 2  -- ties go to the even neighbor
 WriteLn (Random (6) + 1);            // a die
 ```
 
@@ -75,7 +75,7 @@ library takes it and says why:
 - **`Trunc` answers every finite Double exactly**, however large, because an
   Algol-24 Integer is unbounded. Turbo Pascal's gave up at the width of a
   `LongInt`; there is no such width here.
-- **`Round` breaks ties toward the even neighbour**, which is what IEEE 754
+- **`Round` breaks ties toward the even neighbor**, which is what IEEE 754
   already does for every arithmetic result in the language, and what does not
   accumulate a bias.
 - **`Random` and `RandomInteger` are separate names.** Overload selection

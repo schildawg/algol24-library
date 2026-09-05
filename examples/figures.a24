@@ -145,7 +145,7 @@ begin
     FillEllipse (Shapes, 350, 150, 50, 30);
     Ellipse (Shapes, 350, 150, 0, 360, 50, 30);
 
-    // Arc, and the wedge that closes it to the centre.
+    // Arc, and the wedge that closes it to the center.
     SetColor (Shapes, Yellow);
     SetFillStyle (Shapes, SlashFill, Brown);
     Arc (Shapes, 230, 245, 30, 300, 44);
@@ -210,7 +210,7 @@ begin
 
     // A patterned flood crosses the whole region and paints half of it; and
     // Transparent serves as a border too, which on a fresh surface is the
-    // useful one -- the untouched pixels ARE the edge, so the flood recolours
+    // useful one -- the untouched pixels ARE the edge, so the flood recolors
     // a blob and stops exactly where the paint already stops.
     var Woven := ViewPort (856, 296, 396, 356, 1);
 

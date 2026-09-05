@@ -11,7 +11,7 @@ Two changes against the original:
    and the arrows/triangles the scrollbars need -- are SYNTHESIZED, not
    rendered from a font. A frame character must touch its cell's edges so
    that adjacent cells connect without seams, and a TTF glyph rendered at 80%
-   size and centred never does. Terminals draw these themselves for the same
+   size and centered never does. Terminals draw these themselves for the same
    reason.
 """
 import sys, unicodedata
@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 FONT  = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
 EMOJI = "/System/Library/Fonts/Apple Color Emoji.ttc"
 
-COLOURED = "🙂🌍🎉👋⭐🐈"
+COLORED = "🙂🌍🎉👋⭐🐈"
 
 CP437_PICTURES = "☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼⌂"
 CP437_HIGH     = bytes(range(0x80, 0x100)).decode("cp437")
@@ -48,7 +48,7 @@ TEXT = (
 def box_rects(cp, W, H, t):
     """Exclusive-coordinate rectangles for one box-drawing character, or None.
 
-    Positions: XC/YC centre a single line; X1,X2/Y1,Y2 are the two lines of a
+    Positions: XC/YC center a single line; X1,X2/Y1,Y2 are the two lines of a
     double. Corners are exact: an outer line meets its perpendicular outer
     line, an inner meets inner, so double frames keep their inner gap.
 
@@ -142,7 +142,7 @@ def synthesize(cp, W, H):
 
     if ch in "░▒▓":
         # The dither is scaled with the cell -- a 1-pixel checker at twice
-        # VGA's cell size reads as flat grey, not as the chunky shade the
+        # VGA's cell size reads as flat gray, not as the chunky shade the
         # era's scrollbars were made of.
         s2 = max(1, W // 8)
         keep = {"░": lambda x, y: x % 2 == 0 and y % 2 == 0,
@@ -270,27 +270,27 @@ def render(ch, font, cell_w, cell_h, baseline):
 
 def main():
     args = sys.argv[1:]
-    grey = False
+    gray = False
     cell_h = 16
 
     if args and args[0] == "--gray":
-        grey, cell_h, args = True, int(args[1]), args[2:]
+        gray, cell_h, args = True, int(args[1]), args[2:]
 
     size     = int(cell_h * 0.80)
     baseline = int(cell_h * 0.78)
     font     = ImageFont.truetype(FONT, size)
 
     seen, out = set(), []
-    if grey:
+    if gray:
         out.append("# gray8 %d" % cell_h)
-        colour = ImageFont.truetype(EMOJI, 160)
+        color = ImageFont.truetype(EMOJI, 160)
 
-        for ch in COLOURED:
+        for ch in COLORED:
             cp = ord(ch)
             seen.add(cp)
 
             img = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
-            ImageDraw.Draw(img).text((0, 0), ch, font=colour, embedded_color=True)
+            ImageDraw.Draw(img).text((0, 0), ch, font=color, embedded_color=True)
 
             box = img.getbbox() or (0, 0, 160, 160)
             px  = img.crop(box).resize((cell_h, cell_h), Image.LANCZOS).load()
@@ -311,7 +311,7 @@ def main():
         px = (synth if synth is not None
               else render(ch, font, cell_w, cell_h, baseline)).load()
 
-        if grey:
+        if gray:
             body = "".join("%02X" % px[x, y]
                            for y in range(cell_h) for x in range(cell_w))
         else:
@@ -329,6 +329,6 @@ def main():
     with open(args[0], "w") as f:
         f.write("\n".join(out) + "\n")
 
-    print("%d glyphs -> %s" % (len(out) - (1 if grey else 0), args[0]))
+    print("%d glyphs -> %s" % (len(out) - (1 if gray else 0), args[0]))
 
 main()
