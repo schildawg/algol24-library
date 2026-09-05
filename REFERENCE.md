@@ -32,17 +32,21 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Black` … `White`](#colors) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
+| [`DelLine` `InsLine`](#delline) | procedures | `graph` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`Exp`](#exp) | function | `math` |
 | [`FillEllipse`](#fillellipse) | procedure, alias | `graph` |
 | [`FillPoly`](#fillpoly) | procedure, alias | `graph` |
+| [`FillSettings` `LineSettings`](#fillsettings) | classes | `graph` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`FloodFill`](#floodfill) | procedure, alias | `graph` |
 | [`Frac`](#frac) | function | `math` |
 | [`GetArcCoords`](#getarccoords) | function, alias | `graph` |
 | [`GetAspectRatio`](#getaspectratio) | function | `graph` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
+| [`GetFillPattern`](#getfillpattern) | function, alias | `graph` |
+| [`GetFillSettings` `GetLineSettings`](#getfillsettings) | functions, aliases | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
 | [`GetPixel`](#getpixel) | function, alias | `graph` |
@@ -87,11 +91,13 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`Sector`](#sector) | procedure, alias | `graph` |
+| [`SetBkColor` `GetBkColor`](#setbkcolor) | procedures, aliases | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
 | [`SetFillStyle`](#setfillstyle) | procedures, aliases | `graph` |
 | [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
+| [`SetTextJustify`](#settextjustify) | procedure, alias | `graph` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
 | [`Show`](#show) | procedure, alias | `graph` |
 | [`Sin`](#sin) | function | `math` |
@@ -100,6 +106,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`TextBackground`](#textbackground) | procedure | `graph` |
 | [`TextColor`](#textcolor) | procedure | `graph` |
 | [`TextCols`](#textcols) | function | `graph` |
+| [`LeftText` … `TopText`](#textjustify) | constants | `graph` |
 | [`TextMode`](#textmode) | procedure | `graph` |
 | [`TextRows`](#textrows) | function | `graph` |
 | [`TextWidth` `TextHeight`](#textwidth) | functions | `graph` |
@@ -186,7 +193,7 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the forty-nine surface methods has a
+is Turbo Pascal's — so each of the fifty-eight surface methods has a
 free-function twin. Each is a one-line delegate adding no behavior whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
@@ -1245,6 +1252,117 @@ for var Deg := 0; Deg <= 180; Deg := Deg + 90 do
 
 ---
 
+## DelLine
+
+*procedures* — unit `graph`
+
+**Function**
+
+Deletes the cursor's row, or inserts a blank one.
+
+**Declaration**
+
+```algol24
+procedure DelLine ();            // the screen
+procedure DelLine (W : Window);  // that window
+
+procedure InsLine ();            // the screen
+procedure InsLine (W : Window);  // that window
+```
+
+**Remarks**
+
+The window forms are [aliases](#aliases) of `W.DelLine` and `W.InsLine`. The
+bare forms are the **base console layer** — the root grid at Order 0 — and
+touch nothing else in the stack.
+
+`DelLine` removes the row the cursor is on; every row below it moves **up**
+one, and the last row is left blank. `InsLine` opens a blank row at the
+cursor; every row below moves **down** one.
+
+⚠️ **They act within the surface's own walls**, from the cursor's row to that
+surface's last — a window's rows, never the screen's. Graphics are untouched,
+on the same rule as [`ClrEol`](#clreol).
+
+⚠️ **The cursor does not move**, in column or row. That is what makes
+`DelLine` twice delete two rows rather than the same one twice, and what lets
+`InsLine` and `DelLine` undo each other.
+
+The blank row takes the current [`TextBackground`](#textbackground) — the one
+in force when the verb runs, not the one the rest of the surface was cleared
+to, so changing the background between a clear and a `DelLine` shows.
+
+⚠️ **What `InsLine` pushes off the bottom is gone.** Nothing scrolls into
+being kept, here or in Turbo Pascal: a window holds its rows and no more. So
+the two are inverses only while nothing falls off the end.
+
+Raises `CloseGraph has closed this surface.` on a window whose graph has gone,
+and `Graph is not open.` for the bare forms without a window.
+
+**See also**
+
+[`Clear`](#clear), [`ClrEol`](#clreol), [`ClrScr`](#clrscr),
+[`TextBackground`](#textbackground), [`Window`](#window)
+
+**Example**
+
+```algol24
+uses graph;
+
+// A Window holds pixels, not characters, so telling a blank row from a
+// written one means asking whether any of its pixels carry ink.
+function Written (W : Window, Row : Integer) : Boolean;
+begin
+    for var Y := (Row - 1) * CellHeight (); Y < Row * CellHeight (); Y := Y + 1 do
+        for var X := 0; X < W.PxW; X := X + 1 do
+            if W.Buf.GetInt ((Y * W.PxW + X) * 4) <> Blue - 16777216 then
+                Exit True;
+
+    Exit False;
+end
+
+InitGraph (640, 480, 'lines', False);
+
+var W := Window (1, 1, 20, 4, 1);
+
+TextBackground (W, Blue);
+ClrScr (W);
+Write (W, 'alpha');
+GotoXY (W, 1, 2);
+Write (W, 'beta');
+GotoXY (W, 1, 3);
+Write (W, 'gamma');
+
+System.WriteLn ('written: ', Written (W, 1), ' ', Written (W, 2), ' ',
+                Written (W, 3), ' ', Written (W, 4));
+
+// Delete the first row: the rest come up, and the last goes blank.
+GotoXY (W, 1, 1);
+DelLine (W);
+
+System.WriteLn ('deleted: ', Written (W, 1), ' ', Written (W, 2), ' ',
+                Written (W, 3), ' ', Written (W, 4));
+
+// Insert one back: the rest go down again. The cursor never moved, which is
+// what lets the two undo each other.
+InsLine (W);
+
+System.WriteLn ('inserted:', Written (W, 1), ' ', Written (W, 2), ' ',
+                Written (W, 3), ' ', Written (W, 4));
+System.WriteLn ('cursor at ', WhereX (W), ', ', WhereY (W));
+
+CloseGraph ();
+```
+
+```console
+written: true true true false
+deleted: true true false false
+inserted:false true true false
+cursor at 1, 1
+```
+
+---
+
 ## DrawPoly
 
 *procedure, alias of `ViewPort.DrawPoly`* — unit `graph`
@@ -1625,6 +1743,66 @@ CloseGraph ();
 true
 true
 ```
+
+---
+
+## FillSettings
+
+*classes* — unit `graph`
+
+**Function**
+
+The fill and line state a viewport is holding, answered whole.
+
+**Declaration**
+
+```algol24
+constructor FillSettings (Style : Integer, Color : Integer);
+
+Style : Integer         one of the FillStyles
+Color : Integer         the ink figures are filled in
+
+constructor LineSettings (Style : Integer, Pattern : Integer,
+                          Thickness : Integer);
+
+Style : Integer         one of the LineStyles
+Pattern : Integer       the sixteen bits walked along a line
+Thickness : Integer     the width in pixels
+```
+
+**Remarks**
+
+Turbo Pascal's `FillSettingsType` and `LineSettingsType`, answered by
+[`GetFillSettings`](#getfillsettings) and `GetLineSettings` rather than
+written into a `var` record — the same reasoning as
+[`ArcCoords`](#arccoords).
+
+⚠️ **The field names are this library's, not Turbo Pascal's.**
+`FillSettings.Style` is Turbo Pascal's `Pattern` field, renamed so it matches
+[`SetFillStyle`](#setfillstyle)`(Style, Color)`; calling it `Pattern` here
+would invite a reader to expect the eight rows that
+[`GetFillPattern`](#getfillpattern) answers. `LineSettings.Style` is Turbo
+Pascal's `LineStyle`, on the same reasoning. **Every field is named for the
+argument that sets it**, so a saved state goes back through the setter without
+translation:
+
+```algol24
+SetLineStyle (V, Line.Style, Line.Pattern, Line.Thickness);
+```
+
+They are snapshots. A later `SetFillStyle` makes a new one rather than
+changing an existing one, so a value held on to still describes the state it
+came from.
+
+**See also**
+
+[`ArcCoords`](#arccoords), [`GetFillSettings`](#getfillsettings),
+[`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle),
+[`ViewPort`](#viewport)
+
+**Example**
+
+See [`GetFillSettings`](#getfillsettings).
 
 ---
 
@@ -2061,6 +2239,179 @@ has gone.
 **Example**
 
 See [`SetColor`](#setcolor), which sets it and reads it back.
+
+---
+
+## GetFillPattern
+
+*function, alias of `ViewPort.GetFillPattern`* — unit `graph`
+
+**Function**
+
+The eight rows of the fill pattern in force.
+
+**Declaration**
+
+```algol24
+function GetFillPattern (V : ViewPort) : List;
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `GetFillPattern (V)` is
+`V.GetFillPattern ()`.
+
+Eight Integers, each the eight bits of one row with the high bit leftmost —
+**the same shape [`SetFillPattern`](#setfillstyle) takes**, so what comes out
+of one viewport goes straight into another:
+
+```algol24
+SetFillPattern (W, GetFillPattern (V), LightCyan);
+```
+
+⚠️ **It answers the bits actually in force, whichever style set them.** Turbo
+Pascal's `GetFillPattern` answered the last pattern given to
+`SetFillPattern` and nothing else, so asking it after a built-in style told
+you about a pattern that was no longer painting anything. Here
+`InterleaveFill` answers its own checker.
+
+⚠️ **The list is a copy.** Changing it changes nothing on the viewport, so
+what is answered cannot be used to alter what a surface paints without asking.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`FillStyles`](#fillstyles), [`GetFillSettings`](#getfillsettings),
+[`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'pattern', False);
+
+var V := ViewPort (50, 50, 100, 100, 1);
+
+// A built-in style answers the bits it stands for, not merely its number.
+SetFillStyle (V, InterleaveFill, Yellow);
+
+for var Row in GetFillPattern (V) do
+    System.Write (Row, ' ');
+
+System.WriteLn ('');
+
+// The same eight rows go straight back in, here into another surface.
+var W := ViewPort (200, 50, 100, 100, 1);
+
+SetFillPattern (W, GetFillPattern (V), LightCyan);
+
+System.WriteLn ('W is UserFill: ', GetFillStyle (W) = UserFill);
+System.WriteLn ('bits carried:  ', GetFillPattern (W)[0] = 170);
+
+CloseGraph ();
+```
+
+```console
+170 85 170 85 170 85 170 85 
+W is UserFill: true
+bits carried:  true
+```
+
+---
+
+## GetFillSettings
+
+*functions, aliases of `ViewPort.GetFillSettings` and `GetLineSettings`* — unit `graph`
+
+**Function**
+
+Reads back the fill or line state a viewport is holding.
+
+**Declaration**
+
+```algol24
+function GetFillSettings (V : ViewPort) : FillSettings;
+function GetLineSettings (V : ViewPort) : LineSettings;
+```
+
+**Remarks**
+
+[Aliases](#aliases) of the methods, answering a
+[`FillSettings`](#fillsettings) or a `LineSettings`.
+
+What they are for is **saving a state and putting it back** — before a routine
+that will change the pen, so it can be handed over unchanged afterward. Every
+field is named for the argument that sets it, so a restore is one call and no
+translation:
+
+```algol24
+var Line := GetLineSettings (V);
+// ... something that changes the pen ...
+SetLineStyle (V, Line.Style, Line.Pattern, Line.Thickness);
+```
+
+[`GetFillStyle`](#setfillstyle) and `GetFillColor` answer the two halves of
+the fill separately and are shorter when only one is wanted.
+`GetLineSettings` has no such pair: **it is the only way to read the line
+state back**, there being no `GetLineStyle`.
+
+⚠️ **`Pattern` is the bits actually walked, not the argument given.** A
+built-in style answers what it stands for — `SolidLn` answers `65535`,
+`DashedLn` answers `61680` — where a caller usually passes `0` beside it.
+Turbo Pascal answered the argument, which said nothing at all for four of its
+five styles. Feeding what is answered back into
+[`SetLineStyle`](#setlinestyle) restores the same line either way, since the
+style is restored alongside it.
+
+Both are snapshots, not views onto the surface.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`FillSettings`](#fillsettings), [`GetFillPattern`](#getfillpattern),
+[`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'settings', False);
+
+var V := ViewPort (50, 50, 200, 100, 1);
+
+SetFillStyle (V, XHatchFill, LightGreen);
+SetLineStyle (V, DashedLn, 0, 5);
+
+// Save both states before something that will change them.
+var Fill := GetFillSettings (V);
+var Line := GetLineSettings (V);
+
+System.WriteLn ('fill style ', Fill.Style, ' color ', Fill.Color);
+System.WriteLn ('line style ', Line.Style, ' pattern ', Line.Pattern,
+                ' thickness ', Line.Thickness);
+
+SetFillStyle (V, SolidFill, Red);
+SetLineStyle (V, DottedLn, 0, 1);
+
+// And put them back, the fields being the setters' own arguments.
+SetFillStyle (V, Fill.Style, Fill.Color);
+SetLineStyle (V, Line.Style, Line.Pattern, Line.Thickness);
+
+System.WriteLn ('restored   ', GetFillStyle (V) = XHatchFill, ' ',
+                GetLineSettings (V).Thickness = 5);
+
+CloseGraph ();
+```
+
+```console
+fill style 8 color 5635925
+line style 3 pattern 61680 thickness 5
+restored   true true
+```
 
 ---
 
@@ -4364,6 +4715,92 @@ false
 
 ---
 
+## SetBkColor
+
+*procedures, aliases of `ViewPort.SetBkColor` and `GetBkColor`* — unit `graph`
+
+**Function**
+
+Sets the color [`Clear`](#clear) returns a viewport to.
+
+**Declaration**
+
+```algol24
+procedure SetBkColor (V : ViewPort, Color : Integer);
+function  GetBkColor (V : ViewPort) : Integer;
+```
+
+**Remarks**
+
+[Aliases](#aliases) of the methods: `SetBkColor (V, …)` is
+`V.SetBkColor (…)`.
+
+⚠️ **[`Transparent`](#colors) by default**, which is what a fresh viewport
+already is and what lets whatever lies beneath show through when it is
+cleared. Give it a color and [`Clear`](#clear) paints that instead. This is a
+viewport's answer to a window's [`TextBackground`](#textbackground), which has
+always governed what `ClrScr` fills.
+
+Turbo Pascal's `SetBkColor` set the whole screen's background — there was one
+screen and no stack to see through. It is per surface here for the same reason
+everything else is.
+
+⚠️ **Nothing else consults it.** In particular `EmptyFill` still paints
+nothing at all rather than painting this: leaving pixels alone is what *empty*
+has to mean on a stack of surfaces, and painting them would hide what is
+under them. See [`FillStyles`](#fillstyles).
+
+It is a third pen, independent of [`SetColor`](#setcolor)'s and
+[`SetFillStyle`](#setfillstyle)'s; setting one never disturbs another.
+
+Raises `SetBkColor wants a color or Transparent.` below `Transparent`, and
+`CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`Clear`](#clear), [`ClearViewPort`](#clearviewport), [`Colors`](#colors),
+[`SetFillStyle`](#setfillstyle), [`TextBackground`](#textbackground)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'bk', False);
+
+var Under := ViewPort (50, 50, 200, 100, 1);
+var Over  := ViewPort (50, 50, 200, 100, 2);
+
+SetFillStyle (Under, SolidFill, Red);
+Bar (Under, 1, 1, 200, 100);
+
+// Transparent by default, so clearing the upper viewport lets the lower one
+// show through it again.
+SetFillStyle (Over, SolidFill, Yellow);
+Bar (Over, 1, 1, 200, 100);
+ClearViewPort (Over);
+
+System.WriteLn ('transparent: ', GetPixel (Over, 20, 20) = Transparent);
+
+// Given a background, clearing paints that instead.
+SetBkColor (Over, Blue);
+Bar (Over, 1, 1, 200, 100);
+ClearViewPort (Over);
+
+System.WriteLn ('blue:        ', GetPixel (Over, 20, 20) = Blue);
+System.WriteLn ('reported:    ', GetBkColor (Over) = Blue);
+
+CloseGraph ();
+```
+
+```console
+transparent: true
+blue:        true
+reported:    true
+```
+
+---
+
 ## SetBlinkRate
 
 *procedure* — unit `graph`
@@ -4536,7 +4973,9 @@ color.`
 
 **See also**
 
-[`Colors`](#colors), [`FillStyles`](#fillstyles), [`SetColor`](#setcolor), [`SetLineStyle`](#setlinestyle)
+[`Colors`](#colors), [`FillStyles`](#fillstyles),
+[`GetFillPattern`](#getfillpattern), [`GetFillSettings`](#getfillsettings),
+[`SetColor`](#setcolor), [`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -4664,6 +5103,103 @@ WriteLn (RandomInteger (1000));
 380
 504
 380
+```
+
+---
+
+## SetTextJustify
+
+*procedure, alias of `ViewPort.SetTextJustify`* — unit `graph`
+
+**Function**
+
+Sets where free text sits relative to the point it is placed at.
+
+**Declaration**
+
+```algol24
+procedure SetTextJustify (V : ViewPort, Horiz : Integer, Vert : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `SetTextJustify (V, …)` is
+`V.SetTextJustify (…)`.
+
+`Horiz` is [`LeftText`, `CenterText` or `RightText`](#textjustify) and says
+which end of the text meets the point; `Vert` is `TopText`, `CenterText` or
+`BottomText` and says which edge of the line does. A fresh viewport is
+`LeftText, TopText` — Turbo Pascal's default, and the top-left corner
+[`OutTextXY`](#outtextxy) has always placed.
+
+This is what [`TextWidth`](#textwidth) and `TextHeight` are for, applied by the
+unit instead of by the caller. Centering a label becomes one call and one
+placement rather than a measurement and a subtraction:
+
+```algol24
+SetTextJustify (V, CenterText, CenterText);
+OutTextXY (V, 150, 50, 'centered');
+```
+
+⚠️ **Justification is measured along the text's own run and across it**, not
+along the screen's axes. Under [`SetTextStyle`](#settextstyle) a turned string
+justifies about its own start, middle and end — so `RightText` on text running
+downward puts the *end* of the run at the point. Upright, which is the
+ordinary case, the two readings are the same.
+
+It governs [`OutText`](#outtext) as well, which is Turbo Pascal's rule.
+Chaining `OutText` calls only reads sensibly under `LeftText`, the advance
+being the width of what was drawn either way.
+
+Raises `SetTextJustify wants a known justification.`, and `CloseGraph has
+closed this surface.` once the window has gone.
+
+**See also**
+
+[`OutText`](#outtext), [`OutTextXY`](#outtextxy),
+[`SetTextStyle`](#settextstyle), [`TextJustify`](#textjustify),
+[`TextWidth`](#textwidth)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'justify', False);
+
+var V := ViewPort (50, 50, 300, 100, 1);
+
+SetColor (V, White);
+
+// Centered about the middle of the viewport both ways, in one call. This is
+// what TextWidth and TextHeight are for, applied by the unit rather than by
+// the caller.
+SetTextJustify (V, CenterText, CenterText);
+OutTextXY (V, 150, 50, 'centered');
+Show (V);
+
+var Left := 9999;
+var Right := 0;
+
+for var Y := 1; Y <= 100; Y := Y + 1 do
+    for var X := 1; X <= 300; X := X + 1 do
+        if GetPixel (V, X, Y) <> Transparent then
+        begin
+            if X < Left then Left := X;
+            if X > Right then Right := X;
+        end
+
+System.WriteLn ('the label is ', TextWidth (V, 'centered'), ' wide');
+System.WriteLn ('its ink runs ', Left, ' to ', Right);
+System.WriteLn ('straddling   ', (Left + Right) div 2);
+
+CloseGraph ();
+```
+
+```console
+the label is 128 wide
+its ink runs 88 to 211
+straddling   149
 ```
 
 ---
@@ -5061,6 +5597,45 @@ CloseGraph ();
 
 ---
 
+## TextJustify
+
+*constants* — unit `graph`
+
+**Function**
+
+The justifications [`SetTextJustify`](#settextjustify) takes.
+
+**Declaration**
+
+```algol24
+const LeftText   := 0;      const BottomText := 0;
+const CenterText := 1;      const TopText    := 2;
+const RightText  := 2;
+```
+
+**Remarks**
+
+Turbo Pascal's five names and its five values, `CenterText` serving both axes.
+
+⚠️ **`BottomText` and `LeftText` are both zero**, as they were there, so
+passing one where the other belongs is not caught — `SetTextJustify` sees the
+number, not which name was written. It is worth reading the second argument
+twice.
+
+The horizontal three say which end of the text meets the point; the vertical
+three say which edge of the line does. `LeftText, TopText` is what a fresh
+viewport holds.
+
+**See also**
+
+[`SetTextJustify`](#settextjustify), [`SetTextStyle`](#settextstyle)
+
+**Example**
+
+See [`SetTextJustify`](#settextjustify).
+
+---
+
 ## TextMode
 
 *procedure* — unit `graph`
@@ -5369,6 +5944,12 @@ procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
 function  GetPixel (PX : Integer, PY : Integer) : Integer;
 procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
 function  GetArcCoords () : ArcCoords;
+function  GetFillPattern () : List;
+function  GetFillSettings () : FillSettings;
+function  GetLineSettings () : LineSettings;
+procedure SetBkColor (Color : Integer);
+function  GetBkColor () : Integer;
+procedure SetTextJustify (Horiz : Integer, Vert : Integer);
 function  TextWidth (Text : String) : Integer;
 function  TextHeight (Text : String) : Integer;
 procedure Clear ();
@@ -5396,6 +5977,7 @@ Order : Integer         under the root grid when negative, over it when positive
 Alpha : Integer         0 invisible .. 255 opaque
 W, H : Integer          the size, fixed at creation
 Dir, Size : Integer     the text turn and magnification -- see SetTextStyle
+HJust, VJust : Integer  the justification -- see SetTextJustify
 ```
 
 **Remarks**
@@ -5454,7 +6036,10 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`GetArcCoords`](#getarccoords),
 [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
 [`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto),
-[`ClearViewPort`](#clearviewport), [`TextWidth`](#textwidth).
+[`ClearViewPort`](#clearviewport), [`TextWidth`](#textwidth),
+[`SetBkColor`](#setbkcolor), [`SetTextJustify`](#settextjustify),
+[`GetFillPattern`](#getfillpattern), [`GetFillSettings`](#getfillsettings),
+`GetLineSettings`.
 
 [`Clear`](#clear) is the method `ClearViewPort (V)` reaches.
 
@@ -5583,6 +6168,8 @@ procedure Write (Text : String);
 procedure WriteLn (Text : String);
 procedure ClrEol ();
 procedure Clear ();
+procedure DelLine ();
+procedure InsLine ();
 
 // readable, and Order and Alpha settable
 X1, Y1, X2, Y2 : Integer    the corner cells, inclusive
@@ -5639,7 +6226,8 @@ own: [`Write`](#write), `WriteLn`, [`GotoXY`](#gotoxy), [`WhereX`](#wherex),
 [`WhereY`](#wherey), [`TextColor`](#textcolor),
 [`TextBackground`](#textbackground), [`HighVideo`](#highvideo),
 [`LowVideo`](#lowvideo), [`NormVideo`](#normvideo), [`ClrEol`](#clreol),
-[`ClrScr`](#clrscr), [`MoveTo`](#moveto).
+[`ClrScr`](#clrscr), [`MoveTo`](#moveto), [`DelLine`](#delline),
+`InsLine`.
 
 [`Clear`](#clear) is the method `ClrScr (W)` reaches.
 

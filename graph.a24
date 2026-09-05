@@ -152,6 +152,16 @@ procedure Flood (X : Integer, Y : Integer, Border : Integer,
 procedure ScrollTarget (DY : Integer, Fill : Integer);
     external 'alg_scroll_up' in 'libgraphffi.dylib';
 
+/// Moves a band of the stamp target within itself, filling what it vacates.
+///
+/// Private to this unit, and the general form `ScrollTarget` is a case of.
+/// Rows are one-based and inclusive; a positive DY moves the band's contents
+/// up and fills at its foot, a negative one moves them down and fills at its
+/// head.
+procedure ScrollBand (Top : Integer, Bottom : Integer, DY : Integer,
+                      Fill : Integer);
+    external 'alg_scroll_band' in 'libgraphffi.dylib';
+
 /// Decodes hex text in groups of Group digits, one four-byte word per group,
 /// into Out. Answers how many words were written.
 ///
@@ -213,6 +223,17 @@ const InterleaveFill := 9;
 const WideDotFill    := 10;
 const CloseDotFill   := 11;
 const UserFill       := 12;
+
+/// Where free text sits relative to the point it is placed at.
+///
+/// Turbo Pascal's five names and its five values, `CenterText` serving both
+/// axes. Note that `BottomText` and `LeftText` are both zero, as they were
+/// there, so passing one where the other belongs is not caught.
+const LeftText   := 0;
+const CenterText := 1;
+const RightText  := 2;
+const BottomText := 0;
+const TopText    := 2;
 
 /// The line styles `SetLineStyle` takes, and the two thicknesses.
 ///
@@ -1398,6 +1419,47 @@ begin
     end
 end
 
+/// The pattern and color a surface fills figures with.
+///
+/// Turbo Pascal's `FillSettingsType`, answered by `GetFillSettings`. Its
+/// first field is named `Style` rather than Turbo Pascal's `Pattern`, so that
+/// it matches `SetFillStyle (Style, Color)` -- the same word for the same
+/// thing throughout this library matters more than the same word Turbo
+/// Pascal used, and `Pattern` here would invite a reader to expect the bits
+/// that `GetFillPattern` answers.
+class FillSettings;
+var
+    Style : Integer;
+    Color : Integer;
+
+begin
+    constructor Init (Style : Integer, Color : Integer);
+    begin
+        this.Style := Style;
+        this.Color := Color;
+    end
+end
+
+/// The style, bit pattern and thickness a surface draws lines with.
+///
+/// Turbo Pascal's `LineSettingsType`, answered by `GetLineSettings`, with its
+/// three fields named for `SetLineStyle`'s three parameters rather than for
+/// Turbo Pascal's record, which called the first one `LineStyle`.
+class LineSettings;
+var
+    Style     : Integer;
+    Pattern   : Integer;
+    Thickness : Integer;
+
+begin
+    constructor Init (Style : Integer, Pattern : Integer, Thickness : Integer);
+    begin
+        this.Style     := Style;
+        this.Pattern   := Pattern;
+        this.Thickness := Thickness;
+    end
+end
+
 class Window;
 var
     X1     : Integer;
@@ -1647,12 +1709,8 @@ begin
             Exit;
         end
 
-        var Fill := 0;
-
-        if Back >= 0 then Fill := Back - 16777216;
-
         StampTarget (Buf.Address, PxW, PxH);
-        ScrollTarget (FontHeight, Fill);
+        ScrollTarget (FontHeight, ClearFill ());
         StampTarget (BBuf.Address, PxW, PxH);
         ScrollTarget (FontHeight, 0);
     end
@@ -1790,6 +1848,79 @@ begin
         Present ();
     end
 
+
+    /// The pixel value this window's cells are cleared to.
+    ///
+    /// Private to this unit. A window whose background is Transparent clears
+    /// to a fully transparent zero rather than to any color, which is what
+    /// lets whatever is beneath it show through.
+    function ClearFill () : Integer;
+    begin
+        if Back >= 0 then Exit Back - 16777216;
+
+        Exit 0;
+    end
+
+    /// Deletes the cursor's row; the rows below move up and the last blanks.
+    ///
+    /// Turbo Pascal's `DelLine`, and it acts on this window alone: the rows
+    /// from the cursor's down to this window's last, never the screen's. The
+    /// vacated last row takes the current `TextBackground`.
+    ///
+    /// The cursor does not move, in column or row. Deleting the row it sits
+    /// on leaves it sitting on whatever came up to replace it, which is what
+    /// makes `DelLine` twice delete two rows.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `DelLine Pulls The Rows Below It Up`
+    procedure DelLine ();
+    begin
+        Check ();
+
+        var Top    := (CurRow - 1) * FontHeight + 1;
+        var Bottom := Rows * FontHeight;
+
+        StampTarget (Buf.Address, PxW, PxH);
+        ScrollBand (Top, Bottom, FontHeight, ClearFill ());
+        StampTarget (BBuf.Address, PxW, PxH);
+        ScrollBand (Top, Bottom, FontHeight, 0);
+
+        Present ();
+    end
+
+    /// Inserts a blank row at the cursor; the rows below move down, last lost.
+    ///
+    /// Turbo Pascal's `InsLine`, and the exact inverse of `DelLine` but for
+    /// one thing: what falls off the bottom is gone. Nothing scrolls into
+    /// being kept, here or in Turbo Pascal -- a window holds its rows and no
+    /// more.
+    ///
+    /// The new row takes the current `TextBackground`, and the cursor does
+    /// not move, so what it sits on afterward is the blank row.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `InsLine Pushes The Rows Below It Down`
+    procedure InsLine ();
+    begin
+        Check ();
+
+        var Top    := (CurRow - 1) * FontHeight + 1;
+        var Bottom := Rows * FontHeight;
+
+        StampTarget (Buf.Address, PxW, PxH);
+        ScrollBand (Top, Bottom, 0 - FontHeight, ClearFill ());
+        StampTarget (BBuf.Address, PxW, PxH);
+        ScrollBand (Top, Bottom, 0 - FontHeight, 0);
+
+        Present ();
+    end
+
     /// Clears all this window's cells to its background and homes its cursor.
     ///
     /// The clearing verb both kinds of surface answer to. What a surface is
@@ -1891,6 +2022,9 @@ var
     Filling : Integer;
     FillInk : Integer;
     FillPat : Any;
+    BkColor : Integer;
+    HJust  : Integer;
+    VJust  : Integer;
     ArcX   : Integer;
     ArcY   : Integer;
     ArcXS  : Integer;
@@ -1935,6 +2069,9 @@ begin
         Filling := SolidFill;
         FillInk := 16777215;      // White, as the pen is
         HasArc  := False;
+        BkColor := Transparent;
+        HJust   := LeftText;
+        VJust   := TopText;
         FillPat := [255, 255, 255, 255, 255, 255, 255, 255];
         FillBuf := Buffer (32);
 
@@ -2158,7 +2295,7 @@ begin
         Check ();
 
         StampTarget (Buf.Address, W, H);
-        ClearTarget (0);
+        ClearTarget (ClearFill ());
 
         PenX := 1;
         PenY := 1;
@@ -2227,6 +2364,178 @@ begin
         if Dir = 90 or Dir = 270 then Exit GlyphRun (Text) * Size;
 
         Exit FontHeight * Size;
+    end
+
+
+    /// Sets the color `Clear` returns this viewport to.
+    ///
+    /// Transparent by default, which is what a fresh viewport already is and
+    /// what lets whatever lies beneath show through when it is cleared. Give
+    /// it a color and `Clear` paints that instead, which is a viewport's
+    /// answer to a window's `TextBackground`.
+    ///
+    /// Turbo Pascal's `SetBkColor` set the whole screen's background, there
+    /// being one screen and no stack to see through. It is per surface here
+    /// for the same reason everything else is.
+    ///
+    /// Nothing else consults it. `EmptyFill` still paints nothing at all
+    /// rather than painting this, because leaving pixels alone is what empty
+    /// means on a stack of surfaces and painting them would hide what is
+    /// under them.
+    ///
+    /// # Raises
+    /// `SetBkColor wants a color or Transparent.` below Transparent, and
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `SetBkColor Gives Clear A Color To Clear To`
+    procedure SetBkColor (Color : Integer);
+    begin
+        Check ();
+
+        if Color < Transparent then
+            raise 'SetBkColor wants a color or Transparent.';
+
+        BkColor := Color;
+    end
+
+    /// The color `Clear` returns this viewport to.
+    function GetBkColor () : Integer;
+    begin
+        Check ();
+
+        Exit BkColor;
+    end
+
+    /// The pixel value this viewport is cleared to.
+    ///
+    /// Private to this unit, and the viewport's twin of a window's
+    /// `ClearFill`: a background of Transparent is a fully transparent zero
+    /// rather than any color.
+    function ClearFill () : Integer;
+    begin
+        if BkColor >= 0 then Exit BkColor - 16777216;
+
+        Exit 0;
+    end
+
+    /// Sets where free text sits relative to the point it is placed at.
+    ///
+    /// Horiz is `LeftText`, `CenterText` or `RightText` and says which end of
+    /// the text meets the point; Vert is `TopText`, `CenterText` or
+    /// `BottomText` and says which edge of the line does. A fresh viewport is
+    /// `LeftText, TopText`, which is Turbo Pascal's default and the top-left
+    /// corner `OutTextXY` has always placed.
+    ///
+    /// It is what `TextWidth` and `TextHeight` are for, applied by the unit
+    /// rather than by the caller -- centering a label becomes
+    /// `SetTextJustify (CenterText, CenterText)` and one `OutTextXY` at the
+    /// middle of the box.
+    ///
+    /// Justification is measured along the text's own run and across it, so
+    /// under `SetTextStyle` a turned string justifies about its own start,
+    /// middle and end rather than about the screen's left and right. Upright,
+    /// which is the ordinary case, the two readings are the same.
+    ///
+    /// It governs `OutText` as well, which is Turbo Pascal's rule. Chaining
+    /// `OutText` calls only reads sensibly under `LeftText`, the advance
+    /// being the width of what was drawn either way.
+    ///
+    /// # Raises
+    /// `SetTextJustify wants a known justification.`, and `CloseGraph has
+    /// closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `SetTextJustify Centers Text About The Point It Is Given`
+    procedure SetTextJustify (Horiz : Integer, Vert : Integer);
+    begin
+        Check ();
+
+        if Horiz < LeftText or Horiz > RightText then
+            raise 'SetTextJustify wants a known justification.';
+
+        if Vert < BottomText or Vert > TopText then
+            raise 'SetTextJustify wants a known justification.';
+
+        HJust := Horiz;
+        VJust := Vert;
+    end
+
+
+    /// The eight rows of the fill pattern in force.
+    ///
+    /// Eight Integers, each the eight bits of one row with the high bit
+    /// leftmost -- the same shape `SetFillPattern` takes, so what comes out
+    /// of one viewport goes straight into another.
+    ///
+    /// Turbo Pascal's `GetFillPattern` answered the last pattern given to
+    /// `SetFillPattern` and nothing else, so asking it after a built-in style
+    /// told you about a pattern that was no longer painting anything. This
+    /// answers the bits actually in force, whichever style set them, which is
+    /// the question worth being able to ask.
+    ///
+    /// The list is this viewport's own bits copied out, so changing it
+    /// changes nothing here.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetFillPattern Answers The Bits Actually In Force`
+    function GetFillPattern () : List;
+    begin
+        Check ();
+
+        var Rows := [];
+
+        for var K := 0; K < 8; K := K + 1 do
+            Rows.Add (FillPat[K]);
+
+        Exit Rows;
+    end
+
+    /// The pattern and color this viewport fills with, together.
+    ///
+    /// Turbo Pascal's `GetFillSettings`, answering a `FillSettings` rather
+    /// than filling a `var` record. `GetFillStyle` and `GetFillColor` answer
+    /// the two halves separately and are the shorter thing to write when only
+    /// one is wanted; this is for saving a state and putting it back.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `The Settings Verbs Save A State That Can Be Put Back`
+    function GetFillSettings () : FillSettings;
+    begin
+        Check ();
+
+        Exit FillSettings (Filling, FillInk);
+    end
+
+    /// The style, bit pattern and thickness this viewport draws lines with.
+    ///
+    /// Turbo Pascal's `GetLineSettings`, answering a `LineSettings` rather
+    /// than filling a `var` record, and the only way to read the pen's line
+    /// state back -- there is no `GetLineStyle` to pair with `SetLineStyle`,
+    /// this being it.
+    ///
+    /// Pattern is the sixteen bits actually walked along a line, not merely
+    /// the argument `SetLineStyle` was given: a built-in style answers the
+    /// bits it stands for, so `SolidLn` answers 65535 rather than the zero a
+    /// caller usually passes beside it. Turbo Pascal answered the argument,
+    /// which said nothing at all for four of its five styles.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `The Settings Verbs Save A State That Can Be Put Back`
+    function GetLineSettings () : LineSettings;
+    begin
+        Check ();
+
+        Exit LineSettings (Style, Bits, Thick);
     end
 
     /// Sets the color the pen draws and free text is written in.
@@ -3194,8 +3503,49 @@ begin
         StampTarget (Buf.Address, W, H);
         StampStyle (Size, Dir);
 
+        // A glyph's cell is anchored at its top-left whatever the turn, and
+        // the run steps away from there -- so justifying is a matter of
+        // moving the anchor BACK along the run, and back across it, before a
+        // single glyph is drawn.
+        var Run  := GlyphRun (Text) * Size;
+        var Line := FontHeight * Size;
+
+        var BackRun := 0;
+
+        if HJust = CenterText then BackRun := Run div 2;
+        else if HJust = RightText then BackRun := Run;
+
+        var BackAcross := 0;
+
+        if VJust = CenterText then BackAcross := Line div 2;
+        else if VJust = BottomText then BackAcross := Line;
+
         var AtX := PX - 1;
         var AtY := PY - 1;
+
+        // The run goes right, up, left or down; the cell always grows down
+        // for a horizontal run and right for a vertical one, which is what
+        // the two offsets are subtracted from.
+        if Dir = 0 then
+        begin
+            AtX := AtX - BackRun;
+            AtY := AtY - BackAcross;
+        end
+        else if Dir = 90 then
+        begin
+            AtY := AtY + BackRun;
+            AtX := AtX - BackAcross;
+        end
+        else if Dir = 180 then
+        begin
+            AtX := AtX + BackRun;
+            AtY := AtY - BackAcross;
+        end
+        else
+        begin
+            AtY := AtY - BackRun;
+            AtX := AtX - BackAcross;
+        end
 
         for var I := 0; I < Length (Text); I := I + 1 do
         begin
@@ -3611,6 +3961,43 @@ begin
     Root.ClrEol ();
 end
 
+/// Deletes the cursor's row of the screen; the rows below move up.
+///
+/// The base console layer -- the root grid at Order 0 -- and nothing else in
+/// the stack. `DelLine (W)` acts on that window instead, within its own
+/// walls. Graphics are untouched, on the same rule as `ClrEol`.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `DelLine And InsLine Work The Base Console Layer`
+procedure DelLine ();
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureRoot ();
+    Root.DelLine ();
+end
+
+/// Inserts a blank row at the cursor's row of the screen; the rows below move
+/// down and the last is lost.
+///
+/// The base console layer, as `DelLine` is.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `DelLine And InsLine Work The Base Console Layer`
+procedure InsLine ();
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureRoot ();
+    Root.InsLine ();
+end
+
 /// Clears the whole screen grid and homes its cursor.
 ///
 /// # Raises
@@ -3711,6 +4098,18 @@ begin
     W.ClrEol ();
 end
 
+/// Deletes a window's cursor row, pulling the rows below up. See `Window`.
+procedure DelLine (W : Window);
+begin
+    W.DelLine ();
+end
+
+/// Inserts a blank row at a window's cursor row. See `Window`.
+procedure InsLine (W : Window);
+begin
+    W.InsLine ();
+end
+
 /// Clears a window and homes its cursor. See `Window`.
 procedure ClrScr (W : Window);
 begin
@@ -3745,6 +4144,42 @@ end
 function TextHeight (V : ViewPort, Text : String) : Integer;
 begin
     Exit V.TextHeight (Text);
+end
+
+/// Sets the color a viewport's Clear returns it to. See `SetBkColor`.
+procedure SetBkColor (V : ViewPort, Color : Integer);
+begin
+    V.SetBkColor (Color);
+end
+
+/// The color a viewport's Clear returns it to. See `SetBkColor`.
+function GetBkColor (V : ViewPort) : Integer;
+begin
+    Exit V.GetBkColor ();
+end
+
+/// Sets where a viewport's free text sits. See `SetTextJustify`.
+procedure SetTextJustify (V : ViewPort, Horiz : Integer, Vert : Integer);
+begin
+    V.SetTextJustify (Horiz, Vert);
+end
+
+/// The eight rows of a viewport's fill pattern. See `GetFillPattern`.
+function GetFillPattern (V : ViewPort) : List;
+begin
+    Exit V.GetFillPattern ();
+end
+
+/// A viewport's fill pattern and color together. See `GetFillSettings`.
+function GetFillSettings (V : ViewPort) : FillSettings;
+begin
+    Exit V.GetFillSettings ();
+end
+
+/// A viewport's line style, pattern and thickness. See `GetLineSettings`.
+function GetLineSettings (V : ViewPort) : LineSettings;
+begin
+    Exit V.GetLineSettings ();
 end
 
 /// The color of a pixel of a viewport. See `ViewPort`.
@@ -8880,4 +9315,852 @@ begin
 
     try GetAspectRatio (); except on e : String do Message := e; end
     AssertEqual ('Graph is not open.', Message);
+end
+
+/// How many pixels of a window's row are painted with ink.
+///
+/// Private to the tests below, which need to say which rows carry text and
+/// which are blank without a text model to read back -- a Window holds
+/// pixels, not characters.
+function InkOnRow (W : Window, Row : Integer) : Integer;
+begin
+    var Count := 0;
+    var Blank := 0;
+
+    if W.Back >= 0 then Blank := W.Back - 16777216;
+
+    for var Y := (Row - 1) * CellHeight (); Y < Row * CellHeight (); Y := Y + 1 do
+        for var X := 0; X < W.PxW; X := X + 1 do
+            if W.Buf.GetInt ((Y * W.PxW + X) * 4) <> Blank then
+                Count := Count + 1;
+
+    Exit Count;
+end
+
+test 'DelLine Pulls The Rows Below It Up';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'delline', False);
+
+    var W := Window (1, 1, 20, 4, 1);
+
+    W.TextBackground (Blue);
+    W.Clear ();
+    W.WriteLn ('one');
+    W.WriteLn ('two');
+    W.WriteLn ('three');
+
+    var One   := InkOnRow (W, 1);
+    var Two   := InkOnRow (W, 2);
+    var Three := InkOnRow (W, 3);
+
+    AssertTrue (One > 0);
+    AssertEqual (0, InkOnRow (W, 4));
+
+    W.GotoXY (1, 1);
+    W.DelLine ();
+
+    // Row 1 is gone and everything below has come up one; the last row is
+    // blank, in the window's own background.
+    AssertEqual (Two, InkOnRow (W, 1));
+    AssertEqual (Three, InkOnRow (W, 2));
+    AssertEqual (0, InkOnRow (W, 3));
+    AssertEqual (0, InkOnRow (W, 4));
+
+    // The cursor has not moved, which is what makes a second DelLine delete
+    // a second row rather than the same one.
+    AssertEqual (1, W.WhereX ());
+    AssertEqual (1, W.WhereY ());
+
+    W.DelLine ();
+
+    AssertEqual (Three, InkOnRow (W, 1));
+    AssertEqual (0, InkOnRow (W, 2));
+
+    CloseGraph ();
+end
+
+test 'DelLine Leaves The Rows Above The Cursor Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'delabove', False);
+
+    var W := Window (1, 1, 20, 4, 1);
+
+    W.TextBackground (Blue);
+    W.Clear ();
+    W.WriteLn ('one');
+    W.WriteLn ('two');
+    W.WriteLn ('three');
+
+    var One   := InkOnRow (W, 1);
+    var Three := InkOnRow (W, 3);
+
+    W.GotoXY (1, 2);
+    W.DelLine ();
+
+    // Only the band from the cursor down moves.
+    AssertEqual (One, InkOnRow (W, 1));
+    AssertEqual (Three, InkOnRow (W, 2));
+    AssertEqual (0, InkOnRow (W, 3));
+
+    CloseGraph ();
+end
+
+test 'InsLine Pushes The Rows Below It Down';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'insline', False);
+
+    var W := Window (1, 1, 20, 4, 1);
+
+    W.TextBackground (Blue);
+    W.Clear ();
+    W.WriteLn ('one');
+    W.WriteLn ('two');
+
+    var One := InkOnRow (W, 1);
+    var Two := InkOnRow (W, 2);
+
+    W.GotoXY (1, 1);
+    W.InsLine ();
+
+    // A blank row at the cursor, and everything that was there pushed down.
+    AssertEqual (0, InkOnRow (W, 1));
+    AssertEqual (One, InkOnRow (W, 2));
+    AssertEqual (Two, InkOnRow (W, 3));
+
+    AssertEqual (1, W.WhereX ());
+    AssertEqual (1, W.WhereY ());
+
+    CloseGraph ();
+end
+
+test 'What InsLine Pushes Off The Bottom Is Gone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'inslost', False);
+
+    var W := Window (1, 1, 20, 2, 1);
+
+    W.TextBackground (Blue);
+    W.Clear ();
+    W.Write ('one');
+    W.GotoXY (1, 2);
+    W.Write ('two');
+
+    var Two := InkOnRow (W, 2);
+
+    AssertTrue (Two > 0);
+
+    W.GotoXY (1, 1);
+    W.InsLine ();
+
+    // A window holds its rows and no more: nothing scrolls into being kept,
+    // here or in Turbo Pascal.
+    AssertEqual (0, InkOnRow (W, 1));
+    AssertTrue (InkOnRow (W, 2) > 0);
+
+    W.InsLine ();
+
+    AssertEqual (0, InkOnRow (W, 1));
+    AssertEqual (0, InkOnRow (W, 2));
+
+    CloseGraph ();
+end
+
+test 'InsLine Then DelLine Puts A Window Back';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'insdel', False);
+
+    var W := Window (1, 1, 20, 4, 1);
+
+    W.TextBackground (Blue);
+    W.Clear ();
+    W.WriteLn ('one');
+    W.WriteLn ('two');
+
+    var Before := [InkOnRow (W, 1), InkOnRow (W, 2), InkOnRow (W, 3),
+                   InkOnRow (W, 4)];
+
+    W.GotoXY (1, 2);
+    W.InsLine ();
+    W.DelLine ();
+
+    // Inverses, so long as nothing was pushed off the end.
+    AssertEqual (Before[0], InkOnRow (W, 1));
+    AssertEqual (Before[1], InkOnRow (W, 2));
+    AssertEqual (Before[2], InkOnRow (W, 3));
+    AssertEqual (Before[3], InkOnRow (W, 4));
+
+    CloseGraph ();
+end
+
+test 'The Vacated Row Takes The Background In Force';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'delback', False);
+
+    var W := Window (1, 1, 10, 3, 1);
+
+    W.TextBackground (Red);
+    W.Clear ();
+    W.Write ('x');
+
+    W.GotoXY (1, 1);
+    W.TextBackground (Green);
+    W.DelLine ();
+
+    // The row that came in is Green, the rows that merely moved are still
+    // the Red they were cleared to.
+    AssertEqual (Green - 16777216,
+                 W.Buf.GetInt ((2 * CellHeight () * W.PxW) * 4));
+    AssertEqual (Red - 16777216, W.Buf.GetInt (0));
+
+    CloseGraph ();
+end
+
+test 'DelLine And InsLine Work The Base Console Layer';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'delroot', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+    GotoXY (1, 1);
+    Write ('first');
+    GotoXY (1, 2);
+    Write ('second');
+
+    var First  := InkOnRow (Root, 1);
+    var Second := InkOnRow (Root, 2);
+
+    AssertTrue (First > 0);
+
+    GotoXY (1, 1);
+    DelLine ();
+
+    AssertEqual (Second, InkOnRow (Root, 1));
+    AssertEqual (1, WhereX ());
+    AssertEqual (1, WhereY ());
+
+    InsLine ();
+
+    AssertEqual (0, InkOnRow (Root, 1));
+    AssertEqual (Second, InkOnRow (Root, 2));
+
+    CloseGraph ();
+end
+
+test 'DelLine On A Window Leaves The Screen And Other Surfaces Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'delown', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+    GotoXY (1, 1);
+    Write ('screen text');
+
+    var Screen := InkOnRow (Root, 1);
+
+    var W := Window (1, 1, 20, 3, 1);
+
+    W.Write ('window text');
+
+    var V := ViewPort (1, 1, 40, 20, 2);
+
+    V.SetFillStyle (SolidFill, Yellow);
+    V.Bar (1, 1, 40, 20);
+
+    W.GotoXY (1, 1);
+    W.DelLine ();
+
+    AssertEqual (Screen, InkOnRow (Root, 1));
+    AssertEqual (Yellow, V.GetPixel (5, 5));
+
+    CloseGraph ();
+end
+
+test 'DelLine And InsLine Refuse A Closed Surface And A Shut Window';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'deldead', False);
+
+    var W := Window (1, 1, 10, 3, 1);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try W.DelLine (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try W.InsLine (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try DelLine (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try InsLine (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'The DelLine And InsLine Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'delalias', False);
+
+    var W := Window (1, 1, 20, 4, 1);
+
+    TextBackground (W, Blue);
+    ClrScr (W);
+    GotoXY (W, 1, 1);
+    Write (W, 'one');
+    GotoXY (W, 1, 2);
+    Write (W, 'two');
+
+    var One := InkOnRow (W, 1);
+
+    GotoXY (W, 1, 1);
+    DelLine (W);
+
+    AssertTrue (InkOnRow (W, 1) > 0);
+    AssertEqual (0, InkOnRow (W, 3));
+
+    InsLine (W);
+
+    AssertEqual (0, InkOnRow (W, 1));
+
+    CloseGraph ();
+end
+
+test 'SetBkColor Gives Clear A Color To Clear To';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bkcolor', False);
+
+    var V := ViewPort (1, 1, 40, 20, 1);
+
+    // Transparent by default, so a fresh viewport clears the way it always
+    // has and what lies beneath keeps showing through.
+    AssertEqual (Transparent, V.GetBkColor ());
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (1, 1, 40, 20);
+    V.Clear ();
+
+    AssertEqual (Transparent, V.GetPixel (5, 5));
+
+    // Given a color, Clear paints it instead.
+    V.SetBkColor (Blue);
+    AssertEqual (Blue, V.GetBkColor ());
+
+    V.Bar (1, 1, 40, 20);
+    V.Clear ();
+
+    AssertEqual (Blue, V.GetPixel (5, 5));
+    AssertEqual (Blue, V.GetPixel (40, 20));
+
+    // And back again, Transparent being a background like any other.
+    V.SetBkColor (Transparent);
+    V.Clear ();
+
+    AssertEqual (Transparent, V.GetPixel (5, 5));
+
+    CloseGraph ();
+end
+
+test 'The Background Color Is Its Own Pen And Refuses Nonsense';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bkpen', False);
+
+    var V := ViewPort (1, 1, 40, 20, 1);
+
+    V.SetColor (Yellow);
+    V.SetFillStyle (SolidFill, Green);
+    V.SetBkColor (Red);
+
+    // Three pens, none of them each other.
+    AssertEqual (Yellow, V.GetColor ());
+    AssertEqual (Green, V.GetFillColor ());
+    AssertEqual (Red, V.GetBkColor ());
+
+    var Message := '';
+
+    try V.SetBkColor (-2); except on e : String do Message := e; end
+    AssertEqual ('SetBkColor wants a color or Transparent.', Message);
+
+    CloseGraph ();
+end
+
+test 'An Empty Fill Still Paints Nothing Rather Than The Background';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bkempty', False);
+
+    var V := ViewPort (1, 1, 40, 20, 1);
+
+    V.SetBkColor (Blue);
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (1, 1, 40, 20);
+
+    // Turbo Pascal's EmptyFill painted the background color. On a stack of
+    // surfaces, leaving the pixels alone is what empty has to mean.
+    V.SetFillStyle (EmptyFill, Red);
+    V.Bar (1, 1, 40, 20);
+
+    AssertEqual (Red, V.GetPixel (5, 5));
+
+    CloseGraph ();
+end
+
+test 'SetTextJustify Centers Text About The Point It Is Given';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justify', False);
+
+    var V := ViewPort (1, 1, 300, 100, 1);
+
+    V.SetColor (White);
+
+    var Text  := 'abc';
+    var Wide  := V.TextWidth (Text);
+    var Tall  := V.TextHeight (Text);
+
+    // Left and top is the default, and is the corner OutTextXY has always
+    // placed -- so the two spellings must agree.
+    AssertEqual (LeftText, V.HJust);
+    AssertEqual (TopText, V.VJust);
+
+    V.OutTextXY (100, 20, Text);
+
+    var Plain := 0;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then Plain := Plain + 1;
+
+    V.Clear ();
+    V.SetTextJustify (LeftText, TopText);
+    V.OutTextXY (100, 20, Text);
+
+    var Same := 0;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then Same := Same + 1;
+
+    AssertEqual (Plain, Same);
+
+    // Centered on the same point, the ink moves back half its own extent.
+    V.Clear ();
+    V.SetTextJustify (CenterText, CenterText);
+    V.OutTextXY (100, 20, Text);
+
+    var MinX := 9999;
+    var MinY := 9999;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+            begin
+                if X < MinX then MinX := X;
+                if Y < MinY then MinY := Y;
+            end
+
+    V.Clear ();
+    V.SetTextJustify (LeftText, TopText);
+    V.OutTextXY (100 - Wide div 2, 20 - Tall div 2, Text);
+
+    var WasX := 9999;
+    var WasY := 9999;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+            begin
+                if X < WasX then WasX := X;
+                if Y < WasY then WasY := Y;
+            end
+
+    AssertEqual (WasX, MinX);
+    AssertEqual (WasY, MinY);
+
+    CloseGraph ();
+end
+
+test 'Right Justified Text Ends Where Left Justified Text Would Start';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justright', False);
+
+    var V := ViewPort (1, 1, 300, 100, 1);
+
+    V.SetColor (White);
+
+    var Text := 'measure';
+    var Wide := V.TextWidth (Text);
+
+    V.SetTextJustify (RightText, TopText);
+    V.OutTextXY (200, 20, Text);
+
+    var Right := 0;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+                if X > Right then Right := X;
+
+    V.Clear ();
+    V.SetTextJustify (LeftText, TopText);
+    V.OutTextXY (200 - Wide, 20, Text);
+
+    var Was := 0;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+                if X > Was then Was := X;
+
+    AssertEqual (Was, Right);
+    AssertTrue (Right <= 200);
+
+    CloseGraph ();
+end
+
+test 'Bottom Justified Text Sits Above The Point';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justbottom', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetTextJustify (LeftText, BottomText);
+    V.OutTextXY (20, 100, 'x');
+
+    var Low := 0;
+
+    for var Y := 1; Y <= 200; Y := Y + 1 do
+        for var X := 1; X <= 200; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+                if Y > Low then Low := Y;
+
+    // The whole line sits above the point it was given.
+    AssertTrue (Low < 100);
+    AssertTrue (Low > 100 - V.TextHeight ('x'));
+
+    CloseGraph ();
+end
+
+test 'Justification Follows A Turn Rather Than The Screen';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justturn', False);
+
+    var V := ViewPort (1, 1, 300, 300, 1);
+
+    V.SetColor (White);
+    V.SetTextStyle (270, 1);
+
+    // Turned to run downward, right justification puts the END of the run at
+    // the point -- so the ink is above it, not to its left.
+    V.SetTextJustify (RightText, TopText);
+    V.OutTextXY (150, 200, 'abc');
+
+    var Low := 0;
+
+    for var Y := 1; Y <= 300; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+                if Y > Low then Low := Y;
+
+    AssertTrue (Low <= 200);
+
+    CloseGraph ();
+end
+
+test 'SetTextJustify Refuses What It Does Not Know';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justraise', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    var Message := '';
+
+    try V.SetTextJustify (3, TopText); except on e : String do Message := e; end
+    AssertEqual ('SetTextJustify wants a known justification.', Message);
+
+    Message := '';
+    try V.SetTextJustify (LeftText, 3); except on e : String do Message := e; end
+    AssertEqual ('SetTextJustify wants a known justification.', Message);
+
+    Message := '';
+    try V.SetTextJustify (0 - 1, TopText); except on e : String do Message := e; end
+    AssertEqual ('SetTextJustify wants a known justification.', Message);
+
+    CloseGraph ();
+end
+
+test 'The Background And Justify Verbs Refuse A Closed Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justdead', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.SetBkColor (Blue); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.GetBkColor (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.SetTextJustify (LeftText, TopText); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'The SetBkColor And SetTextJustify Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'justalias', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    SetBkColor (V, Magenta);
+    AssertEqual (Magenta, GetBkColor (V));
+
+    ClearViewPort (V);
+    AssertEqual (Magenta, GetPixel (V, 10, 10));
+
+    SetTextJustify (V, CenterText, CenterText);
+
+    AssertEqual (CenterText, V.HJust);
+    AssertEqual (CenterText, V.VJust);
+
+    CloseGraph ();
+end
+
+test 'GetFillPattern Answers The Bits Actually In Force';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fillpat', False);
+
+    var V := ViewPort (1, 1, 40, 20, 1);
+
+    // A fresh viewport fills solid, so every row is every bit.
+    var Solid := V.GetFillPattern ();
+
+    AssertEqual (8, Solid.Length);
+    AssertEqual (255, Solid[0]);
+    AssertEqual (255, Solid[7]);
+
+    // A built-in style answers the bits it stands for. Turbo Pascal's
+    // GetFillPattern answered the last user pattern instead, which said
+    // nothing about what was actually painting.
+    V.SetFillStyle (InterleaveFill, Red);
+
+    var Weave := V.GetFillPattern ();
+
+    AssertEqual (170, Weave[0]);
+    AssertEqual (85, Weave[1]);
+
+    // A pattern of one's own comes back as it went in.
+    var Mine := [24, 60, 126, 255, 255, 126, 60, 24];
+
+    V.SetFillPattern (Mine, Yellow);
+
+    var Back := V.GetFillPattern ();
+
+    for var K := 0; K < 8; K := K + 1 do
+        AssertEqual (Mine[K], Back[K]);
+
+    CloseGraph ();
+end
+
+test 'The Answered Fill Pattern Is A Copy';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fillcopy', False);
+
+    var V := ViewPort (1, 1, 40, 20, 1);
+
+    V.SetFillPattern ([255, 0, 255, 0, 255, 0, 255, 0], Red);
+
+    var Rows := V.GetFillPattern ();
+
+    Rows[0] := 7;
+
+    // Scribbling on what was answered must not reach the viewport, or a
+    // reader could change what it paints without asking.
+    AssertEqual (255, V.GetFillPattern ()[0]);
+
+    CloseGraph ();
+end
+
+test 'GetFillPattern Round Trips Into Another Viewport';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fillmove', False);
+
+    var A := ViewPort (1, 1, 40, 20, 1);
+    var B := ViewPort (1, 1, 40, 20, 2);
+
+    A.SetFillStyle (HatchFill, Green);
+
+    // What comes out of one goes straight into another, the shape being the
+    // one SetFillPattern takes.
+    B.SetFillPattern (A.GetFillPattern (), Green);
+
+    A.Bar (1, 1, 40, 20);
+    B.Bar (1, 1, 40, 20);
+
+    for var Y := 1; Y <= 20; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+            AssertEqual (A.GetPixel (X, Y), B.GetPixel (X, Y));
+
+    CloseGraph ();
+end
+
+test 'The Settings Verbs Save A State That Can Be Put Back';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'settings', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    V.SetFillStyle (XHatchFill, LightGreen);
+    V.SetLineStyle (DashedLn, 0, 5);
+
+    var Fill := V.GetFillSettings ();
+    var Line := V.GetLineSettings ();
+
+    AssertEqual (XHatchFill, Fill.Style);
+    AssertEqual (LightGreen, Fill.Color);
+
+    AssertEqual (DashedLn, Line.Style);
+    AssertEqual (5, Line.Thickness);
+
+    // The pattern answered is the bits actually walked, not the argument:
+    // DashedLn stands for 1111000011110000.
+    AssertEqual (61680, Line.Pattern);
+
+    // Change everything, then put the saved state back.
+    V.SetFillStyle (SolidFill, Red);
+    V.SetLineStyle (DottedLn, 0, 1);
+
+    V.SetFillStyle (Fill.Style, Fill.Color);
+    V.SetLineStyle (Line.Style, Line.Pattern, Line.Thickness);
+
+    AssertEqual (XHatchFill, V.GetFillStyle ());
+    AssertEqual (LightGreen, V.GetFillColor ());
+    AssertEqual (DashedLn, V.Style);
+    AssertEqual (5, V.Thick);
+    AssertEqual (61680, V.Bits);
+
+    CloseGraph ();
+end
+
+test 'A Solid Line Answers The Bits It Stands For';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'linebits', False);
+
+    var V := ViewPort (1, 1, 100, 50, 1);
+
+    // A fresh viewport draws solid at width one.
+    var Line := V.GetLineSettings ();
+
+    AssertEqual (SolidLn, Line.Style);
+    AssertEqual (65535, Line.Pattern);
+    AssertEqual (NormWidth, Line.Thickness);
+
+    // A user pattern is kept as given, that being what UserBitLn means.
+    V.SetLineStyle (UserBitLn, 43690, 2);
+
+    Line := V.GetLineSettings ();
+
+    AssertEqual (UserBitLn, Line.Style);
+    AssertEqual (43690, Line.Pattern);
+    AssertEqual (2, Line.Thickness);
+
+    CloseGraph ();
+end
+
+test 'A Settings Value Is A Snapshot And Not A Window On The Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'snapshot', False);
+
+    var V := ViewPort (1, 1, 100, 50, 1);
+
+    V.SetFillStyle (LineFill, Blue);
+
+    var Fill := V.GetFillSettings ();
+
+    V.SetFillStyle (SolidFill, Red);
+
+    AssertEqual (LineFill, Fill.Style);
+    AssertEqual (Blue, Fill.Color);
+    AssertEqual (SolidFill, V.GetFillStyle ());
+
+    CloseGraph ();
+end
+
+test 'The Settings Verbs Refuse A Closed Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'setdead', False);
+
+    var V := ViewPort (1, 1, 100, 50, 1);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.GetFillPattern (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.GetFillSettings (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.GetLineSettings (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'The Settings Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'setalias', False);
+
+    var V := ViewPort (1, 1, 100, 50, 1);
+
+    SetFillStyle (V, WideDotFill, LightCyan);
+    SetLineStyle (V, CenterLn, 0, 3);
+
+    AssertEqual (WideDotFill, GetFillSettings (V).Style);
+    AssertEqual (LightCyan, GetFillSettings (V).Color);
+    AssertEqual (CenterLn, GetLineSettings (V).Style);
+    AssertEqual (3, GetLineSettings (V).Thickness);
+    AssertEqual (128, GetFillPattern (V)[0]);
+
+    // GetBkColor was already here, arriving with SetBkColor.
+    SetBkColor (V, Brown);
+    AssertEqual (Brown, GetBkColor (V));
+
+    CloseGraph ();
 end

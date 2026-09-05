@@ -184,18 +184,80 @@ void alg_stamp_cell (int64_t x, int64_t y, void *glyph,
  * int32 would mangle an opaque color.  Total: a dy past the height clears
  * the whole target; zero or less does nothing.
  */
+/* Move a band of the stamp target up or down within itself, filling what it
+ * vacates.
+ *
+ * The general form of the scroller.  A whole grid scrolling at its bottom is
+ * one band -- all of it, moving up -- and deleting or inserting a line is
+ * another: the rows from the cursor down, moving one row either way.  Both
+ * are a run of pixels, so both live here.
+ *
+ * Rows are one-based and inclusive, as everything on this screen is.  A
+ * positive dy moves the band's contents UP and fills at its foot, which is
+ * what deleting a line does; a negative dy moves them DOWN and fills at its
+ * head, which is what inserting one does.  The copy runs forward for the
+ * first and backward for the second, the regions overlapping either way.
+ *
+ * Total: no target, a band outside the surface, a dy of zero, or a shift at
+ * least as large as the band all do something defined -- nothing, or a band
+ * wholly filled.
+ */
+void alg_scroll_band (int64_t top, int64_t bottom, int64_t dy, int64_t fill)
+{
+    if (target == 0) return;
+
+    if (top < 1) top = 1;
+    if (bottom > target_h) bottom = target_h;
+    if (top > bottom || dy == 0) return;
+
+    int32_t f    = (int32_t) (uint32_t) fill;
+    int64_t rows = bottom - top + 1;
+    int64_t d    = dy < 0 ? -dy : dy;
+
+    if (d >= rows)
+    {
+        /* Everything in the band is shifted clean out of it. */
+        for (int64_t y = top; y <= bottom; y++)
+            for (int64_t x = 0; x < target_w; x++)
+                target[(y - 1) * target_w + x] = f;
+
+        return;
+    }
+
+    if (dy > 0)
+    {
+        for (int64_t y = top; y <= bottom - d; y++)
+            for (int64_t x = 0; x < target_w; x++)
+                target[(y - 1) * target_w + x] =
+                    target[(y - 1 + d) * target_w + x];
+
+        for (int64_t y = bottom - d + 1; y <= bottom; y++)
+            for (int64_t x = 0; x < target_w; x++)
+                target[(y - 1) * target_w + x] = f;
+    }
+    else
+    {
+        for (int64_t y = bottom; y >= top + d; y--)
+            for (int64_t x = 0; x < target_w; x++)
+                target[(y - 1) * target_w + x] =
+                    target[(y - 1 - d) * target_w + x];
+
+        for (int64_t y = top; y < top + d; y++)
+            for (int64_t x = 0; x < target_w; x++)
+                target[(y - 1) * target_w + x] = f;
+    }
+}
+
+/* Scroll the whole target up, which is the band that is all of it.
+ *
+ * Kept as its own name because scrolling a grid at its foot is the common
+ * case and reads better without three arguments that never vary.
+ */
 void alg_scroll_up (int64_t dy, int64_t fill)
 {
     if (target == 0 || dy <= 0) return;
-    if (dy > target_h) dy = target_h;
 
-    int64_t keep = (target_h - dy) * target_w;
-
-    for (int64_t i = 0; i < keep; i++)
-        target[i] = target[i + dy * target_w];
-
-    for (int64_t i = keep; i < target_h * target_w; i++)
-        target[i] = (int32_t) (uint32_t) fill;
+    alg_scroll_band (1, target_h, dy, fill);
 }
 
 /* Fill a rectangle of the stamp target with an eight-by-eight pattern.
