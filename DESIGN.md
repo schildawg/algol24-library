@@ -258,24 +258,57 @@ ignores the theme.
 to, so save-and-restore round-trips. `GetPixel` answers the resolved color,
 because that is what is actually on the surface.
 
-### The one open question
+### The name collision, and the rule that settles it
 
-Under this scheme `SetColor (V, 11141120)` and `SetColor (V, Red)` are
-indistinguishable, so an arbitrary RGB that happens to equal one of the
-sixteen gets rebound too. Sixteen values out of 16.7 million is a small
-surface, and **the remap is inert until a palette is set**, so a program that
-never asks for a theme can never be bitten — but it is magic, and it should be
-ruled on rather than discovered.
+Under this scheme `SetColor (V, 11141120)` and `SetColor (V, Red)` are the
+same call — the constants *are* their RGB values, so at run time the lookup
+sees a number and cannot tell which was written. An arbitrary color that
+happens to equal one of the sixteen is therefore rebound along with the name.
 
-The recommendation is to accept it and state the rule plainly: a color equal
-to one of the sixteen is a *name*, anything else is a literal.
+**The rule, decided: a color equal to one of the sixteen is a name; anything
+else is a literal.** It is stated here so that it is documented behavior
+rather than a surprise, and it must appear in `SetPalette`'s own doc comment.
 
-The alternative considered was tagging the sixteen constants into a reserved
-range, the way `Blink` uses bit 24, so that names and raw RGBs are genuinely
-different spaces. It is rejected because the constants **are** the CGA RGB
-values, which is both useful and true, and because `Yellow + Blink` is
-arithmetic on a color that the library already invites — tagging would break
-the idiom to fix a collision that costs less than the fix.
+Turbo Pascal had no such problem, because there `Blue` was 1 and `Red` was 4 —
+indices, a space of their own. Making the constants the CGA RGB values is
+worth more than the collision costs: it is what lets any RGB be passed
+wherever a color is wanted, with the sixteen as a vocabulary rather than a
+limit.
+
+Three things already hold the blast radius down, and no code is needed for
+any of them:
+
+- **Inert until asked for.** No `SetPalette`, no lookup. A program that never
+  themes cannot be bitten at all.
+- **Unlisted means itself**, so a theme rebinding three names puts only those
+  three at risk. An amber palette that leaves `Black` alone cannot disturb a
+  computed black.
+- **`PutPixel` and `PutImage` bypass the pens entirely**, writing colors
+  directly — so exact-pixel work is unaffected by construction. What remains
+  exposed is a *line or fill* in a computed color, under a theme, that
+  collides with a name that theme rebinds.
+
+The exposure is not uniform, which is worth knowing when choosing what a theme
+rebinds: `Black` (0) and `White` (0xFFFFFF) are the two of the sixteen that
+arithmetic actually produces — the end of a fade, the top of a ramp — where
+the other fourteen are `0xAA`/`0x55`/`0xFF` mixes that rarely arise by
+accident.
+
+Two alternatives were considered and rejected.
+
+**Tagging the sixteen** into a reserved range, the way `Blink` uses bit 24, so
+that names and raw RGBs are genuinely different spaces. Rejected because
+`GetColor` would then answer a tagged value rather than the RGB actually
+drawn, so it would stop agreeing with `GetPixel` on the pixel it had just
+laid; and because `Yellow + Blink` is arithmetic on a color the library
+already invites. It breaks a property that currently holds cleanly, to fix a
+collision that costs less than the fix.
+
+**A bypass verb** — a `SetColorRGB` that skips the lookup — which does solve
+the residual case exactly. Rejected *for now* rather than on principle: it is
+a second way to say a common thing, and a reader would have to know which one
+they want. It can be added the day someone needs it without changing anything
+already written, which is why accepting the rule first costs nothing.
 
 ## Doors left open, deliberately
 
