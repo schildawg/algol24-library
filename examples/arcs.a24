@@ -1,0 +1,108 @@
+// Arc: the convention, drawn so it can be checked by eye. Zero at three
+// o'clock, counterclockwise -- which on a screen means 90 degrees is UP.
+//
+//     algc examples/arcs.a24
+//
+// Esc, or the close button, finishes.
+
+uses graph;
+uses math;
+
+begin
+    InitGraph (1280, 800, 'Arc', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+    TextColor (White);
+    GotoXY (2, 1);
+    Write ('Arc: degrees, zero at three o''clock, counterclockwise.');
+
+    // -- the compass, with each cardinal angle labelled where it lands --
+    var Dial := ViewPort (60, 80, 520, 520, 1);
+
+    SetColor (Dial, DarkGray);
+    Arc (Dial, 260, 260, 0, 360, 200);
+
+    SetColor (Dial, LightGray);
+    for var A in [0, 90, 180, 270] do
+    begin
+        var R := A * Pi / 180.0;
+
+        PenTo (Dial, 260, 260);
+        LineTo (Dial, 260 + Round (200.0 * Cos (R)),
+                      260 - Round (200.0 * Sin (R)));
+    end
+
+    SetColor (Dial, Yellow);
+    OutTextXY (Dial, 470, 250, '0');
+    OutTextXY (Dial, 250, 30,  '90');
+    OutTextXY (Dial, 20,  250, '180');
+    OutTextXY (Dial, 240, 470, '270');
+
+    // Each quadrant its own colour, so the sweep direction is unmistakable.
+    SetLineStyle (Dial, SolidLn, 0, 7);
+
+    SetColor (Dial, LightRed);
+    Arc (Dial, 260, 260, 0, 90, 160);
+    SetColor (Dial, LightGreen);
+    Arc (Dial, 260, 260, 90, 180, 160);
+    SetColor (Dial, LightCyan);
+    Arc (Dial, 260, 260, 180, 270, 160);
+    SetColor (Dial, LightMagenta);
+    Arc (Dial, 260, 260, 270, 360, 160);
+
+    SetLineStyle (Dial, SolidLn, 0, NormWidth);
+    SetColor (Dial, White);
+    OutTextXY (Dial, 150, 240, 'red is 0..90');
+    Show (Dial);
+
+    // -- sweeps, thicknesses and styles --
+    var Fan := ViewPort (620, 80, 600, 520, 1);
+
+    SetColor (Fan, White);
+    OutTextXY (Fan, 10, 10, 'sweeps, thicknesses, styles');
+
+    // A widening set of sweeps from a common start.
+    for var I := 1; I <= 6; I := I + 1 do
+    begin
+        SetColor (Fan, LightGreen);
+        SetLineStyle (Fan, SolidLn, 0, NormWidth);
+        Arc (Fan, 150, 200, 0, I * 60, 20 + I * 18);
+    end
+
+    OutTextXY (Fan, 60, 330, '60 deg to 360');
+
+    // The same arc at three thicknesses.
+    for var I := 0; I < 3; I := I + 1 do
+    begin
+        SetColor (Fan, [LightCyan, Yellow, LightMagenta][I]);
+        SetLineStyle (Fan, SolidLn, 0, [1, 3, 7][I]);
+        Arc (Fan, 420, 200, 100, 260, 70 + I * 40);
+    end
+
+    SetLineStyle (Fan, SolidLn, 0, NormWidth);
+    SetColor (Fan, White);
+    OutTextXY (Fan, 350, 330, 'widths 1, 3, 7');
+
+    // And the line styles, which pattern an arc as they pattern a line.
+    var Y := 390;
+
+    for var St in [[SolidLn, 'Solid'], [DottedLn, 'Dotted'],
+                   [CenterLn, 'Center'], [DashedLn, 'Dashed']] do
+    begin
+        SetColor (Fan, LightGray);
+        SetLineStyle (Fan, SolidLn, 0, NormWidth);
+        OutTextXY (Fan, 10, Y - 12, St[1]);
+
+        SetColor (Fan, Yellow);
+        SetLineStyle (Fan, St[0], 0, NormWidth);
+        Arc (Fan, 300, Y + 60, 20, 160, 130);
+
+        Y := Y + 30;
+    end
+
+    Show (Fan);
+
+    ReadKey ();
+    CloseGraph ();
+end

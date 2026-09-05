@@ -16,6 +16,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` |
+| [`Arc`](#arc) | procedure, alias | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Blink`](#blink) | constant | `graph` |
@@ -198,6 +199,93 @@ and `System.Write` still means the console.
 
 See any alias entry — [`Line`](#line), [`GotoXY`](#gotoxy),
 [`SetColor`](#setcolor) — or `examples/ide.a24`, which uses both spellings.
+
+---
+
+## Arc
+
+*procedure, alias of `ViewPort.Arc`* — unit `graph`
+
+**Function**
+
+Draws a circular arc on a viewport.
+
+**Declaration**
+
+```algol24
+procedure Arc (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+               EndAngle : Integer, Radius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Arc (V, …)` is `V.Arc (…)`.
+
+Angles are **degrees**, zero at three o'clock, counting **counterclockwise** —
+Turbo Pascal's convention, and the one `Arc (V, 100, 100, 0, 90, 50)` reads as:
+a quarter turn upward.
+
+⚠️ **Counterclockwise on a screen means Y gets smaller.** A screen's Y grows
+downward, so the four cardinal angles land like this:
+
+| angle | where | |
+| --- | --- | --- |
+| 0° | three o'clock | `X + R`, `Y` |
+| 90° | twelve o'clock | `X`, **`Y − R`** |
+| 180° | nine o'clock | `X − R`, `Y` |
+| 270° | six o'clock | `X`, `Y + R` |
+
+Getting that sign backwards mirrors every curve in the library, and nothing
+but a picture would catch it — which is why the tests assert all four.
+
+The sweep runs from `StartAngle` to `EndAngle` **the counterclockwise way**, so
+`Arc (V, X, Y, 350, 10, R)` is the twenty degrees across three o'clock rather
+than the three hundred and forty the other way round. Equal angles draw a
+point; `0, 360` is the whole circle.
+
+Drawn in the pen's [color](#setcolor), patterned by the current
+[line style](#setlinestyle), and thickened **along the radius** — the only
+direction that keeps a thick arc the same shape.
+
+⚠️ **The pen is not moved.** An arc is a figure, not a journey, so a following
+[`LineTo`](#lineto) still draws from wherever the pen was.
+
+Raises `Arc needs a radius of zero or more.` and `CloseGraph has closed this
+surface.`
+
+**See also**
+
+[`Line`](#line), [`SetColor`](#setcolor), [`SetLineStyle`](#setlinestyle), [`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'arc', False);
+
+var V := ViewPort (100, 60, 300, 300, 1);
+
+// A full circle, then a quarter of one drawn thick over it.
+SetColor (V, LightGray);
+Arc (V, 150, 150, 0, 360, 100);
+
+SetColor (V, Yellow);
+SetLineStyle (V, SolidLn, 0, ThickWidth);
+Arc (V, 150, 150, 0, 90, 100);
+Show (V);
+
+// Ninety degrees is twelve o'clock: a SMALLER Y than the centre.
+System.WriteLn (V.Buf.GetInt ((49 * 300 + 149) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((149 * 300 + 149) * 4) = 0);
+
+CloseGraph ();
+```
+
+```console
+true
+true
+```
 
 ---
 
@@ -3751,7 +3839,7 @@ and `ViewPort needs a positive size.`
 **See also**
 
 Its methods each have a free-function [alias](#aliases) with an entry of its
-own: [`Line`](#line), [`LineTo`](#lineto), [`LineRel`](#linerel),
+own: [`Arc`](#arc), [`Line`](#line), [`LineTo`](#lineto), [`LineRel`](#linerel),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
 [`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),

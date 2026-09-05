@@ -1909,6 +1909,68 @@ begin
         this.Line (PenX, PenY, PenX + DX, PenY + DY);
     end
 
+
+    /// Draws a circular arc centred on X, Y.
+    ///
+    /// Angles are **degrees**, zero at three o'clock, counting
+    /// counterclockwise -- Turbo Pascal's convention, and the one a reader
+    /// expects from `Arc (100, 100, 0, 90, 50)` meaning a quarter turn
+    /// upward. Because a screen's Y grows downward, counterclockwise is
+    /// reached by *subtracting* the sine: 90 degrees is twelve o'clock, at a
+    /// SMALLER Y than the centre. Getting that sign backwards mirrors every
+    /// curve in the library and nothing but a picture would catch it.
+    ///
+    /// A sweep is measured from StartAngle to EndAngle the counterclockwise
+    /// way, so `Arc (X, Y, 350, 10, R)` is the twenty degrees across three
+    /// o'clock rather than the three hundred and forty the other way round.
+    /// Equal angles draw a point; `0, 360` is the whole circle.
+    ///
+    /// Drawn in the pen's color, patterned by the current line style, and
+    /// thickened across the radius so a thick arc stays an arc. The pen is
+    /// not moved: an arc is a figure, not a journey.
+    ///
+    /// # Raises
+    /// `Arc needs a radius of zero or more.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `An Arc Draws Only Its Own Sweep`
+    procedure Arc (X : Integer, Y : Integer, StartAngle : Integer,
+                   EndAngle : Integer, Radius : Integer);
+    begin
+        Check ();
+
+        if Radius < 0 then raise 'Arc needs a radius of zero or more.';
+
+        var Sweep := EndAngle - StartAngle;
+
+        if Sweep < 0 then Sweep := Sweep + 360;
+
+        // One step to the pixel along the arc, which is the radius times the
+        // sweep in radians -- fewer and the curve breaks into dots.
+        var Steps := Round (Radius * Sweep * Pi / 180.0) + 1;
+        var Half  := Thick div 2;
+
+        for var I := 0; I <= Steps; I := I + 1 do
+        begin
+            var A := (StartAngle + Sweep * I / Steps) * Pi / 180.0;
+
+            var Place := 1;
+
+            for var K := 0; K < 15 - I mod 16; K := K + 1 do
+                Place := Place * 2;
+
+            if Bits div Place mod 2 = 1 then
+                // Thickness spreads along the radius, which is the only
+                // direction that keeps a thick arc the same shape.
+                for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
+                    this.PutPixel (X + Round ((Radius + K) * Cos (A)),
+                                   Y - Round ((Radius + K) * Sin (A)), Pen);
+        end
+
+        Present ();
+    end
+
     /// Draws the outline of a rectangle with opposite corners at the points.
     ///
     /// Four lines in the current style and thickness; the pen ends where it
@@ -2577,6 +2639,13 @@ end
 procedure LineRel (V : ViewPort, DX : Integer, DY : Integer);
 begin
     V.LineRel (DX, DY);
+end
+
+/// Draws a circular arc on a viewport. See `Arc`.
+procedure Arc (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+               EndAngle : Integer, Radius : Integer);
+begin
+    V.Arc (X, Y, StartAngle, EndAngle, Radius);
 end
 
 /// Draws a rectangle's outline on a viewport. See `Line`.
@@ -4815,6 +4884,168 @@ begin
     System.Write ('');
     AssertEqual (1, WhereX ());
     AssertEqual (14, WhereX (W));
+
+    CloseGraph ();
+end
+
+// -------------------------------------------------------------- arc tests --
+
+/// The convention, pinned at the four cardinal points: zero at three
+/// o'clock and counterclockwise, which on a screen whose Y grows downward
+/// puts 90 degrees ABOVE the centre. The sign this asserts is the one that
+/// would mirror every curve in the library if it were wrong.
+test 'An Arc Puts Ninety Degrees At Twelve O''Clock';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arc', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Arc (100, 100, 0, 360, 50);
+
+    // Three o'clock, twelve, nine, six.
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 149) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((49 * 200 + 99) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 49) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((149 * 200 + 99) * 4) <> 0);
+
+    // And nothing in the middle: an arc is a curve, not a disc.
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 99) * 4));
+
+    CloseGraph ();
+end
+
+/// A sweep runs counterclockwise from start to end, and draws only that.
+test 'An Arc Draws Only Its Own Sweep';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'sweep', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Arc (100, 100, 0, 90, 50);          // the upper-right quadrant
+
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 149) * 4) <> 0);    // 0 degrees
+    AssertTrue (V.Buf.GetInt ((49 * 200 + 99) * 4) <> 0);     // 90 degrees
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 49) * 4));      // 180: absent
+    AssertEqual (0, V.Buf.GetInt ((149 * 200 + 99) * 4));     // 270: absent
+
+    CloseGraph ();
+end
+
+/// The sweep is the counterclockwise one, so a start past the end crosses
+/// three o'clock rather than going the long way round.
+test 'An Arc Sweeps The Short Way Across Zero';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'wrap', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Arc (100, 100, 350, 10, 50);        // twenty degrees, not three hundred
+
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 149) * 4) <> 0);    // across zero
+    AssertEqual (0, V.Buf.GetInt ((49 * 200 + 99) * 4));      // 90: absent
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 49) * 4));      // 180: absent
+
+    CloseGraph ();
+end
+
+/// Thickness spreads along the radius, which is the only direction that
+/// keeps a thick arc the same shape.
+test 'A Thick Arc Spreads Along Its Radius';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'thickarc', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetLineStyle (SolidLn, 0, ThickWidth);
+    V.Arc (100, 100, 0, 360, 50);
+
+    // Three pixels deep where the arc crosses three o'clock.
+    var Band := 0;
+
+    for var X := 140; X < 160; X := X + 1 do
+        if V.Buf.GetInt ((99 * 200 + X - 1) * 4) <> 0 then Band := Band + 1;
+
+    AssertEqual (3, Band);
+
+    CloseGraph ();
+end
+
+test 'An Arc Leaves The Pen Where It Was';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcpen', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.PenTo (7, 9);
+    V.Arc (100, 100, 0, 180, 40);
+
+    AssertEqual (7, V.GetX ());
+    AssertEqual (9, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'An Arc Of No Radius Is A Point And A Negative One Raises';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arc0', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Arc (50, 50, 0, 360, 0);
+
+    AssertTrue (V.Buf.GetInt ((49 * 200 + 49) * 4) <> 0);
+
+    var Message := '';
+
+    try V.Arc (50, 50, 0, 90, -1); except on e : String do Message := e; end
+    AssertEqual ('Arc needs a radius of zero or more.', Message);
+
+    CloseGraph ();
+end
+
+/// An arc reaching past the viewport is clipped like everything else.
+test 'An Arc Is Clipped At The Viewport''s Edges';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcclip', False);
+
+    var V := ViewPort (1, 1, 40, 40, 1);
+
+    V.SetColor (White);
+    V.Arc (20, 20, 0, 360, 500);
+
+    var Painted := 0;
+
+    for var I := 0; I < 40 * 40; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Painted := Painted + 1;
+
+    AssertEqual (0, Painted);          // wholly outside: nothing lands
+
+    CloseGraph ();
+end
+
+test 'The Arc Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcalias', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    SetColor (V, White);
+    Arc (V, 100, 100, 0, 90, 50);
+
+    AssertTrue (V.Buf.GetInt ((49 * 200 + 99) * 4) <> 0);
 
     CloseGraph ();
 end
