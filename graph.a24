@@ -2247,6 +2247,113 @@ begin
         Present ();
     end
 
+
+    /// Fills and outlines the polygon through a list of points.
+    ///
+    /// Points is a List of two-number Lists, as `DrawPoly` takes. Unlike
+    /// `DrawPoly` the figure IS closed: the last point joins the first
+    /// whether or not it was repeated, because a filled shape has no open
+    /// reading. Repeating it anyway is harmless -- the closing edge is then
+    /// of no length and crosses nothing.
+    ///
+    /// Filled with the current fill pattern and color, then outlined with the
+    /// pen and the current line style, so a polygon may be laid in one color
+    /// and edged in another.
+    ///
+    /// The fill is by scanline, and by the even-odd rule: a row is crossed by
+    /// the edges, the crossings are sorted, and the spans between the first
+    /// and second, third and fourth, and so on are painted. A self-crossing
+    /// polygon therefore fills in bands, which is what that rule means and
+    /// what Turbo Pascal did.
+    ///
+    /// The geometry is here rather than in C -- which row is crossed where is
+    /// the logic -- and only the spans themselves are handed over, one call
+    /// to the run filler per span.
+    ///
+    /// The pen is not moved.
+    ///
+    /// # Raises
+    /// `FillPoly wants at least three points.` and `FillPoly wants points of
+    /// two numbers.`, and `CloseGraph has closed this surface.` once the
+    /// window has gone.
+    ///
+    /// # Examples
+    /// `FillPoly Closes Its Figure And Fills It`
+    procedure FillPoly (Points : List);
+    begin
+        Check ();
+
+        if Points.Length < 3 then raise 'FillPoly wants at least three points.';
+
+        for var P in Points do
+            if P.Length <> 2 then raise 'FillPoly wants points of two numbers.';
+
+        var WasX := PenX;
+        var WasY := PenY;
+
+        if Filling <> EmptyFill then
+        begin
+            var Lowest  := Points[0][1];
+            var Highest := Lowest;
+
+            for var P in Points do
+            begin
+                if P[1] < Lowest then Lowest := P[1];
+                if P[1] > Highest then Highest := P[1];
+            end
+
+            if Lowest < 1 then Lowest := 1;
+            if Highest > H then Highest := H;
+
+            StampTarget (Buf.Address, W, H);
+
+            for var Y := Lowest; Y <= Highest; Y := Y + 1 do
+            begin
+                var Crossings := [];
+
+                for var I := 0; I < Points.Length; I := I + 1 do
+                begin
+                    var A := Points[I];
+                    var B := Points[(I + 1) mod Points.Length];
+                    var AY := A[1];
+                    var BY := B[1];
+
+                    // Half open -- one end counted, the other not -- so a
+                    // vertex is crossed once rather than twice, which is what
+                    // keeps a shape from leaking at its corners.
+                    if (AY <= Y and BY > Y) or (BY <= Y and AY > Y) then
+                        Crossings.Add (A[0] + (Y - AY) * (B[0] - A[0]) div (BY - AY));
+                end
+
+                Crossings.Sort ();
+
+                var K := 0;
+
+                while K + 1 < Crossings.Length do
+                begin
+                    FillRect (Crossings[K], Y, Crossings[K + 1], Y,
+                              FillBuf.Address, FillInk);
+
+                    K := K + 2;
+                end
+            end
+        end
+
+        // Outlined over the fill, and closed whatever was given.
+        for var I := 0; I < Points.Length; I := I + 1 do
+        begin
+            var A := Points[I];
+            var B := Points[(I + 1) mod Points.Length];
+
+            this.Line (A[0], A[1], B[0], B[1]);
+        end
+
+        PenX := WasX;
+        PenY := WasY;
+
+        Present ();
+    end
+
     /// Fills a bar and draws it in three dimensions.
     ///
     /// The front face is filled with the current fill pattern and outlined
@@ -3284,6 +3391,12 @@ procedure Ellipse (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
                    EndAngle : Integer, XRadius : Integer, YRadius : Integer);
 begin
     V.Ellipse (X, Y, StartAngle, EndAngle, XRadius, YRadius);
+end
+
+/// Fills and outlines a polygon on a viewport. See `FillPoly`.
+procedure FillPoly (V : ViewPort, Points : List);
+begin
+    V.FillPoly (Points);
 end
 
 /// Fills a bar and draws it in three dimensions. See `Bar3D`.
@@ -6889,6 +7002,203 @@ begin
     Sector (V, 100, 100, 0, 90, 80, 30);
 
     AssertEqual (LightCyan - 16777216, V.Buf.GetInt ((94 * 200 + 129) * 4));
+
+    CloseGraph ();
+end
+
+// -------------------------------------------------------- fillpoly tests --
+
+/// A rectangle drawn as a polygon must be the rectangle drawn as one --
+/// which also pins the half-open edge rule, since a scanline fill that
+/// counted vertices twice or dropped a row would differ here.
+test 'A Rectangular FillPoly Is A Bar With A Rectangle';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fpoly', False);
+
+    var P := ViewPort (1, 1, 100, 100, 1);
+    var B := ViewPort (1, 1, 100, 100, 2);
+
+    for var V in [P, B] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (SolidFill, Red);
+    end
+
+    P.FillPoly ([[10, 10], [80, 10], [80, 60], [10, 60]]);
+
+    B.Bar (10, 10, 80, 60);
+    B.Rectangle (10, 10, 80, 60);
+
+    var Diff := 0;
+
+    for var I := 0; I < 100 * 100; I := I + 1 do
+        if P.Buf.GetInt (I * 4) <> B.Buf.GetInt (I * 4) then Diff := Diff + 1;
+
+    AssertEqual (0, Diff);
+
+    CloseGraph ();
+end
+
+/// Unlike DrawPoly the figure closes itself, a filled shape having no open
+/// reading -- and repeating the first point anyway must change nothing.
+test 'FillPoly Closes Its Figure And Fills It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'closes', False);
+
+    var Bare     := ViewPort (1, 1, 100, 100, 1);
+    var Repeated := ViewPort (1, 1, 100, 100, 2);
+
+    for var V in [Bare, Repeated] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (SolidFill, LightGreen);
+    end
+
+    Bare.FillPoly ([[50, 10], [85, 70], [15, 70]]);
+    Repeated.FillPoly ([[50, 10], [85, 70], [15, 70], [50, 10]]);
+
+    var Diff := 0;
+
+    for var I := 0; I < 100 * 100; I := I + 1 do
+        if Bare.Buf.GetInt (I * 4) <> Repeated.Buf.GetInt (I * 4) then
+            Diff := Diff + 1;
+
+    AssertEqual (0, Diff);
+
+    // And the triangle really is filled, and closed along its base.
+    AssertEqual (LightGreen - 16777216, Bare.Buf.GetInt ((49 * 100 + 49) * 4));
+    AssertTrue (Bare.Buf.GetInt ((69 * 100 + 49) * 4) <> 0);
+
+    CloseGraph ();
+end
+
+/// The even-odd rule, which is what a scanline fill means: a five-pointed
+/// star leaves its middle empty, because a row there crosses four edges and
+/// the middle span falls between the second and third.
+test 'A Self Crossing Polygon Fills By The Even Odd Rule';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'star', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Yellow);
+
+    // The classic star, drawn by taking every second point of a pentagon.
+    V.FillPoly ([[100, 20], [124, 160], [12, 72], [188, 72], [76, 160]]);
+
+    // A point on a limb is filled...
+    AssertTrue (V.Buf.GetInt ((59 * 200 + 99) * 4) <> 0);
+
+    // ... and the pentagon at the heart of it is not.
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 99) * 4));
+
+    CloseGraph ();
+end
+
+test 'A FillPoly With An Empty Fill Is Only Its Outline';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'hollowpoly', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (EmptyFill, Red);
+    V.FillPoly ([[50, 10], [85, 70], [15, 70]]);
+
+    AssertEqual (0, V.Buf.GetInt ((49 * 100 + 49) * 4));       // hollow
+    AssertTrue (V.Buf.GetInt ((69 * 100 + 49) * 4) <> 0);      // the base
+
+    CloseGraph ();
+end
+
+test 'A FillPoly Uses Both Pens And Moves Neither';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'polypens', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Blue);
+    V.PenTo (17, 18);
+    V.FillPoly ([[20, 20], [80, 20], [80, 70], [20, 70]]);
+
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((44 * 100 + 49) * 4));
+    AssertEqual (White - 16777216, V.Buf.GetInt ((19 * 100 + 49) * 4));
+
+    AssertEqual (17, V.GetX ());
+    AssertEqual (18, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'A Malformed FillPoly Draws Nothing At All';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'badfpoly', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+    var Message := '';
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, White);
+
+    try V.FillPoly ([[10, 10], [80, 10]]); except on e : String do Message := e; end
+    AssertEqual ('FillPoly wants at least three points.', Message);
+
+    Message := '';
+    try V.FillPoly ([[10, 10], [80, 10], [45]]);
+    except on e : String do Message := e; end
+    AssertEqual ('FillPoly wants points of two numbers.', Message);
+
+    var Lit := 0;
+
+    for var I := 0; I < 100 * 100; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (0, Lit);
+
+    CloseGraph ();
+end
+
+test 'A FillPoly Is Clipped At The Viewport''s Edges';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'polyclip', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, White);
+    V.FillPoly ([[-100, -100], [500, -100], [500, 500], [-100, 500]]);
+
+    var Lit := 0;
+
+    for var I := 0; I < 40 * 30; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (40 * 30, Lit);
+
+    CloseGraph ();
+end
+
+test 'The FillPoly Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fpalias', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    SetColor (V, White);
+    SetFillStyle (V, SolidFill, LightMagenta);
+    FillPoly (V, [[50, 10], [85, 70], [15, 70]]);
+
+    AssertEqual (LightMagenta - 16777216, V.Buf.GetInt ((49 * 100 + 49) * 4));
 
     CloseGraph ();
 end

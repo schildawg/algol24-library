@@ -32,6 +32,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`DrawPoly`](#drawpoly) | procedure, alias of `ViewPort.DrawPoly` | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias of `ViewPort.Ellipse` | `graph` |
 | [`Exp`](#exp) | function | `math` |
+| [`FillPoly`](#fillpoly) | procedure, alias of `ViewPort.FillPoly` | `graph` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`Frac`](#frac) | function | `math` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
@@ -1092,7 +1093,7 @@ numbers.`, and `CloseGraph has closed this surface.`
 
 **See also**
 
-[`Line`](#line), [`Rectangle`](#rectangle), [`SetLineStyle`](#setlinestyle)
+[`FillPoly`](#fillpoly), [`Line`](#line), [`Rectangle`](#rectangle), [`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -1248,6 +1249,96 @@ WriteLn (Exp (1.0));
 ```console
 1.0
 2.718281828459045
+```
+
+---
+
+## FillPoly
+
+*procedure, alias of `ViewPort.FillPoly`* — unit `graph`
+
+**Function**
+
+Fills and outlines the polygon through a list of points.
+
+**Declaration**
+
+```algol24
+procedure FillPoly (V : ViewPort, Points : List);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `FillPoly (V, …)` is `V.FillPoly (…)`.
+
+`Points` is a List of two-number Lists, as [`DrawPoly`](#drawpoly) takes.
+
+⚠️ **Unlike `DrawPoly`, the figure closes itself.** The last point joins the
+first whether or not it was repeated, because a filled shape has no open
+reading. Repeating it anyway is harmless — the closing edge is then of no
+length and crosses nothing — and a test asserts the two spellings paint
+identically.
+
+Filled with the current fill pattern and color, then outlined with the pen and
+the current [line style](#setlinestyle), so a polygon may be laid in one color
+and edged in another. With `EmptyFill` it is outlined and hollow.
+
+⚠️ **The fill is by the even-odd rule**, which is what a scanline fill means
+and what Turbo Pascal did: a row is crossed by the edges, the crossings are
+sorted, and the spans between the first and second, third and fourth, and so
+on are painted. A **self-crossing polygon therefore fills in bands** — the
+classic five-pointed star comes out with a hollow pentagon at its heart, which
+is correct rather than a defect.
+
+A rectangle given as four points is exactly [`Bar`](#bar) with a
+[`Rectangle`](#rectangle) over it, pixel for pixel — which also pins the
+half-open edge rule that keeps a shape from leaking at its corners.
+
+The geometry is in Algol-24 — which row is crossed where is the logic — and
+only the spans are handed to C, one call per span. That is a different split
+from [`Bar`](#bar)'s and [`PieSlice`](#pieslice)'s, where the shape itself
+went over; a polygon's shape is its points, and those are the caller's.
+
+The pen is not moved.
+
+Raises `FillPoly wants at least three points.`, `FillPoly wants points of two
+numbers.`, and `CloseGraph has closed this surface.`
+
+**See also**
+
+[`Bar`](#bar), [`DrawPoly`](#drawpoly), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'fillpoly', False);
+
+var V := ViewPort (60, 40, 400, 400, 1);
+
+// A filled arrow: closed of its own accord, so the first point is not
+// repeated at the end.
+SetColor (V, White);
+SetFillStyle (V, SolidFill, LightCyan);
+FillPoly (V, [[40, 140], [180, 140], [180, 90], [280, 175],
+              [180, 260], [180, 210], [40, 210]]);
+
+// And a star, which the even-odd rule leaves hollow at its heart.
+SetFillStyle (V, HatchFill, Yellow);
+FillPoly (V, [[200, 280], [224, 390], [112, 320], [288, 320], [176, 390]]);
+Show (V);
+
+// The arrow's shaft is filled; the star's middle is not.
+System.WriteLn (V.Buf.GetInt ((174 * 400 + 99) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((339 * 400 + 199) * 4) = 0);
+
+CloseGraph ();
+```
+
+```console
+true
+true
 ```
 
 ---
@@ -4576,7 +4667,7 @@ and `ViewPort needs a positive size.`
 Its methods each have a free-function [alias](#aliases) with an entry of its
 own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`DrawPoly`](#drawpoly),
-[`Ellipse`](#ellipse), [`Line`](#line),
+[`Ellipse`](#ellipse), [`FillPoly`](#fillpoly), [`Line`](#line),
 [`LineTo`](#lineto), [`PieSlice`](#pieslice), [`Sector`](#sector), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
