@@ -19,6 +19,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Arc`](#arc) | procedure, alias of `ViewPort.Arc` | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
+| [`Bar`](#bar) | procedure, alias of `ViewPort.Bar` | `graph` |
 | [`Blink`](#blink) | constant | `graph` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
@@ -399,6 +400,91 @@ end
 
 ```console
 [INFO] Test: A measurement lands where it should .................... [ PASS ]
+```
+
+---
+
+## Bar
+
+*procedure, alias of `ViewPort.Bar`* — unit `graph`
+
+**Function**
+
+Fills a rectangle with the current fill pattern and color.
+
+**Declaration**
+
+```algol24
+procedure Bar (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Bar (V, …)` is `V.Bar (…)`.
+
+The corners may be given either way round.
+
+⚠️ **No outline is drawn.** Turbo Pascal's `Bar` is the fill alone, so a
+bordered bar is a `Bar` and a [`Rectangle`](#rectangle) over it — which is
+also how it gets two different colors, the fill pen and the drawing pen being
+separate. See [`SetFillStyle`](#setfillstyle).
+
+The pattern is tiled from the **surface's** origin rather than the bar's, so
+bars side by side share one weave. `EmptyFill` paints nothing at all, leaving
+what is beneath showing through.
+
+The pen is not moved, a bar being a figure rather than a journey.
+
+⚠️ **This one is drawn by C**, uniquely among the figures so far. A
+300 × 200 bar is sixty thousand pixels and the interpreted loop measured 7.5
+seconds; the same fill through `alg_fill_rect` is free — fifty full-surface
+bars cost what one does. The unit still decides everything that is a
+decision: which rectangle, which way round its corners came, which pattern,
+which color, and whether the fill is empty at all. What went to C is the run.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`FillStyles`](#fillstyles), [`Rectangle`](#rectangle), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'bar', False);
+
+var V := ViewPort (60, 60, 400, 260, 1);
+
+// A chart's bars, each filled and then outlined -- two colours, because the
+// fill pen and the drawing pen are separate.
+var Heights := [180, 120, 210, 90, 150];
+
+SetColor (V, White);
+
+for var I := 0; I < 5; I := I + 1 do
+begin
+    var Left := 30 + I * 70;
+
+    SetFillStyle (V, [SolidFill, HatchFill, XHatchFill,
+                      InterleaveFill, SlashFill][I], LightGreen);
+
+    Bar (V, Left, 240 - Heights[I], Left + 50, 240);
+    Rectangle (V, Left, 240 - Heights[I], Left + 50, 240);
+end
+
+Show (V);
+
+System.WriteLn (GetFillColor (V) = LightGreen);
+System.WriteLn (GetColor (V) = White);
+
+CloseGraph ();
+```
+
+```console
+true
+true
 ```
 
 ---
@@ -4046,7 +4132,7 @@ and `ViewPort needs a positive size.`
 **See also**
 
 Its methods each have a free-function [alias](#aliases) with an entry of its
-own: [`Arc`](#arc), [`Circle`](#circle), [`Line`](#line),
+own: [`Arc`](#arc), [`Bar`](#bar), [`Circle`](#circle), [`Line`](#line),
 [`LineTo`](#lineto), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),

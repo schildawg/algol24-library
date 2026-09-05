@@ -195,3 +195,42 @@ void alg_scroll_up (int64_t dy, int64_t fill)
     for (int64_t i = keep; i < target_h * target_w; i++)
         target[i] = (int32_t) (uint32_t) fill;
 }
+
+/* Fill a rectangle of the stamp target with an eight-by-eight pattern.
+ *
+ * The unit decides everything that is a decision -- which rectangle, which
+ * way round its corners were given, which pattern, which colour, and whether
+ * the fill is empty at all.  What is left is a run of pixels, and a run is
+ * what C is for: the interpreted loop was measured at 7.5 seconds for one
+ * 300 x 200 bar, of which a bare 60,000 buffer writes are 0.5.
+ *
+ * Coordinates are one-based and inclusive, as everything on this screen is,
+ * and the pattern tiles from the SURFACE's origin rather than the
+ * rectangle's -- which is what makes two bars side by side share one weave.
+ *
+ * Total: no target, no pattern, or a rectangle wholly outside writes nothing.
+ */
+void alg_fill_rect (int64_t x1, int64_t y1, int64_t x2, int64_t y2,
+                    void *pattern, int64_t color)
+{
+    const int32_t *rows = (const int32_t *) pattern;
+
+    if (target == 0 || rows == 0) return;
+
+    int32_t ink = (int32_t) (0xFF000000u | (uint32_t) color);
+
+    for (int64_t y = y1; y <= y2; y++)
+    {
+        if (y < 1 || y > target_h) continue;
+
+        uint32_t row  = (uint32_t) rows[(y - 1) % 8];
+        int32_t *line = target + (y - 1) * target_w;
+
+        for (int64_t x = x1; x <= x2; x++)
+        {
+            if (x < 1 || x > target_w) continue;
+
+            if ((row >> (7 - (x - 1) % 8)) & 1) line[x - 1] = ink;
+        }
+    }
+}

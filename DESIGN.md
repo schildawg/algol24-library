@@ -230,8 +230,11 @@ ever needs addressing, in increasing order of what it spends:
   the standing rule guards: line geometry is *logic*, and logic belongs in
   Algol-24 where it is readable and testable. `alg_trunc` is four lines and
   a primitive; a line renderer is neither.
-- **A C blitter for whole runs**, if fills and images ever arrive and the
-  same argument repeats.
+- ~~A C blitter for whole runs~~ — arrived with `Bar`, which is the first
+  figure to fill: 7.5 seconds interpreted for one 300 × 200 rectangle, free
+  through `alg_fill_rect`. The line drawn is the one the rest of the file
+  argues for — the unit decides the rectangle, the corners' order, the
+  pattern, the colour and whether the fill is empty; C receives a run.
 
 ## What was measured on the way here
 

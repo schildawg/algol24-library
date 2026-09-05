@@ -103,6 +103,15 @@ procedure StampCell (X : Integer, Y : Integer, Glyph : Pointer,
 procedure StampStyle (Scale : Integer, Rotation : Integer);
     external 'alg_stamp_style' in 'libgraphffi.dylib';
 
+/// Fills a rectangle of the stamp target with an eight-by-eight pattern.
+///
+/// Private to this unit. The unit decides the rectangle, the pattern and the
+/// colour; what is left is a run of pixels, which is what C is for -- the
+/// interpreted loop was 7.5 seconds for one 300 by 200 bar.
+procedure FillRect (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
+                    Pattern : Pointer, Color : Integer);
+    external 'alg_fill_rect' in 'libgraphffi.dylib';
+
 /// Scrolls the stamp target up by DY pixel rows, filling the vacated band.
 ///
 /// Private to this unit.
@@ -1680,6 +1689,7 @@ var
     Filling : Integer;
     FillInk : Integer;
     FillPat : Any;
+    FillBuf : Any;
     Order  : Integer;
     Alpha  : Integer;
     Serial : Integer;
@@ -1716,6 +1726,10 @@ begin
         Filling := SolidFill;
         FillInk := 16777215;      // White, as the pen is
         FillPat := [255, 255, 255, 255, 255, 255, 255, 255];
+        FillBuf := Buffer (32);
+
+        for var K := 0; K < 8; K := K + 1 do
+            FillBuf.PutInt (K * 4, 255);
         Serial := NextSerial;
         Dead   := False;
 
@@ -2087,6 +2101,8 @@ begin
         Filling := Style;
         FillInk := Color;
         FillPat := FillRowsOf (Style);
+
+        LoadFillPattern ();
     end
 
     /// Sets an eight-by-eight fill pattern of the caller's own.
@@ -2111,6 +2127,18 @@ begin
         Filling := UserFill;
         FillInk := Color;
         FillPat := Rows;
+
+        LoadFillPattern ();
+    end
+
+    /// Copies the fill pattern into the buffer the C fill reads.
+    ///
+    /// Private to this unit; both setters end with it, so the two never
+    /// disagree about what the pattern is.
+    procedure LoadFillPattern ();
+    begin
+        for var K := 0; K < 8; K := K + 1 do
+            FillBuf.PutInt (K * 4, FillPat[K]);
     end
 
     /// The fill pattern in force.
@@ -2146,6 +2174,63 @@ begin
             Place := Place * 2;
 
         Exit Row div Place mod 2 = 1;
+    end
+
+
+    /// Fills a rectangle with the current fill pattern and color.
+    ///
+    /// The corners may be given either way round. No outline is drawn --
+    /// Turbo Pascal's `Bar` is the fill alone, and `Bar3D` is the one that
+    /// borders it -- so a bordered bar is a `Bar` and a `Rectangle` over it,
+    /// which is also how it gets two different colors.
+    ///
+    /// The pattern is tiled from the surface's origin rather than the bar's,
+    /// so bars side by side share one weave. `EmptyFill` paints nothing at
+    /// all, leaving what is beneath showing through.
+    ///
+    /// The pen is not moved, a bar being a figure rather than a journey.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Bar Fills Its Rectangle And Nothing Beyond`
+    procedure Bar (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+    begin
+        Check ();
+
+        if Filling = EmptyFill then Exit;
+
+        var Left  := X1;
+        var Right := X2;
+        var Top    := Y1;
+        var Bottom := Y2;
+
+        if Right < Left then
+        begin
+            Left  := X2;
+            Right := X1;
+        end
+
+        if Bottom < Top then
+        begin
+            Top    := Y2;
+            Bottom := Y1;
+        end
+
+        // Clipped to the surface here rather than pixel by pixel, so the
+        // inner loop can write the buffer directly: a full-screen bar is
+        // hundreds of thousands of pixels, and a method call apiece is the
+        // difference between a blink and a wait.
+        if Left < 1 then Left := 1;
+        if Top < 1 then Top := 1;
+        if Right > W then Right := W;
+        if Bottom > H then Bottom := H;
+
+        StampTarget (Buf.Address, W, H);
+        FillRect (Left, Top, Right, Bottom, FillBuf.Address, FillInk);
+
+        Present ();
     end
 
     /// Draws the outline of a rectangle with opposite corners at the points.
@@ -2816,6 +2901,13 @@ end
 procedure LineRel (V : ViewPort, DX : Integer, DY : Integer);
 begin
     V.LineRel (DX, DY);
+end
+
+/// Fills a rectangle on a viewport. See `Bar`.
+procedure Bar (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
+               Y2 : Integer);
+begin
+    V.Bar (X1, Y1, X2, Y2);
 end
 
 /// Draws a circle on a viewport. See `Circle`.
@@ -5465,6 +5557,193 @@ begin
     SetFillPattern (V, [1, 2, 4, 8, 16, 32, 64, 128], Red);
     AssertEqual (UserFill, GetFillStyle (V));
     AssertEqual (Red, GetFillColor (V));
+
+    CloseGraph ();
+end
+
+// -------------------------------------------------------------- bar tests --
+
+test 'A Bar Fills Its Rectangle And Nothing Beyond';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bar', False);
+
+    var V := ViewPort (1, 1, 60, 40, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (10, 10, 29, 19);          // 20 by 10
+
+    var Lit := 0;
+
+    for var I := 0; I < 60 * 40; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (200, Lit);
+
+    // The corners are painted and the pixel outside each is not.
+    AssertEqual (Red - 16777216, V.Buf.GetInt ((9 * 60 + 9) * 4));
+    AssertEqual (Red - 16777216, V.Buf.GetInt ((18 * 60 + 28) * 4));
+    AssertEqual (0, V.Buf.GetInt ((9 * 60 + 8) * 4));
+    AssertEqual (0, V.Buf.GetInt ((19 * 60 + 29) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Bar Takes Its Corners Either Way Round';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'corners', False);
+
+    var A := ViewPort (1, 1, 60, 40, 1);
+    var B := ViewPort (1, 1, 60, 40, 2);
+
+    A.SetFillStyle (SolidFill, White);
+    A.Bar (10, 10, 29, 19);
+
+    B.SetFillStyle (SolidFill, White);
+    B.Bar (29, 19, 10, 10);
+
+    var Same := True;
+
+    for var I := 0; I < 60 * 40; I := I + 1 do
+        if A.Buf.GetInt (I * 4) <> B.Buf.GetInt (I * 4) then Same := False;
+
+    AssertTrue (Same);
+
+    CloseGraph ();
+end
+
+test 'An Empty Fill Paints Nothing At All';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'empty', False);
+
+    var V := ViewPort (1, 1, 60, 40, 1);
+
+    V.SetFillStyle (EmptyFill, White);
+    V.Bar (1, 1, 60, 40);
+
+    var Lit := 0;
+
+    for var I := 0; I < 60 * 40; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (0, Lit);
+
+    CloseGraph ();
+end
+
+/// A patterned bar paints only where its pattern covers, and the pattern is
+/// the one FillCovers reports -- the two must not drift apart.
+test 'A Patterned Bar Paints Where Its Pattern Covers';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'patbar', False);
+
+    var V := ViewPort (1, 1, 40, 24, 1);
+
+    V.SetFillStyle (InterleaveFill, White);
+    V.Bar (1, 1, 40, 24);
+
+    var Agreed := True;
+
+    for var Y := 1; Y <= 24; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+        begin
+            var Painted := V.Buf.GetInt (((Y - 1) * 40 + X - 1) * 4) <> 0;
+
+            if Painted <> V.FillCovers (X, Y) then Agreed := False;
+        end
+
+    AssertTrue (Agreed);
+
+    // Half of a checker, exactly.
+    AssertEqual (40 * 24 div 2, 480);
+
+    CloseGraph ();
+end
+
+/// The pattern tiles from the SURFACE's origin, so two bars side by side
+/// continue one weave rather than each starting its own.
+test 'Two Bars Side By Side Share One Weave';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'weave', False);
+
+    var Split := ViewPort (1, 1, 40, 16, 1);
+    var Whole := ViewPort (1, 1, 40, 16, 2);
+
+    Split.SetFillStyle (LtSlashFill, White);
+    Split.Bar (1, 1, 13, 16);           // an odd width, so a naive tile shifts
+    Split.Bar (14, 1, 40, 16);
+
+    Whole.SetFillStyle (LtSlashFill, White);
+    Whole.Bar (1, 1, 40, 16);
+
+    var Same := True;
+
+    for var I := 0; I < 40 * 16; I := I + 1 do
+        if Split.Buf.GetInt (I * 4) <> Whole.Buf.GetInt (I * 4) then Same := False;
+
+    AssertTrue (Same);
+
+    CloseGraph ();
+end
+
+test 'A Bar Is Clipped At The Viewport''s Edges';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'barclip', False);
+
+    var V := ViewPort (1, 1, 30, 20, 1);
+
+    V.SetFillStyle (SolidFill, White);
+    V.Bar (-50, -50, 500, 500);
+
+    var Lit := 0;
+
+    for var I := 0; I < 30 * 20; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (30 * 20, Lit);        // the whole surface, and no crash
+
+    CloseGraph ();
+end
+
+test 'A Bar Uses The Fill Pen And Leaves The Drawing Pen Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twopens', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (Red);
+    V.SetFillStyle (SolidFill, LightGreen);
+    V.PenTo (5, 6);
+    V.Bar (10, 10, 19, 19);
+
+    // Filled in the fill colour, not the pen's...
+    AssertEqual (LightGreen - 16777216, V.Buf.GetInt ((12 * 40 + 12) * 4));
+
+    // ... and the pen has neither moved nor changed.
+    AssertEqual (5, V.GetX ());
+    AssertEqual (6, V.GetY ());
+    AssertEqual (Red, V.GetColor ());
+
+    CloseGraph ();
+end
+
+test 'The Bar Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'baralias', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    SetFillStyle (V, SolidFill, Yellow);
+    Bar (V, 5, 5, 14, 14);
+
+    AssertEqual (Yellow - 16777216, V.Buf.GetInt ((9 * 40 + 9) * 4));
 
     CloseGraph ();
 end
