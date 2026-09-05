@@ -71,15 +71,51 @@ static int64_t  target_h     = 0;
  * The grid never sets it, so cells stay 1:1 and upright; a viewport sets it
  * around its own drawing and puts it back.
  */
-static int64_t stamp_scale = 1;
-static int64_t stamp_rot   = 0;
+static int64_t stamp_nx  = 1;      /* magnification as a ratio per axis, */
+static int64_t stamp_dx  = 1;      /* so a half-height glyph is 1 over 2  */
+static int64_t stamp_ny  = 1;
+static int64_t stamp_dy  = 1;
+static int64_t stamp_rot = 0;
+
+static void set_rotation (int64_t rotation)
+{
+    rotation = ((rotation % 360) + 360) % 360;
+    stamp_rot = (rotation / 90) * 90;
+}
 
 void alg_stamp_style (int64_t scale, int64_t rotation)
 {
-    stamp_scale = scale > 0 ? scale : 1;
+    stamp_nx = stamp_ny = scale > 0 ? scale : 1;
+    stamp_dx = stamp_dy = 1;
 
-    rotation = ((rotation % 360) + 360) % 360;
-    stamp_rot = (rotation / 90) * 90;
+    set_rotation (rotation);
+}
+
+/* The general form: a separate ratio for each axis, so text can be stretched
+ * or squeezed rather than only doubled.  A zero or negative term is refused
+ * into 1 rather than dividing by it.
+ */
+void alg_stamp_ratio (int64_t num_x, int64_t den_x, int64_t num_y,
+                      int64_t den_y, int64_t rotation)
+{
+    stamp_nx = num_x > 0 ? num_x : 1;
+    stamp_dx = den_x > 0 ? den_x : 1;
+    stamp_ny = num_y > 0 ? num_y : 1;
+    stamp_dy = den_y > 0 ? den_y : 1;
+
+    set_rotation (rotation);
+}
+
+/* The bitwise exclusive or of two pixel words.
+ *
+ * The language has no bitwise operators at all -- its `and` and `or` are
+ * logical -- so this is a genuine gap rather than a shortcut.  It is the
+ * whole of what XorPut line drawing needs, and being pure it is testable
+ * against known values.
+ */
+int64_t alg_xor (int64_t a, int64_t b)
+{
+    return (int64_t) (int32_t) ((uint32_t) a ^ (uint32_t) b);
 }
 
 void alg_stamp_target (void *pixels, int64_t w, int64_t h)
@@ -120,9 +156,50 @@ void alg_stamp_cell (int64_t x, int64_t y, void *glyph,
 
     if (target == 0 || gw <= 0 || gh <= 0) return;
 
-    for (int64_t r = 0; r < gh; r++)
-        for (int64_t c = 0; c < gw; c++)
+    /* The glyph's extent once turned.  A quarter turn counterclockwise sends
+     * the glyph's top edge to the left edge, which is what a chart's Y-axis
+     * label wants, and swaps its width and height along with it. */
+    int64_t turned = (stamp_rot == 90 || stamp_rot == 270);
+    int64_t rw = turned ? gh : gw;
+    int64_t rh = turned ? gw : gh;
+
+    /* And its extent once scaled.  Walking the DESTINATION and sampling back
+     * is what lets the ratio be a fraction: replicating each source pixel a
+     * whole number of times, as this once did, can only ever magnify. */
+    int64_t dw = rw * stamp_nx / stamp_dx;
+    int64_t dh = rh * stamp_ny / stamp_dy;
+
+    if (dw < 1) dw = 1;      /* squeezed past nothing still marks its place */
+    if (dh < 1) dh = 1;
+
+    for (int64_t oy = 0; oy < dh; oy++)
+    {
+        int64_t ty = y + oy;
+
+        if (ty < 0 || ty >= target_h) continue;
+
+        int64_t ry = oy * stamp_dy / stamp_ny;
+
+        if (ry >= rh) ry = rh - 1;
+
+        for (int64_t ox = 0; ox < dw; ox++)
         {
+            int64_t tx = x + ox;
+
+            if (tx < 0 || tx >= target_w) continue;
+
+            int64_t rx = ox * stamp_dx / stamp_nx;
+
+            if (rx >= rw) rx = rw - 1;
+
+            /* Undo the turn to find which source pixel this one shows. */
+            int64_t r, c;
+
+            if (stamp_rot == 90)       { r = rx;          c = gw - 1 - ry; }
+            else if (stamp_rot == 180) { c = gw - 1 - rx; r = gh - 1 - ry; }
+            else if (stamp_rot == 270) { r = gh - 1 - rx; c = ry;          }
+            else                       { c = rx;          r = ry;          }
+
             int64_t cover = 0;
             int64_t color = ink;
 
@@ -141,41 +218,18 @@ void alg_stamp_cell (int64_t x, int64_t y, void *glyph,
                 }
             }
 
-            /* Where this source pixel lands, before magnification.  A quarter
-             * turn counterclockwise sends the glyph's top edge to the left
-             * edge, which is what a chart's Y-axis label wants. */
-            int64_t dx = c;
-            int64_t dy = r;
+            int32_t *out = target + ty * target_w + tx;
 
-            if (stamp_rot == 90)       { dx = r;          dy = gw - 1 - c; }
-            else if (stamp_rot == 180) { dx = gw - 1 - c; dy = gh - 1 - r; }
-            else if (stamp_rot == 270) { dx = gh - 1 - r; dy = c;          }
-
-            for (int64_t sy = 0; sy < stamp_scale; sy++)
-            {
-                int64_t ty = y + dy * stamp_scale + sy;
-
-                if (ty < 0 || ty >= target_h) continue;
-
-                for (int64_t sx = 0; sx < stamp_scale; sx++)
-                {
-                    int64_t tx = x + dx * stamp_scale + sx;
-
-                    if (tx < 0 || tx >= target_w) continue;
-
-                    int32_t *out = target + ty * target_w + tx;
-
-                    if (bg >= 0)
-                        *out = mixed (bg, color, cover);
-                    else if (cover >= 255)
-                        *out = (int32_t) (0xFF000000u | (uint32_t) color);
-                    else if (cover > 0)
-                        *out = (int32_t) (((uint32_t) cover << 24) | (uint32_t) color);
-                    else
-                        *out = 0;
-                }
-            }
+            if (bg >= 0)
+                *out = mixed (bg, color, cover);
+            else if (cover >= 255)
+                *out = (int32_t) (0xFF000000u | (uint32_t) color);
+            else if (cover > 0)
+                *out = (int32_t) (((uint32_t) cover << 24) | (uint32_t) color);
+            else
+                *out = 0;
         }
+    }
 }
 
 /* Scroll the target up by dy pixel rows, filling the vacated band.
@@ -545,4 +599,95 @@ void alg_clear_target (int64_t value)
     int64_t n = target_w * target_h;
 
     for (int64_t i = 0; i < n; i++) target[i] = v;
+}
+
+/* ------------------------------------------------------------- images -- */
+/*
+ * Copy a rectangle of the stamp target out into a caller's buffer.
+ *
+ * A rectangle of any size is thousands of pixels, which is the same bargain
+ * every other run here strikes.  The unit decides the rectangle and owns the
+ * buffer; this only moves the words.
+ *
+ * Coordinates are one-based and inclusive, as everything on this screen is.
+ * A rectangle reaching past the surface reads transparent zeros there rather
+ * than reading out of bounds, so an image lifted from the edge is defined and
+ * puts back what it took.
+ *
+ * Total: no target, no destination, or a rectangle the wrong way round
+ * writes nothing.
+ */
+void alg_get_image (void *dst, int64_t x1, int64_t y1, int64_t x2, int64_t y2)
+{
+    int32_t *out = (int32_t *) dst;
+
+    if (target == 0 || out == 0 || x2 < x1 || y2 < y1) return;
+
+    int64_t at = 0;
+
+    for (int64_t y = y1; y <= y2; y++)
+        for (int64_t x = x1; x <= x2; x++)
+            if (x < 1 || y < 1 || x > target_w || y > target_h)
+                out[at++] = 0;
+            else
+                out[at++] = target[(y - 1) * target_w + (x - 1)];
+}
+
+/* Draw a caller's buffer onto the stamp target, combining as the mode says.
+ *
+ * The modes are Turbo Pascal's five, plus one its hardware had no need of.
+ * They combine the WHOLE 32-bit pixel, alpha included, which is what makes
+ * XorPut's defining property hold exactly: writing the same image twice
+ * restores what was underneath, because (a ^ b) ^ b is a whatever the bits
+ * mean.  It also makes an opaque sprite show over a transparent surface,
+ * where combining only the colour would leave the alpha at zero and the
+ * sprite invisible.
+ *
+ * NotPut is the exception: it inverts the colour and keeps the source's
+ * alpha, because the inverse of a picture is a picture, not an absence of
+ * one.
+ *
+ * TransparentPut is the one Turbo Pascal lacked, its images being opaque
+ * indices throughout.  It skips wholly transparent source pixels, which is
+ * what a sprite over a background needs and what CopyPut cannot do.
+ *
+ * Pixels falling outside the surface are dropped, the edge being the clip
+ * here as everywhere.
+ *
+ * Total: no target, no source, or a senseless size draws nothing.
+ */
+void alg_put_image (const void *src, int64_t w, int64_t h,
+                    int64_t x, int64_t y, int64_t mode)
+{
+    const int32_t *in = (const int32_t *) src;
+
+    if (target == 0 || in == 0 || w <= 0 || h <= 0) return;
+
+    for (int64_t row = 0; row < h; row++)
+    {
+        int64_t ty = y + row;
+
+        if (ty < 1 || ty > target_h) continue;
+
+        for (int64_t col = 0; col < w; col++)
+        {
+            int64_t tx = x + col;
+
+            if (tx < 1 || tx > target_w) continue;
+
+            int32_t  s  = in[row * w + col];
+            int32_t *d  = &target[(ty - 1) * target_w + (tx - 1)];
+
+            switch (mode)
+            {
+                case 1:  *d = (int32_t) ((uint32_t) *d ^ (uint32_t) s); break;
+                case 2:  *d = (int32_t) ((uint32_t) *d | (uint32_t) s); break;
+                case 3:  *d = (int32_t) ((uint32_t) *d & (uint32_t) s); break;
+                case 4:  *d = (int32_t) (((uint32_t) s & 0xFF000000u)
+                              | (~(uint32_t) s & 0x00FFFFFFu));         break;
+                case 5:  if ((uint32_t) s & 0xFF000000u) *d = s;        break;
+                default: *d = s;                                        break;
+            }
+        }
+    }
 }

@@ -47,13 +47,18 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetFillPattern`](#getfillpattern) | function, alias | `graph` |
 | [`GetFillSettings` `GetLineSettings`](#getfillsettings) | functions, aliases | `graph` |
+| [`GetImage` `PutImage`](#getimage) | function and procedure, aliases | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
 | [`GetPixel`](#getpixel) | function, alias | `graph` |
+| [`GetTextSettings` `GetViewSettings`](#gettextsettings) | functions, aliases | `graph` |
 | [`GetX`](#getx) | function, alias | `graph` |
 | [`GetY`](#gety) | function, alias | `graph` |
 | [`GotoXY`](#gotoxy) | procedure | `graph` |
+| [`GraphDefaults`](#graphdefaults) | procedure, alias | `graph` |
 | [`HighVideo`](#highvideo) | procedure | `graph` |
+| [`Image`](#image) | class | `graph` |
+| [`ImageSize`](#imagesize) | function | `graph` |
 | [`Infinity`](#infinity) | constant | `math` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
@@ -80,6 +85,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`PenTo`](#pento) | procedure, alias | `graph` |
 | [`Pi`](#pi) | constant | `math` |
 | [`PieSlice`](#pieslice) | procedure, alias | `graph` |
+| [`CopyPut` … `TransparentPut`](#putmodes) | constants | `graph` |
 | [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
@@ -91,6 +97,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`Sector`](#sector) | procedure, alias | `graph` |
+| [`SetAspectRatio`](#setaspectratio) | procedure | `graph` |
 | [`SetBkColor` `GetBkColor`](#setbkcolor) | procedures, aliases | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
@@ -99,6 +106,8 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`SetTextJustify`](#settextjustify) | procedure, alias | `graph` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
+| [`SetUserCharSize`](#setusercharsize) | procedure, alias | `graph` |
+| [`SetWriteMode` `GetWriteMode`](#setwritemode) | procedures, aliases | `graph` |
 | [`Show`](#show) | procedure, alias | `graph` |
 | [`Sin`](#sin) | function | `math` |
 | [`Sqr`](#sqr) | function | `math` |
@@ -109,6 +118,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`LeftText` … `TopText`](#textjustify) | constants | `graph` |
 | [`TextMode`](#textmode) | procedure | `graph` |
 | [`TextRows`](#textrows) | function | `graph` |
+| [`TextSettings` `ViewSettings`](#textsettings) | classes | `graph` |
 | [`TextWidth` `TextHeight`](#textwidth) | functions | `graph` |
 | [`Trunc`](#trunc) | function | `math` |
 | [`ViewPort`](#viewport) | class | `graph` |
@@ -193,7 +203,7 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the fifty-eight surface methods has a
+is Turbo Pascal's — so each of the sixty-six surface methods has a
 free-function twin. Each is a one-line delegate adding no behavior whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
@@ -2415,6 +2425,114 @@ restored   true true
 
 ---
 
+## GetImage
+
+*function and procedure, aliases of `ViewPort.GetImage` and `PutImage`* — unit `graph`
+
+**Function**
+
+Lifts a rectangle of pixels off a viewport, and draws one back.
+
+**Declaration**
+
+```algol24
+function  GetImage (V : ViewPort, X1 : Integer, Y1 : Integer,
+                    X2 : Integer, Y2 : Integer) : Image;
+
+procedure PutImage (V : ViewPort, X : Integer, Y : Integer,
+                    Img : Image, Mode : Integer);
+```
+
+**Remarks**
+
+[Aliases](#aliases) of the methods. `GetImage` answers an
+[`Image`](#image); `PutImage` draws one with its top-left corner at `X, Y`.
+
+⚠️ **Neither step Turbo Pascal required is needed.** There the caller sized a
+block with [`ImageSize`](#imagesize), allocated it with `GetMem`, and only
+then called `GetImage`. An `Image` carries its own storage, so this is one
+call. `ImageSize` remains and says what a region will cost.
+
+The corners are **inclusive**, so `GetImage (V, 1, 1, 8, 8)` is sixty-four
+pixels. A rectangle reaching past the edge reads
+[`Transparent`](#colors) there rather than raising, and `PutImage` drops
+pixels that fall outside — the edge is the clip, as it is for
+[`GetPixel`](#getpixel).
+
+`Mode` is one of the [put modes](#putmodes) and says how the image combines
+with what is already on the surface. Two of them do the work:
+
+| | |
+| --- | --- |
+| `CopyPut` | replaces the rectangle, the image's transparency included |
+| `TransparentPut` | lays only what the image painted, leaving the rest showing |
+
+⚠️ **`CopyPut` restores exactly what was taken**, which is what makes
+save-scribble-restore work. `TransparentPut` is the sprite one, and is the
+mode Turbo Pascal had no equivalent of.
+
+`XorPut` written twice puts the surface back — `(a xor b) xor b` is `a`
+whatever the bits mean — which is the classic way to move a figure over a
+background without saving the background at all.
+
+The pen is not moved, an image being a figure rather than a journey.
+
+Raises `GetImage wants X2 >= X1 and Y2 >= Y1.`, `PutImage wants a known
+mode.`, and `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`GetPixel`](#getpixel), [`Image`](#image), [`ImageSize`](#imagesize),
+[`PutModes`](#putmodes)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'images', False);
+
+var V := ViewPort (50, 50, 300, 200, 1);
+
+// A figure drawn on the bare surface, so what surrounds it is unpainted.
+SetFillStyle (V, SolidFill, Red);
+SetColor (V, Yellow);
+PieSlice (V, 40, 40, 30, 300, 24);
+
+var Sprite := GetImage (V, 16, 16, 65, 65);
+
+System.WriteLn ('sprite  ', Sprite.W, ' by ', Sprite.H,
+                ', costing ', ImageSize (16, 16, 65, 65), ' bytes');
+
+// A patterned band to lay it over.
+SetFillStyle (V, HatchFill, DarkGray);
+Bar (V, 1, 100, 300, 170);
+
+PutImage (V, 20, 110, Sprite, CopyPut);
+PutImage (V, 120, 110, Sprite, TransparentPut);
+Show (V);
+
+// CopyPut brought the sprite's own unpainted surround with it, so the band
+// is gone inside that rectangle. TransparentPut laid only what was painted.
+System.WriteLn ('band under the copy:        ',
+                GetPixel (V, 21, 111) <> Transparent);
+System.WriteLn ('band under the transparent: ',
+                GetPixel (V, 121, 111) <> Transparent);
+System.WriteLn ('but both drew the figure:   ',
+                GetPixel (V, 44, 134) = GetPixel (V, 144, 134));
+
+CloseGraph ();
+```
+
+```console
+sprite  50 by 50, costing 10000 bytes
+band under the copy:        false
+band under the transparent: true
+but both drew the figure:   true
+```
+
+---
+
 ## GetMaxX
 
 *function* — unit `graph`
@@ -2582,6 +2700,93 @@ true
 
 ---
 
+## GetTextSettings
+
+*functions, aliases of `ViewPort.GetTextSettings` and `GetViewSettings`* — unit `graph`
+
+**Function**
+
+Reads back how a viewport writes text, and where it sits.
+
+**Declaration**
+
+```algol24
+function GetTextSettings (V : ViewPort) : TextSettings;
+function GetViewSettings (V : ViewPort) : ViewSettings;
+```
+
+**Remarks**
+
+[Aliases](#aliases) of the methods, answering a [`TextSettings`](#textsettings)
+or a `ViewSettings`.
+
+`GetTextSettings` completes the set begun by
+[`GetFillSettings`](#getfillsettings): every pen a viewport holds can now be
+saved and put back. Its fields are the arguments of
+[`SetTextStyle`](#settextstyle), [`SetTextJustify`](#settextjustify) and
+[`SetUserCharSize`](#setusercharsize).
+
+`GetViewSettings` answers the corners the viewport occupies in the logical
+space, **inclusive** — so `X2` is `X + W - 1`, and `Clip` is always True. It
+follows the surface when [`MoveTo`](#moveto) drags it.
+
+Both are snapshots, not views onto the surface.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`GetFillSettings`](#getfillsettings), [`GraphDefaults`](#graphdefaults),
+[`SetTextJustify`](#settextjustify), [`SetTextStyle`](#settextstyle),
+[`TextSettings`](#textsettings)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'settings', False);
+
+var V := ViewPort (100, 60, 200, 150, 1);
+
+SetTextStyle (V, 90, 2);
+SetTextJustify (V, CenterText, BottomText);
+
+// Save the whole text state before a routine that will change it.
+var T := GetTextSettings (V);
+
+System.WriteLn ('direction ', T.Direction, '  size ', T.CharSize);
+System.WriteLn ('justify   ', T.Horiz, ', ', T.Vert);
+
+SetTextStyle (V, 0, 1);
+SetTextJustify (V, LeftText, TopText);
+
+// The fields are the setters' own arguments, so putting it back is two calls.
+SetTextStyle (V, T.Direction, T.CharSize);
+SetTextJustify (V, T.Horiz, T.Vert);
+
+System.WriteLn ('restored  ', GetTextSettings (V).Direction = 90);
+
+// Where the viewport sits, with the far corner worked out: inclusive, so
+// X2 is X + W - 1 rather than X + W.
+var S := GetViewSettings (V);
+
+System.WriteLn ('corners   ', S.X1, ',', S.Y1, ' to ', S.X2, ',', S.Y2);
+System.WriteLn ('clipped   ', S.Clip);
+
+CloseGraph ();
+```
+
+```console
+direction 90  size 2
+justify   1, 0
+restored  true
+corners   100,60 to 299,209
+clipped   true
+```
+
+---
+
 ## GetX
 
 *function, alias of `ViewPort.GetX`* — unit `graph`
@@ -2709,6 +2914,83 @@ CloseGraph ();
 
 ---
 
+## GraphDefaults
+
+*procedure, alias of `ViewPort.GraphDefaults`* — unit `graph`
+
+**Function**
+
+Puts every pen of a viewport back the way a fresh one holds them.
+
+**Declaration**
+
+```algol24
+procedure GraphDefaults (V : ViewPort);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method. It resets the drawing color, the line
+style and thickness, the fill pattern and color, the background, the write
+mode, the text turn, size and justification, and the pen and free-text
+positions — everything the setters set.
+
+⚠️ **It erases nothing**, which is Turbo Pascal's behavior too.
+[`Clear`](#clear) is what erases; this is about how the next stroke will look,
+not about what is already drawn.
+
+Nor does it touch what the surface **is** — its place in the stack, its size,
+its `Alpha`, or where [`MoveTo`](#moveto) put it. Those are the object rather
+than the pens.
+
+It is per surface, as every pen here is. Turbo Pascal's was global because its
+pens were.
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`Clear`](#clear), [`GetFillSettings`](#getfillsettings),
+[`GetTextSettings`](#gettextsettings), [`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'defaults', False);
+
+var V := ViewPort (50, 50, 150, 100, 1);
+
+SetFillStyle (V, SolidFill, Red);
+Bar (V, 1, 1, 150, 100);
+
+SetColor (V, Yellow);
+SetLineStyle (V, DashedLn, 0, 5);
+SetTextStyle (V, 90, 3);
+
+GraphDefaults (V);
+
+// Every pen back the way a fresh viewport holds them.
+System.WriteLn ('color     ', GetColor (V) = White);
+System.WriteLn ('line      ', GetLineSettings (V).Thickness = NormWidth);
+System.WriteLn ('text      ', GetTextSettings (V).Direction = 0);
+
+// But the picture is untouched -- Clear is what erases.
+System.WriteLn ('picture   ', GetPixel (V, 20, 20) = Red);
+
+CloseGraph ();
+```
+
+```console
+color     true
+line      true
+text      true
+picture   true
+```
+
+---
+
 ## HighVideo
 
 *procedure* — unit `graph`
@@ -2768,6 +3050,96 @@ CloseGraph ();
 2
 ```
 
+
+---
+
+## Image
+
+*class* — unit `graph`
+
+**Function**
+
+A rectangle of pixels lifted off a surface.
+
+**Declaration**
+
+```algol24
+constructor Image (W : Integer, H : Integer);
+
+W, H : Integer          the size in pixels
+Bits : Buffer           the pixels, four bytes each, row by row
+```
+
+**Remarks**
+
+Turbo Pascal's image buffer was an untyped block: the caller sized it with
+`ImageSize`, allocated it with `GetMem`, passed it to `GetImage` to be filled,
+and remembered its dimensions separately. This carries its own size and its
+own storage, so [`GetImage`](#getimage) answers one ready to use.
+
+⚠️ **An image belongs to no surface once lifted.** It can be put onto the
+viewport it came from, onto another, or onto the same one repeatedly — see
+[`PutImage`](#getimage).
+
+The pixels are the surface's own, **transparency included**: a region that was
+partly unpainted comes back partly unpainted, which is what lets
+[`CopyPut`](#putmodes) restore exactly what was taken.
+
+Constructing one directly gives a transparent rectangle, which is occasionally
+useful as a scratch surface; the usual source is `GetImage`.
+
+**See also**
+
+[`GetImage`](#getimage), [`ImageSize`](#imagesize), [`PutModes`](#putmodes),
+[`ViewPort`](#viewport)
+
+**Example**
+
+See [`GetImage`](#getimage).
+
+---
+
+## ImageSize
+
+*function* — unit `graph`
+
+**Function**
+
+The bytes an image of a rectangle would occupy.
+
+**Declaration**
+
+```algol24
+function ImageSize (X1 : Integer, Y1 : Integer, X2 : Integer,
+                    Y2 : Integer) : Integer;
+```
+
+**Remarks**
+
+Four bytes to the pixel, the corners inclusive.
+
+⚠️ **It is no longer a step on the way to [`GetImage`](#getimage).** In Turbo
+Pascal it could not be skipped — the caller sized a block with it, allocated
+that block, and only then lifted an image into it. An [`Image`](#image)
+carries its own storage, so this answers a question rather than granting
+permission: what a region will cost, which is worth knowing when the region is
+large or there are many of them.
+
+It takes no surface and needs no open window, being arithmetic on four
+numbers.
+
+Turbo Pascal answered a `Word` and so could not describe an image past 64K,
+which is a 128 by 128 square in sixteen colors. The Integer here is unbounded.
+
+Raises `ImageSize wants X2 >= X1 and Y2 >= Y1.`
+
+**See also**
+
+[`GetImage`](#getimage), [`Image`](#image)
+
+**Example**
+
+See [`GetImage`](#getimage).
 
 ---
 
@@ -4086,6 +4458,59 @@ true
 
 ---
 
+## PutModes
+
+*constants* — unit `graph`
+
+**Function**
+
+How [`PutImage`](#getimage) combines an image with what is already there.
+
+**Declaration**
+
+```algol24
+const CopyPut        := 0;      const AndPut         := 3;
+const XorPut         := 1;      const NotPut         := 4;
+const OrPut          := 2;      const TransparentPut := 5;
+```
+
+**Remarks**
+
+Turbo Pascal's five, plus one its hardware had no need of.
+
+| | |
+| --- | --- |
+| `CopyPut` | replaces the rectangle, the image's transparency included |
+| `TransparentPut` | lays only the pixels the image painted |
+| `XorPut` | combines by exclusive or; twice restores what was there |
+| `OrPut`, `AndPut` | combine by union and intersection |
+| `NotPut` | draws the image's colors inverted |
+
+⚠️ **`TransparentPut` is this library's own.** Turbo Pascal's images were
+opaque indices throughout, so the question never arose; a surface here is
+transparent until painted, and a sprite laid over a background needs the mode
+that skips what it never painted. `CopyPut` cannot do it — it would stamp the
+sprite's unpainted surround over the background.
+
+The five inherited modes combine the **whole 32-bit pixel**, alpha included.
+That is what makes `XorPut` restore exactly — `(a xor b) xor b` is `a`
+whatever the bits mean — and what lets an opaque image show over a transparent
+surface at all, where combining only the color would leave the alpha at zero
+and the image invisible.
+
+`NotPut` is the exception: it inverts the color and keeps the source's alpha,
+because the inverse of a picture is a picture rather than an absence of one.
+
+**See also**
+
+[`GetImage`](#getimage), [`Image`](#image)
+
+**Example**
+
+See [`GetImage`](#getimage).
+
+---
+
 ## PutPixel
 
 *procedure, alias of `ViewPort.PutPixel`* — unit `graph`
@@ -4715,6 +5140,83 @@ false
 
 ---
 
+## SetAspectRatio
+
+*procedure* — unit `graph`
+
+**Function**
+
+Imposes an aspect ratio in place of the one measured from the window.
+
+**Declaration**
+
+```algol24
+procedure SetAspectRatio (Ratio : Double);
+```
+
+**Remarks**
+
+[`GetAspectRatio`](#getaspectratio) answers this instead of the measurement
+once it is set.
+
+Turbo Pascal's existed because the value the BIOS reported was not always the
+value that made a circle look round on the monitor in front of you. **The
+measurement here is exact** — the logical space and the window are both known
+— so this is for wanting a different answer rather than for correcting a wrong
+one: drawing to square pixels deliberately, or matching a figure to a
+screenshot from elsewhere.
+
+⚠️ **Keep the measured value before overriding it.** That is the way back;
+there is no verb to un-impose a ratio, because `SetAspectRatio (Measured)`
+already is one.
+
+It is screen-wide, as [`GetAspectRatio`](#getaspectratio) is: the stretch
+belongs to the window and no single surface owns it.
+[`CloseGraph`](#closegraph) clears it, so a new window starts from its own
+measurement.
+
+A single Double, where Turbo Pascal took two `Word`s with the vertical one
+pegged at 10000.
+
+Raises `SetAspectRatio wants a ratio above zero.`, and `Graph is not open.`
+without a window.
+
+**See also**
+
+[`Circle`](#circle), [`Ellipse`](#ellipse),
+[`GetAspectRatio`](#getaspectratio)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'aspect', False);
+
+// Keep the measured one first: that is the way back, there being no verb
+// to un-impose a ratio.
+var Measured := GetAspectRatio ();
+
+System.WriteLn ('measured ', Measured);
+
+// Draw to square pixels deliberately, ignoring the window's stretch.
+SetAspectRatio (1.0);
+System.WriteLn ('imposed  ', GetAspectRatio ());
+
+SetAspectRatio (Measured);
+System.WriteLn ('restored ', GetAspectRatio () = Measured);
+
+CloseGraph ();
+```
+
+```console
+measured 0.8333333333333334
+imposed  1.0
+restored true
+```
+
+---
+
 ## SetBkColor
 
 *procedures, aliases of `ViewPort.SetBkColor` and `GetBkColor`* — unit `graph`
@@ -5283,6 +5785,184 @@ CloseGraph ();
 
 ---
 
+## SetUserCharSize
+
+*procedure, alias of `ViewPort.SetUserCharSize`* — unit `graph`
+
+**Function**
+
+Magnifies free text by a ratio rather than a whole number.
+
+**Declaration**
+
+```algol24
+procedure SetUserCharSize (V : ViewPort, MultX : Integer, DivX : Integer,
+                           MultY : Integer, DivY : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method. `MultX` over `DivX` across, `MultY` over
+`DivY` down, so `(3, 2, 1, 1)` is half again as wide at the same height —
+which [`SetTextStyle`](#settextstyle)'s whole-number `CharSize` cannot express
+at all.
+
+A whole-number size is the ratio N over one, so the two verbs are the same
+setting and either replaces what the other set.
+
+⚠️ **Turbo Pascal's worked only on its stroked fonts** and was ignored by the
+bitmap one. The glyphs here are a bitmap and this works on them: the stamper
+walks the destination and samples back, so it can **squeeze as readily as
+magnify**. Squeezed far enough a glyph loses rows and columns, which is what
+sampling a bitmap costs and is the honest picture of it.
+
+[`TextWidth`](#textwidth) and `TextHeight` follow the ratio, so justification
+and centering stay right at any size.
+
+[`GetTextSettings`](#gettextsettings) reports the four terms, and reports
+`CharSize` as 0 while a ratio is in force.
+
+Raises `SetUserCharSize wants positive terms.`, and `CloseGraph has closed
+this surface.` once the window has gone.
+
+**See also**
+
+[`GetTextSettings`](#gettextsettings), [`SetTextJustify`](#settextjustify),
+[`SetTextStyle`](#settextstyle), [`TextWidth`](#textwidth)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'charsize', False);
+
+var V := ViewPort (50, 50, 400, 150, 1);
+
+System.WriteLn ('one to one     ', TextWidth (V, 'Wide'), ' by ',
+                TextHeight (V, 'Wide'));
+
+// Half again as wide at the same height, which a whole-number CharSize
+// cannot express at all.
+SetUserCharSize (V, 3, 2, 1, 1);
+System.WriteLn ('three halves   ', TextWidth (V, 'Wide'), ' by ',
+                TextHeight (V, 'Wide'));
+
+// And squeezed, which Turbo Pascal's bitmap font could not do either.
+SetUserCharSize (V, 1, 2, 1, 2);
+System.WriteLn ('half           ', TextWidth (V, 'Wide'), ' by ',
+                TextHeight (V, 'Wide'));
+
+SetColor (V, White);
+SetUserCharSize (V, 4, 1, 2, 1);
+OutTextXY (V, 10, 10, 'Wide');
+Show (V);
+
+// A CharSize of zero says the size is a ratio; the four terms say which.
+var T := GetTextSettings (V);
+
+System.WriteLn ('reported       ', T.CharSize, '  ratio ', T.MultX, '/',
+                T.DivX, ' by ', T.MultY, '/', T.DivY);
+
+CloseGraph ();
+```
+
+```console
+one to one     64 by 32
+three halves   96 by 32
+half           32 by 16
+reported       0  ratio 4/1 by 2/1
+```
+
+---
+
+## SetWriteMode
+
+*procedures, aliases of `ViewPort.SetWriteMode` and `GetWriteMode`* — unit `graph`
+
+**Function**
+
+Sets how pen strokes combine with what is already on the surface.
+
+**Declaration**
+
+```algol24
+procedure SetWriteMode (V : ViewPort, Mode : Integer);
+function  GetWriteMode (V : ViewPort) : Integer;
+```
+
+**Remarks**
+
+[Aliases](#aliases) of the methods. `Mode` is
+[`CopyPut`](#putmodes) or `XorPut` — the pen takes those two, where
+[`PutImage`](#getimage) takes all six.
+
+`CopyPut` lays the pen's color over whatever was there, which is how a fresh
+viewport draws. **`XorPut` combines instead, so drawing the same figure twice
+puts the surface back exactly** — a rubber-band line, a crosshair, a shape
+dragged over a picture that has to survive. Nothing needs saving first, which
+is what makes it worth having beside [`GetImage`](#getimage).
+
+⚠️ **It governs every stroke the pen makes**: [`Line`](#line), `LineTo`,
+`LineRel`, [`Rectangle`](#rectangle), [`DrawPoly`](#drawpoly),
+[`Arc`](#arc), [`Circle`](#circle) and [`Ellipse`](#ellipse). Turbo Pascal
+named only the straight ones, which was an arbitrary line to draw through a
+set of verbs that all use one pen.
+
+It does **not** govern the fills, which lay their own pen in runs, nor
+[`PutPixel`](#putpixel), which writes a color of its own and bypasses the pen
+already.
+
+Raises `SetWriteMode wants CopyPut or XorPut.`, and `CloseGraph has closed
+this surface.` once the window has gone.
+
+**See also**
+
+[`GetImage`](#getimage), [`Line`](#line), [`PutModes`](#putmodes),
+[`SetColor`](#setcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'writemode', False);
+
+var V := ViewPort (50, 50, 200, 120, 1);
+
+SetFillStyle (V, HatchFill, LightGreen);
+Bar (V, 1, 1, 200, 120);
+
+// The midpoint of the line below, so the check lands on ink.
+var Was := GetPixel (V, 100, 60);
+
+SetWriteMode (V, XorPut);
+SetColor (V, Red);
+
+// A rubber band: draw it to show it, draw it again to take it away, and what
+// was underneath is back exactly. Nothing had to be saved.
+Line (V, 10, 10, 190, 110);
+System.WriteLn ('drawn:   ', GetPixel (V, 100, 60) <> Was);
+
+Line (V, 10, 10, 190, 110);
+System.WriteLn ('undrawn: ', GetPixel (V, 100, 60) = Was);
+
+// It governs the curves too, where Turbo Pascal named only the straight ones.
+Circle (V, 100, 60, 40);
+Circle (V, 100, 60, 40);
+System.WriteLn ('circle:  ', GetPixel (V, 100, 20) = GetPixel (V, 100, 100));
+
+CloseGraph ();
+```
+
+```console
+drawn:   true
+undrawn: true
+circle:  true
+```
+
+---
+
 ## Show
 
 *procedure, alias of `ViewPort.Show`* — unit `graph`
@@ -5729,6 +6409,68 @@ See [`TextCols`](#textcols).
 
 ---
 
+## TextSettings
+
+*classes* — unit `graph`
+
+**Function**
+
+The text state a viewport is holding, and where it sits.
+
+**Declaration**
+
+```algol24
+constructor TextSettings (Direction : Integer, CharSize : Integer,
+                          Horiz : Integer, Vert : Integer, MultX : Integer,
+                          DivX : Integer, MultY : Integer, DivY : Integer);
+
+Direction, CharSize : Integer       what SetTextStyle set
+Horiz, Vert : Integer               what SetTextJustify set
+MultX, DivX, MultY, DivY : Integer  what SetUserCharSize set
+
+constructor ViewSettings (X1 : Integer, Y1 : Integer, X2 : Integer,
+                          Y2 : Integer, Clip : Boolean);
+
+X1, Y1, X2, Y2 : Integer            the corners, inclusive
+Clip : Boolean                      always True
+```
+
+**Remarks**
+
+Turbo Pascal's `TextSettingsType` and `ViewPortType`, answered by
+[`GetTextSettings`](#gettextsettings) and `GetViewSettings` rather than
+written into a `var` record — the same reasoning as [`ArcCoords`](#arccoords)
+and [`FillSettings`](#fillsettings). **Every field is named for the argument
+that sets it**, so a saved state goes back through the setters without
+translation.
+
+⚠️ **`TextSettings` has no `Font` field.** A font here is a glyph file chosen
+by [`InstallUserFont`](#installuserfont) rather than one of a numbered
+handful, so there is no number to report.
+
+⚠️ **`CharSize` is 0 while a [`SetUserCharSize`](#setusercharsize) ratio is in
+force**, which is Turbo Pascal's convention for the same situation. The four
+ratio terms always say what is actually magnifying, so the zero hides nothing
+and either setter can restore what it set.
+
+`ViewSettings` reports where a viewport is rather than a clipping rectangle to
+be moved: there is one screen in Turbo Pascal and a stack of objects here. Its
+corners are inclusive, so `X2` is `X + W - 1` — the arithmetic worth having a
+verb for. `Clip` is always True, a viewport's edge being its clip with no way
+to ask otherwise.
+
+**See also**
+
+[`ArcCoords`](#arccoords), [`FillSettings`](#fillsettings),
+[`GetTextSettings`](#gettextsettings), [`SetTextStyle`](#settextstyle),
+[`ViewPort`](#viewport)
+
+**Example**
+
+See [`GetTextSettings`](#gettextsettings).
+
+---
+
 ## TextWidth
 
 *functions* — unit `graph`
@@ -5944,6 +6686,16 @@ procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
 function  GetPixel (PX : Integer, PY : Integer) : Integer;
 procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
 function  GetArcCoords () : ArcCoords;
+function  GetTextSettings () : TextSettings;
+function  GetViewSettings () : ViewSettings;
+procedure GraphDefaults ();
+procedure SetWriteMode (Mode : Integer);
+function  GetWriteMode () : Integer;
+procedure SetUserCharSize (MultX : Integer, DivX : Integer,
+                           MultY : Integer, DivY : Integer);
+function  GetImage (X1 : Integer, Y1 : Integer, X2 : Integer,
+                   Y2 : Integer) : Image;
+procedure PutImage (X : Integer, Y : Integer, Img : Image, Mode : Integer);
 function  GetFillPattern () : List;
 function  GetFillSettings () : FillSettings;
 function  GetLineSettings () : LineSettings;
@@ -6039,7 +6791,10 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`ClearViewPort`](#clearviewport), [`TextWidth`](#textwidth),
 [`SetBkColor`](#setbkcolor), [`SetTextJustify`](#settextjustify),
 [`GetFillPattern`](#getfillpattern), [`GetFillSettings`](#getfillsettings),
-`GetLineSettings`.
+`GetLineSettings`, [`GetImage`](#getimage), `PutImage`,
+[`GetTextSettings`](#gettextsettings), `GetViewSettings`,
+[`GraphDefaults`](#graphdefaults), [`SetWriteMode`](#setwritemode),
+`GetWriteMode`, [`SetUserCharSize`](#setusercharsize).
 
 [`Clear`](#clear) is the method `ClearViewPort (V)` reaches.
 

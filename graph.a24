@@ -152,6 +152,39 @@ procedure Flood (X : Integer, Y : Integer, Border : Integer,
 procedure ScrollTarget (DY : Integer, Fill : Integer);
     external 'alg_scroll_up' in 'libgraphffi.dylib';
 
+/// Sets the next stamps' magnification as a ratio per axis, and their turn.
+///
+/// Private to this unit, and the general form of `StampStyle`: a ratio can
+/// squeeze as well as magnify, where a whole number can only magnify.
+procedure StampRatio (NumX : Integer, DenX : Integer, NumY : Integer,
+                      DenY : Integer, Rotation : Integer);
+    external 'alg_stamp_ratio' in 'libgraphffi.dylib';
+
+/// The bitwise exclusive or of two pixel words.
+///
+/// Private to this unit. The language has no bitwise operators at all -- its
+/// `and` and `or` are logical, answering an operand rather than combining
+/// bits -- so this is a genuine gap rather than a shortcut.
+function XorWords (A : Integer, B : Integer) : Integer;
+    external 'alg_xor' in 'libgraphffi.dylib';
+
+/// Copies a rectangle of the stamp target into a caller's buffer.
+///
+/// Private to this unit. A rectangle of any size is thousands of pixels, the
+/// same bargain every other run here strikes. A rectangle reaching past the
+/// surface reads transparent zeros there rather than out of bounds.
+procedure GrabImage (Dst : Pointer, X1 : Integer, Y1 : Integer, X2 : Integer,
+                     Y2 : Integer);
+    external 'alg_get_image' in 'libgraphffi.dylib';
+
+/// Draws a caller's buffer onto the stamp target, combining as Mode says.
+///
+/// Private to this unit. The modes combine the whole 32-bit pixel, which is
+/// what makes XorPut restore what was beneath when written twice.
+procedure DrawImage (Src : Pointer, W : Integer, H : Integer, X : Integer,
+                     Y : Integer, Mode : Integer);
+    external 'alg_put_image' in 'libgraphffi.dylib';
+
 /// Moves a band of the stamp target within itself, filling what it vacates.
 ///
 /// Private to this unit, and the general form `ScrollTarget` is a case of.
@@ -223,6 +256,24 @@ const InterleaveFill := 9;
 const WideDotFill    := 10;
 const CloseDotFill   := 11;
 const UserFill       := 12;
+
+/// How `PutImage` combines an image with what is already on the surface.
+///
+/// Turbo Pascal's five, plus `TransparentPut`, which its images had no need
+/// of -- they were opaque indices throughout, where a surface here is
+/// transparent until painted.
+///
+/// The five combine the whole 32-bit pixel, alpha included. That is what
+/// makes `XorPut` restore what was underneath when the same image is written
+/// twice, and what lets an opaque image show over a transparent surface at
+/// all. `NotPut` is the exception, inverting the color and keeping the
+/// source's alpha, because the inverse of a picture is a picture.
+const CopyPut        := 0;
+const XorPut         := 1;
+const OrPut          := 2;
+const AndPut         := 3;
+const NotPut         := 4;
+const TransparentPut := 5;
 
 /// Where free text sits relative to the point it is placed at.
 ///
@@ -316,6 +367,11 @@ var SdlWin       := nil;
 var Renderer     := nil;
 var Texture      := nil;
 var Pixels       := nil;
+// An aspect ratio the caller has imposed, or 0 for the measured one.
+// Screen-wide, as GetAspectRatio is: it describes the window's stretch,
+// which no single surface owns.
+var AspectSet    := 0.0;
+
 var WindowWidth  := 0;
 var WindowHeight := 0;
 
@@ -947,6 +1003,10 @@ begin
     WindowHeight := 0;
     CurrentX     := 1;
     CurrentY     := 1;
+
+    // An imposed aspect ratio belongs to the window that was open, so it
+    // goes when that window does rather than surprising the next one.
+    AspectSet    := 0.0;
 end
 
 /// The highest X a program can draw to, which is the window's width.
@@ -1061,6 +1121,34 @@ begin
     Present ();
 end
 
+/// Imposes an aspect ratio, in place of the one measured from the window.
+///
+/// Turbo Pascal's `SetAspectRatio`, which existed because the value the BIOS
+/// reported was not always the value that made a circle look round on the
+/// monitor in front of you. The measurement here is exact -- the logical
+/// space and the window are both known -- so this is for wanting a different
+/// answer rather than for correcting a wrong one: drawing to square pixels
+/// deliberately, or matching a figure to a screenshot from elsewhere.
+///
+/// It is screen-wide, as `GetAspectRatio` is: the stretch belongs to the
+/// window and no single surface owns it. `InitGraph` clears it, and the way
+/// back to the measured value is to keep it before overriding.
+///
+/// # Raises
+/// `SetAspectRatio wants a ratio above zero.`, and `Graph is not open.`
+/// without a window.
+///
+/// # Examples
+/// `SetAspectRatio Replaces The Measured Ratio Until InitGraph`
+procedure SetAspectRatio (Ratio : Double);
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    if Ratio <= 0.0 then raise 'SetAspectRatio wants a ratio above zero.';
+
+    AspectSet := Ratio;
+end
+
 /// How much wider than tall a logical pixel appears on the screen.
 ///
 /// The space Windows and ViewPorts are measured in is fixed by the grid and
@@ -1097,10 +1185,37 @@ function GetAspectRatio () : Double;
 begin
     if SdlWin = nil then raise 'Graph is not open.';
 
+    if AspectSet > 0.0 then Exit AspectSet;
+
     var LogW := GridCols * CellWidth ();
     var LogH := GridRows * CellHeight ();
 
     Exit (WindowWidth / LogW) / (WindowHeight / LogH);
+end
+
+/// The bytes an image of this rectangle would occupy.
+///
+/// Turbo Pascal's `ImageSize`, and there it was a step you could not skip:
+/// the caller sized the block, allocated it, and only then called `GetImage`.
+/// An `Image` carries its own storage here, so this answers a question rather
+/// than granting permission -- what a region will cost before it is lifted,
+/// which is worth knowing when the region is large or there are many.
+///
+/// Four bytes to the pixel, the corners inclusive. It takes no surface and
+/// needs no window, being arithmetic on four numbers.
+///
+/// # Raises
+/// `ImageSize wants X2 >= X1 and Y2 >= Y1.`
+///
+/// # Examples
+/// `ImageSize Says What A Rectangle Will Cost`
+function ImageSize (X1 : Integer, Y1 : Integer, X2 : Integer,
+                    Y2 : Integer) : Integer;
+begin
+    if X2 < X1 or Y2 < Y1 then
+        raise 'ImageSize wants X2 >= X1 and Y2 >= Y1.';
+
+    Exit (X2 - X1 + 1) * (Y2 - Y1 + 1) * 4;
 end
 
 /// The width in pixels the text would occupy on the background.
@@ -1457,6 +1572,104 @@ begin
         this.Style     := Style;
         this.Pattern   := Pattern;
         this.Thickness := Thickness;
+    end
+end
+
+/// A rectangle of pixels lifted off a surface.
+///
+/// Turbo Pascal's image buffer, which was an untyped block the caller had to
+/// size with `ImageSize` and allocate with `GetMem` before `GetImage` would
+/// fill it. This carries its own size and its own storage, so `GetImage`
+/// answers one ready to use and `ImageSize` is no longer a step on the way.
+///
+/// The pixels are this surface's own, transparency included: a region that
+/// was partly unpainted comes back partly unpainted, and putting it back
+/// restores exactly what was taken.
+class Image;
+var
+    W    : Integer;
+    H    : Integer;
+    Bits : Any;
+
+begin
+    constructor Init (W : Integer, H : Integer);
+    begin
+        if W < 1 or H < 1 then raise 'An Image needs a positive size.';
+
+        // The parameters shadow the fields, as Window's do, so they can be
+        // named for what they are and reached through `this`.
+        this.W := W;
+        this.H := H;
+
+        Bits := Buffer (W * H * 4);
+    end
+end
+
+/// The turn, size and justification a viewport writes free text in.
+///
+/// Turbo Pascal's `TextSettingsType`, answered by `GetTextSettings`. Its
+/// `Font` field is not here: a font is a glyph file chosen by
+/// `InstallUserFont` rather than one of a numbered handful, so there is no
+/// number to report.
+///
+/// CharSize is 0 while a `SetUserCharSize` ratio is in force, which is Turbo
+/// Pascal's convention for the same situation. The four ratio fields always
+/// say what is actually magnifying, so nothing is hidden by that zero, and
+/// the pair of setters puts any saved state back.
+class TextSettings;
+var
+    Direction : Integer;
+    CharSize  : Integer;
+    Horiz     : Integer;
+    Vert      : Integer;
+    MultX     : Integer;
+    DivX      : Integer;
+    MultY     : Integer;
+    DivY      : Integer;
+
+begin
+    constructor Init (Direction : Integer, CharSize : Integer, Horiz : Integer,
+                      Vert : Integer, MultX : Integer, DivX : Integer,
+                      MultY : Integer, DivY : Integer);
+    begin
+        this.Direction := Direction;
+        this.CharSize  := CharSize;
+        this.Horiz     := Horiz;
+        this.Vert      := Vert;
+        this.MultX     := MultX;
+        this.DivX      := DivX;
+        this.MultY     := MultY;
+        this.DivY      := DivY;
+    end
+end
+
+/// Where a viewport sits and how big it is.
+///
+/// Turbo Pascal's `ViewPortType`, answered by `GetViewSettings`. There it
+/// described the one screen's clipping rectangle, which `SetViewPort` moved;
+/// here a viewport is an object and this reports where that object is.
+///
+/// The corners are in the logical space the grid lives in and are inclusive,
+/// so `X2` is `X + W - 1` -- the arithmetic worth having a verb for. Clip is
+/// always True: a viewport's edge is its clip and there is no way to ask for
+/// otherwise.
+class ViewSettings;
+var
+    X1   : Integer;
+    Y1   : Integer;
+    X2   : Integer;
+    Y2   : Integer;
+    Clip : Boolean;
+
+begin
+    constructor Init (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
+                      Clip : Boolean);
+    begin
+        this.X1   := X1;
+        this.Y1   := Y1;
+        this.X2   := X2;
+        this.Y2   := Y2;
+        this.Clip := Clip;
     end
 end
 
@@ -2023,6 +2236,11 @@ var
     FillInk : Integer;
     FillPat : Any;
     BkColor : Integer;
+    WMode  : Integer;
+    MultX  : Integer;
+    DivX   : Integer;
+    MultY  : Integer;
+    DivY   : Integer;
     HJust  : Integer;
     VJust  : Integer;
     ArcX   : Integer;
@@ -2070,6 +2288,11 @@ begin
         FillInk := 16777215;      // White, as the pen is
         HasArc  := False;
         BkColor := Transparent;
+        WMode   := CopyPut;
+        MultX   := 1;
+        DivX    := 1;
+        MultY   := 1;
+        DivY    := 1;
         HJust   := LeftText;
         VJust   := TopText;
         FillPat := [255, 255, 255, 255, 255, 255, 255, 255];
@@ -2306,6 +2529,30 @@ begin
     end
 
 
+
+    /// The text's extent along its own run, in pixels.
+    ///
+    /// Private to this unit, and the one place the run is measured. Which
+    /// ratio applies depends on the turn: text running across the screen is
+    /// magnified by the X ratio, text running up or down by the Y one.
+    function RunExtent (Text : String) : Integer;
+    begin
+        if Dir = 90 or Dir = 270 then Exit GlyphRun (Text) * MultY div DivY;
+
+        Exit GlyphRun (Text) * MultX div DivX;
+    end
+
+    /// The thickness of one line of text, across its run.
+    ///
+    /// Private to this unit, and `RunExtent`'s partner: whichever ratio the
+    /// run does not use, this one does.
+    function LineExtent () : Integer;
+    begin
+        if Dir = 90 or Dir = 270 then Exit FontHeight * MultX div DivX;
+
+        Exit FontHeight * MultY div DivY;
+    end
+
     /// The width in pixels the text would occupy on this viewport.
     ///
     /// The extent along X of what `OutTextXY` would draw, in the turn and
@@ -2333,9 +2580,9 @@ begin
 
         if Length (Text) = 0 then Exit 0;
 
-        if Dir = 90 or Dir = 270 then Exit FontHeight * Size;
+        if Dir = 90 or Dir = 270 then Exit LineExtent ();
 
-        Exit GlyphRun (Text) * Size;
+        Exit RunExtent (Text);
     end
 
     /// The height in pixels the text would occupy on this viewport.
@@ -2361,9 +2608,9 @@ begin
 
         if Length (Text) = 0 then Exit 0;
 
-        if Dir = 90 or Dir = 270 then Exit GlyphRun (Text) * Size;
+        if Dir = 90 or Dir = 270 then Exit RunExtent (Text);
 
-        Exit FontHeight * Size;
+        Exit LineExtent ();
     end
 
 
@@ -2538,6 +2785,270 @@ begin
         Exit LineSettings (Style, Bits, Thick);
     end
 
+
+    /// Lifts the rectangle X1, Y1 to X2, Y2 off this viewport as an Image.
+    ///
+    /// Turbo Pascal wanted the caller to size a block with `ImageSize` and
+    /// allocate it before calling; this answers an `Image` that carries its
+    /// own storage, so neither step is needed. `ImageSize` remains, and says
+    /// what such an image costs.
+    ///
+    /// The corners are inclusive, so `GetImage (1, 1, 8, 8)` is sixty-four
+    /// pixels. Transparency comes with them: an unpainted pixel is lifted as
+    /// unpainted, and `PutImage` in `CopyPut` puts back exactly what was
+    /// taken.
+    ///
+    /// A rectangle reaching past the edge reads transparent there rather than
+    /// raising, the edge being the clip as it is for `GetPixel`.
+    ///
+    /// # Raises
+    /// `GetImage wants X2 >= X1 and Y2 >= Y1.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetImage And PutImage Carry A Rectangle Unchanged`
+    function GetImage (X1 : Integer, Y1 : Integer, X2 : Integer,
+                       Y2 : Integer) : Image;
+    begin
+        Check ();
+
+        if X2 < X1 or Y2 < Y1 then
+            raise 'GetImage wants X2 >= X1 and Y2 >= Y1.';
+
+        var Taken := Image (X2 - X1 + 1, Y2 - Y1 + 1);
+
+        StampTarget (Buf.Address, W, H);
+        GrabImage (Taken.Bits.Address, X1, Y1, X2, Y2);
+
+        Exit Taken;
+    end
+
+    /// Draws an Image with its top-left corner at X, Y.
+    ///
+    /// Mode is one of the put modes and says how the image combines with what
+    /// is already there: `CopyPut` replaces, `TransparentPut` skips the
+    /// image's unpainted pixels, and `XorPut`, `OrPut`, `AndPut` and `NotPut`
+    /// combine the bits.
+    ///
+    /// `XorPut` twice restores what was underneath, which is how a sprite
+    /// moves over a background without the background being saved: draw,
+    /// draw again, draw elsewhere. `TransparentPut` is the other way to do
+    /// it, and the one that keeps the image's own colors.
+    ///
+    /// Pixels falling outside the viewport are dropped rather than raising.
+    /// The pen is not moved, an image being a figure rather than a journey.
+    ///
+    /// # Raises
+    /// `PutImage wants a known mode.`, and `CloseGraph has closed this
+    /// surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetImage And PutImage Carry A Rectangle Unchanged`
+    procedure PutImage (X : Integer, Y : Integer, Img : Image,
+                        Mode : Integer);
+    begin
+        Check ();
+
+        if Mode < CopyPut or Mode > TransparentPut then
+            raise 'PutImage wants a known mode.';
+
+        StampTarget (Buf.Address, W, H);
+        DrawImage (Img.Bits.Address, Img.W, Img.H, X, Y, Mode);
+
+        Present ();
+    end
+
+
+    /// Lays the pen's color at PX, PY, combining as the write mode says.
+    ///
+    /// Private to this unit, and what every pen stroke goes through -- which
+    /// is how `SetWriteMode` reaches `Line`, `Arc` and `Ellipse` alike
+    /// without any of them mentioning it. `PutPixel` deliberately does not
+    /// come here: it writes a color of its own rather than the pen's, and
+    /// bypasses the pen already.
+    procedure Stroke (PX : Integer, PY : Integer);
+    begin
+        if PX < 1 or PY < 1 or PX > W or PY > H then Exit;
+
+        var At := ((PY - 1) * W + (PX - 1)) * 4;
+
+        if WMode = XorPut then
+            Buf.PutInt (At, XorWords (Buf.GetInt (At), Pen - 16777216));
+        else Buf.PutInt (At, Pen - 16777216);
+    end
+
+    /// Sets how pen strokes combine with what is already on the surface.
+    ///
+    /// `CopyPut` lays the pen's color over whatever was there, which is how a
+    /// fresh viewport draws. `XorPut` combines instead, so drawing the same
+    /// figure twice puts the surface back exactly -- a rubber-band line, a
+    /// crosshair, a shape dragged across a picture that must survive.
+    ///
+    /// It governs every stroke the pen makes: `Line`, `LineTo`, `LineRel`,
+    /// `Rectangle`, `DrawPoly`, `Arc`, `Circle` and `Ellipse`. Turbo Pascal
+    /// named only the straight ones, which was an arbitrary line to draw
+    /// through a set of verbs that all use one pen.
+    ///
+    /// It does not govern the fills, which are runs of pixels laid by their
+    /// own pen, nor `PutPixel`, which writes a color of its own.
+    /// `PutImage` has its own modes and takes one per call.
+    ///
+    /// # Raises
+    /// `SetWriteMode wants CopyPut or XorPut.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `XorPut Draws A Line Twice And Leaves No Mark`
+    procedure SetWriteMode (Mode : Integer);
+    begin
+        Check ();
+
+        if Mode <> CopyPut then if Mode <> XorPut then
+            raise 'SetWriteMode wants CopyPut or XorPut.';
+
+        WMode := Mode;
+    end
+
+    /// How pen strokes combine with what is already there.
+    function GetWriteMode () : Integer;
+    begin
+        Check ();
+
+        Exit WMode;
+    end
+
+    /// Magnifies free text by a ratio rather than a whole number.
+    ///
+    /// MultX over DivX across, MultY over DivY down, so `(3, 2, 1, 1)` is
+    /// half again as wide at the same height. `SetTextStyle`'s CharSize is
+    /// the ratio N over one, and either verb replaces whatever the other
+    /// set.
+    ///
+    /// Turbo Pascal's `SetUserCharSize` worked only on its stroked fonts and
+    /// was ignored by the bitmap one. The glyphs here are a bitmap and this
+    /// works on them: the stamper walks the destination and samples back, so
+    /// it can squeeze as readily as magnify. Squeezed far enough a glyph
+    /// loses rows and columns, which is what sampling a bitmap costs and is
+    /// the honest picture of it.
+    ///
+    /// `TextWidth` and `TextHeight` follow, so justification and centering
+    /// stay right at any ratio.
+    ///
+    /// # Raises
+    /// `SetUserCharSize wants positive terms.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `SetUserCharSize Stretches Text By A Ratio`
+    procedure SetUserCharSize (MultX : Integer, DivX : Integer,
+                               MultY : Integer, DivY : Integer);
+    begin
+        Check ();
+
+        if MultX < 1 or DivX < 1 or MultY < 1 or DivY < 1 then
+            raise 'SetUserCharSize wants positive terms.';
+
+        this.MultX := MultX;
+        this.DivX  := DivX;
+        this.MultY := MultY;
+        this.DivY  := DivY;
+
+        // Turbo Pascal's convention: a CharSize of zero says the size is a
+        // ratio rather than a whole number. The four terms above say what it
+        // actually is, so nothing is hidden by the zero.
+        Size := 0;
+    end
+
+    /// The turn, size and justification this viewport writes free text in.
+    ///
+    /// Turbo Pascal's `GetTextSettings`, answering a `TextSettings` rather
+    /// than filling a `var` record. Its fields are named for the arguments of
+    /// `SetTextStyle`, `SetTextJustify` and `SetUserCharSize`, so a saved
+    /// state goes back through those three without translation.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetTextSettings Saves A Text State That Can Be Put Back`
+    function GetTextSettings () : TextSettings;
+    begin
+        Check ();
+
+        Exit TextSettings (Dir, Size, HJust, VJust, MultX, DivX, MultY, DivY);
+    end
+
+    /// Where this viewport sits and how big it is.
+    ///
+    /// Turbo Pascal's `GetViewSettings`, answering a `ViewSettings`. There it
+    /// reported the one screen's clipping rectangle; here a viewport is an
+    /// object, and this reports the corners of that object in the logical
+    /// space -- inclusive, so X2 is X + W - 1.
+    ///
+    /// Clip is always True. A viewport's edge is its clip and there is no way
+    /// to ask for otherwise, that being what makes a drawing portable.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetViewSettings Answers The Corners A ViewPort Occupies`
+    function GetViewSettings () : ViewSettings;
+    begin
+        Check ();
+
+        Exit ViewSettings (X, Y, X + W - 1, Y + H - 1, True);
+    end
+
+    /// Puts every pen of this viewport back the way a fresh one holds them.
+    ///
+    /// Turbo Pascal's `GraphDefaults`: the drawing color, the line style and
+    /// thickness, the fill pattern and color, the background, the write mode,
+    /// the text turn, size and justification, and the pen and text positions.
+    ///
+    /// It does not erase anything, which is Turbo Pascal's behavior too --
+    /// `Clear` is what erases. Nor does it touch this viewport's place in the
+    /// stack, its size or its Alpha, which are what the object is rather than
+    /// how it draws.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GraphDefaults Puts Every Pen Back Without Erasing Anything`
+    procedure GraphDefaults ();
+    begin
+        Check ();
+
+        Pen   := 16777215;                 // White, as a fresh viewport draws
+        Style := SolidLn;
+        Bits  := 65535;
+        Thick := NormWidth;
+
+        Filling := SolidFill;
+        FillInk := 16777215;
+        FillPat := FillRowsOf (SolidFill);
+
+        LoadFillPattern ();
+
+        BkColor := Transparent;
+        WMode   := CopyPut;
+
+        Dir   := 0;
+        Size  := 1;
+        MultX := 1;
+        DivX  := 1;
+        MultY := 1;
+        DivY  := 1;
+        HJust := LeftText;
+        VJust := TopText;
+
+        PenX := 1;
+        PenY := 1;
+        CurX := 1;
+        CurY := 1;
+    end
+
     /// Sets the color the pen draws and free text is written in.
     ///
     /// Turbo Pascal's `SetColor`, and it governs `Line`, `LineTo`, `LineRel`
@@ -2642,7 +3153,7 @@ begin
     begin
         if Thick <= 1 then
         begin
-            this.PutPixel (PX, PY, Pen);
+            this.Stroke (PX, PY);
 
             Exit;
         end
@@ -2650,8 +3161,8 @@ begin
         var Half := Thick div 2;
 
         for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
-            if Steep then this.PutPixel (PX + K, PY, Pen);
-            else this.PutPixel (PX, PY + K, Pen);
+            if Steep then this.Stroke (PX + K, PY);
+            else this.Stroke (PX, PY + K);
     end
 
     /// Draws a line from AX1, AY1 to AX2, AY2, leaving the pen at the end.
@@ -2784,8 +3295,8 @@ begin
                 // Thickness spreads along the radius, which is the only
                 // direction that keeps a thick arc the same shape.
                 for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
-                    this.PutPixel (X + Round ((Radius + K) * Cos (A)),
-                                   Y - Round ((Radius + K) * Sin (A)), Pen);
+                    this.Stroke (X + Round ((Radius + K) * Cos (A)),
+                                 Y - Round ((Radius + K) * Sin (A)));
         end
 
         RecordArc (X, Y, Radius, Radius, StartAngle, StartAngle + Sweep);
@@ -2970,8 +3481,8 @@ begin
 
             if Bits div LineBitAt (I) mod 2 = 1 then
                 for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
-                    this.PutPixel (X + Round ((XRadius + K) * Cos (A)),
-                                   Y - Round ((YRadius + K) * Sin (A)), Pen);
+                    this.Stroke (X + Round ((XRadius + K) * Cos (A)),
+                                 Y - Round ((YRadius + K) * Sin (A)));
         end
 
         RecordArc (X, Y, XRadius, YRadius, StartAngle, StartAngle + Sweep);
@@ -3489,6 +4000,13 @@ begin
 
         Dir  := Direction;
         Size := CharSize;
+
+        // A whole-number size is the ratio CharSize over one, so the two
+        // spellings cannot disagree about what is magnifying.
+        MultX := CharSize;
+        DivX  := 1;
+        MultY := CharSize;
+        DivY  := 1;
     end
 
     /// Draws free text with its top-left at local PX, PY, in the pen's color.
@@ -3501,14 +4019,14 @@ begin
         Check ();
         EnsureFont ();
         StampTarget (Buf.Address, W, H);
-        StampStyle (Size, Dir);
+        StampRatio (MultX, DivX, MultY, DivY, Dir);
 
         // A glyph's cell is anchored at its top-left whatever the turn, and
         // the run steps away from there -- so justifying is a matter of
         // moving the anchor BACK along the run, and back across it, before a
         // single glyph is drawn.
-        var Run  := GlyphRun (Text) * Size;
-        var Line := FontHeight * Size;
+        var Run  := RunExtent (Text);
+        var Line := LineExtent ();
 
         var BackRun := 0;
 
@@ -3567,8 +4085,11 @@ begin
                 StampCell (AtX, AtY, Words.Address, Wide, FontHeight, Mode,
                            Pen, Transparent);
 
-            // The advance follows the turn: right, up, left or down.
-            var Step := Wide * Size;
+            // The advance follows the turn: right, up, left or down, and
+            // takes the ratio the run is magnified by.
+            var Step := Wide * MultX div DivX;
+
+            if Dir = 90 or Dir = 270 then Step := Wide * MultY div DivY;
 
             if Dir = 0 then AtX := AtX + Step;
             else if Dir = 90 then AtY := AtY - Step;
@@ -3591,7 +4112,7 @@ begin
         // OutTextXY -- which draws on the background, not on this surface.
         this.OutTextXY (CurX, CurY, Text);
 
-        var Step := GlyphRun (Text) * Size;
+        var Step := RunExtent (Text);
 
         if Dir = 0 then CurX := CurX + Step;
         else if Dir = 90 then CurY := CurY - Step;
@@ -4180,6 +4701,57 @@ end
 function GetLineSettings (V : ViewPort) : LineSettings;
 begin
     Exit V.GetLineSettings ();
+end
+
+/// Lifts a rectangle off a viewport as an Image. See `GetImage`.
+function GetImage (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
+                   Y2 : Integer) : Image;
+begin
+    Exit V.GetImage (X1, Y1, X2, Y2);
+end
+
+/// Draws an Image onto a viewport. See `PutImage`.
+procedure PutImage (V : ViewPort, X : Integer, Y : Integer, Img : Image,
+                    Mode : Integer);
+begin
+    V.PutImage (X, Y, Img, Mode);
+end
+
+/// A viewport's text turn, size and justification. See `GetTextSettings`.
+function GetTextSettings (V : ViewPort) : TextSettings;
+begin
+    Exit V.GetTextSettings ();
+end
+
+/// Where a viewport sits and how big it is. See `GetViewSettings`.
+function GetViewSettings (V : ViewPort) : ViewSettings;
+begin
+    Exit V.GetViewSettings ();
+end
+
+/// Puts every pen of a viewport back. See `GraphDefaults`.
+procedure GraphDefaults (V : ViewPort);
+begin
+    V.GraphDefaults ();
+end
+
+/// Sets how a viewport's pen strokes combine. See `SetWriteMode`.
+procedure SetWriteMode (V : ViewPort, Mode : Integer);
+begin
+    V.SetWriteMode (Mode);
+end
+
+/// How a viewport's pen strokes combine. See `SetWriteMode`.
+function GetWriteMode (V : ViewPort) : Integer;
+begin
+    Exit V.GetWriteMode ();
+end
+
+/// Magnifies a viewport's free text by a ratio. See `SetUserCharSize`.
+procedure SetUserCharSize (V : ViewPort, MultX : Integer, DivX : Integer,
+                           MultY : Integer, DivY : Integer);
+begin
+    V.SetUserCharSize (MultX, DivX, MultY, DivY);
 end
 
 /// The color of a pixel of a viewport. See `ViewPort`.
@@ -10161,6 +10733,857 @@ begin
     // GetBkColor was already here, arriving with SetBkColor.
     SetBkColor (V, Brown);
     AssertEqual (Brown, GetBkColor (V));
+
+    CloseGraph ();
+end
+
+test 'GetImage And PutImage Carry A Rectangle Unchanged';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'image', False);
+
+    var V := ViewPort (1, 1, 80, 60, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (10, 10, 19, 19);
+    V.SetColor (Yellow);
+    V.Line (10, 10, 19, 19);
+
+    var Img := V.GetImage (10, 10, 19, 19);
+
+    // The corners are inclusive, so this is ten by ten and not nine.
+    AssertEqual (10, Img.W);
+    AssertEqual (10, Img.H);
+
+    V.PutImage (40, 30, Img, CopyPut);
+
+    // Every pixel of the copy equals its original, the diagonal included.
+    for var Y := 0; Y < 10; Y := Y + 1 do
+        for var X := 0; X < 10; X := X + 1 do
+            AssertEqual (V.GetPixel (10 + X, 10 + Y),
+                         V.GetPixel (40 + X, 30 + Y));
+
+    AssertEqual (Yellow, V.GetPixel (40, 30));
+    AssertEqual (Red, V.GetPixel (41, 30));
+
+    CloseGraph ();
+end
+
+test 'An Image Carries Transparency As Faithfully As Color';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgtrans', False);
+
+    var V := ViewPort (1, 1, 40, 40, 1);
+
+    // Two painted pixels in an otherwise untouched square.
+    V.PutPixel (5, 5, Green);
+    V.PutPixel (7, 7, Blue);
+
+    var Img := V.GetImage (5, 5, 7, 7);
+
+    V.PutImage (20, 20, Img, CopyPut);
+
+    AssertEqual (Green, V.GetPixel (20, 20));
+    AssertEqual (Blue, V.GetPixel (22, 22));
+
+    // What was unpainted comes back unpainted rather than as black, which is
+    // what lets a lifted region be put back without a mark.
+    AssertEqual (Transparent, V.GetPixel (21, 21));
+    AssertEqual (Transparent, V.GetPixel (21, 20));
+
+    CloseGraph ();
+end
+
+test 'CopyPut Restores Exactly What Was Taken';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgrestore', False);
+
+    var V := ViewPort (1, 1, 60, 40, 1);
+
+    V.SetFillStyle (HatchFill, LightGreen);
+    V.Bar (1, 1, 60, 40);
+    V.SetColor (Red);
+    V.Circle (30, 20, 12);
+
+    var Under := V.GetImage (20, 10, 39, 29);
+
+    // Every pixel of the region as it stood, so the restore can be checked
+    // against the truth rather than against a guess about the drawing.
+    var Was := [];
+
+    for var Y := 10; Y <= 29; Y := Y + 1 do
+        for var X := 20; X <= 39; X := X + 1 do
+            Was.Add (V.GetPixel (X, Y));
+
+    // Scribble over the region, then put back what was underneath.
+    V.SetFillStyle (SolidFill, White);
+    V.Bar (20, 10, 39, 29);
+
+    AssertEqual (White, V.GetPixel (30, 20));
+
+    V.PutImage (20, 10, Under, CopyPut);
+
+    var At := 0;
+
+    for var Y := 10; Y <= 29; Y := Y + 1 do
+        for var X := 20; X <= 39; X := X + 1 do
+        begin
+            AssertEqual (Was[At], V.GetPixel (X, Y));
+
+            At := At + 1;
+        end
+
+    // And the region really did hold both figures, or the check above would
+    // be comparing a blank square with itself.
+    AssertTrue (Red in Was);
+    AssertTrue (LightGreen in Was);
+
+    CloseGraph ();
+end
+
+test 'XorPut Twice Puts The Surface Back';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgxor', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetFillStyle (HatchFill, LightCyan);
+    V.Bar (1, 1, 40, 30);
+
+    var Before := V.GetImage (1, 1, 40, 30);
+
+    var Sprite := V.GetImage (2, 2, 9, 9);
+
+    V.PutImage (20, 10, Sprite, XorPut);
+
+    var Changed := False;
+
+    for var Y := 10; Y < 18; Y := Y + 1 do
+        for var X := 20; X < 28; X := X + 1 do
+            if V.GetPixel (X, Y) <> Before.Bits.GetInt (((Y - 1) * 40 + X - 1) * 4) + 16777216 then
+                Changed := True;
+
+    AssertTrue (Changed);
+
+    // Written a second time it cancels: (a xor b) xor b is a, whatever the
+    // bits mean -- which is how a sprite moves without its background saved.
+    V.PutImage (20, 10, Sprite, XorPut);
+
+    for var Y := 1; Y <= 30; Y := Y + 1 do
+        for var X := 1; X <= 40; X := X + 1 do
+        begin
+            var Was := Before.Bits.GetInt (((Y - 1) * 40 + X - 1) * 4);
+
+            if Was = 0 then AssertEqual (Transparent, V.GetPixel (X, Y));
+            else AssertEqual (Was + 16777216, V.GetPixel (X, Y));
+        end
+
+    CloseGraph ();
+end
+
+test 'TransparentPut Skips What The Image Never Painted';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgtp', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    // A sprite: one painted pixel in an unpainted square.
+    V.PutPixel (2, 2, Yellow);
+
+    var Sprite := V.GetImage (1, 1, 3, 3);
+
+    // A background to lay it over.
+    V.SetFillStyle (SolidFill, Blue);
+    V.Bar (20, 20, 30, 28);
+
+    V.PutImage (21, 21, Sprite, TransparentPut);
+
+    // The painted pixel lands; the rest of the square leaves the background
+    // showing, which CopyPut could not do.
+    AssertEqual (Yellow, V.GetPixel (22, 22));
+    AssertEqual (Blue, V.GetPixel (21, 21));
+    AssertEqual (Blue, V.GetPixel (23, 23));
+
+    // CopyPut in the same place blanks them instead.
+    V.PutImage (21, 21, Sprite, CopyPut);
+
+    AssertEqual (Yellow, V.GetPixel (22, 22));
+    AssertEqual (Transparent, V.GetPixel (21, 21));
+
+    CloseGraph ();
+end
+
+test 'The Bitwise Modes Combine As Their Names Say';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgbits', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    // Red is 0xAA0000 and Blue is 0x0000AA, so their union is Magenta and
+    // the palette's own arithmetic shows the mode working.
+    V.PutPixel (1, 1, Red);
+
+    var Ink := V.GetImage (1, 1, 1, 1);
+
+    V.PutPixel (10, 10, Blue);
+    V.PutImage (10, 10, Ink, OrPut);
+
+    AssertEqual (Magenta, V.GetPixel (10, 10));
+
+    // And their intersection is Red again.
+    V.PutImage (10, 10, Ink, AndPut);
+
+    AssertEqual (Red, V.GetPixel (10, 10));
+
+    // NotPut inverts the color and keeps the image opaque: Red's inverse is
+    // LightCyan, these being complementary in the CGA palette.
+    V.PutImage (20, 20, Ink, NotPut);
+
+    AssertEqual (LightCyan, V.GetPixel (20, 20));
+
+    CloseGraph ();
+end
+
+test 'ImageSize Says What A Rectangle Will Cost';
+begin
+    // Four bytes to the pixel, the corners inclusive -- and it needs no
+    // window, being arithmetic on four numbers.
+    CloseGraph ();
+
+    AssertEqual (4, ImageSize (1, 1, 1, 1));
+    AssertEqual (400, ImageSize (1, 1, 10, 10));
+    AssertEqual (4, ImageSize (7, 9, 7, 9));
+    AssertEqual (80, ImageSize (5, 5, 9, 8));
+
+    var Message := '';
+
+    try ImageSize (10, 1, 9, 5); except on e : String do Message := e; end
+    AssertEqual ('ImageSize wants X2 >= X1 and Y2 >= Y1.', Message);
+
+    Message := '';
+    try ImageSize (1, 10, 5, 9); except on e : String do Message := e; end
+    AssertEqual ('ImageSize wants X2 >= X1 and Y2 >= Y1.', Message);
+end
+
+test 'An Image Costs What ImageSize Said It Would';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgcost', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    var Img := V.GetImage (5, 5, 14, 12);
+
+    // The verb and the object have to agree, or one of them is lying.
+    AssertEqual (ImageSize (5, 5, 14, 12), Img.W * Img.H * 4);
+    AssertEqual (10, Img.W);
+    AssertEqual (8, Img.H);
+
+    CloseGraph ();
+end
+
+test 'An Image Lifted From The Edge Reads Transparent Beyond It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgedge', False);
+
+    var V := ViewPort (1, 1, 20, 20, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (1, 1, 20, 20);
+
+    // Half on the surface, half past its corner.
+    var Img := V.GetImage (18, 18, 23, 23);
+
+    AssertEqual (6, Img.W);
+    AssertEqual (6, Img.H);
+
+    V.Clear ();
+    V.PutImage (1, 1, Img, CopyPut);
+
+    // What was on the surface came back; what was past its edge is
+    // transparent rather than out of bounds.
+    AssertEqual (Red, V.GetPixel (1, 1));
+    AssertEqual (Red, V.GetPixel (3, 3));
+    AssertEqual (Transparent, V.GetPixel (4, 4));
+
+    CloseGraph ();
+end
+
+test 'PutImage Clips At The Edge And Leaves The Pen Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgclip', False);
+
+    var V := ViewPort (1, 1, 20, 20, 1);
+
+    V.PutPixel (1, 1, Yellow);
+
+    var Img := V.GetImage (1, 1, 4, 4);
+
+    V.PenTo (7, 8);
+
+    // Mostly past the far corner, and partly before the near one: neither
+    // raises, the edge being the clip.
+    V.PutImage (18, 18, Img, CopyPut);
+    V.PutImage (0 - 1, 0 - 1, Img, CopyPut);
+
+    AssertEqual (Yellow, V.GetPixel (18, 18));
+    AssertEqual (7, V.GetX ());
+    AssertEqual (8, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'An Image Moves Between Surfaces';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgmove', False);
+
+    var A := ViewPort (1, 1, 30, 30, 1);
+    var B := ViewPort (1, 1, 30, 30, 2);
+
+    A.SetFillStyle (XHatchFill, LightMagenta);
+    A.Bar (1, 1, 10, 10);
+
+    // An Image belongs to no surface once lifted, so it goes anywhere.
+    B.PutImage (15, 15, A.GetImage (1, 1, 10, 10), CopyPut);
+
+    for var Y := 0; Y < 10; Y := Y + 1 do
+        for var X := 0; X < 10; X := X + 1 do
+            AssertEqual (A.GetPixel (1 + X, 1 + Y), B.GetPixel (15 + X, 15 + Y));
+
+    CloseGraph ();
+end
+
+test 'The Image Verbs Refuse What They Should';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgraise', False);
+
+    var V := ViewPort (1, 1, 20, 20, 1);
+
+    var Message := '';
+
+    try V.GetImage (10, 1, 9, 5); except on e : String do Message := e; end
+    AssertEqual ('GetImage wants X2 >= X1 and Y2 >= Y1.', Message);
+
+    Message := '';
+    try V.GetImage (1, 10, 5, 9); except on e : String do Message := e; end
+    AssertEqual ('GetImage wants X2 >= X1 and Y2 >= Y1.', Message);
+
+    var Img := V.GetImage (1, 1, 4, 4);
+
+    Message := '';
+    try V.PutImage (1, 1, Img, 6); except on e : String do Message := e; end
+    AssertEqual ('PutImage wants a known mode.', Message);
+
+    Message := '';
+    try V.PutImage (1, 1, Img, 0 - 1); except on e : String do Message := e; end
+    AssertEqual ('PutImage wants a known mode.', Message);
+
+    Message := '';
+    try Image (0, 4); except on e : String do Message := e; end
+    AssertEqual ('An Image needs a positive size.', Message);
+
+    CloseGraph ();
+
+    Message := '';
+    try V.GetImage (1, 1, 4, 4); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.PutImage (1, 1, Img, CopyPut); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'The GetImage And PutImage Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'imgalias', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    SetFillStyle (V, SolidFill, LightGreen);
+    Bar (V, 1, 1, 5, 5);
+
+    var Img := GetImage (V, 1, 1, 5, 5);
+
+    PutImage (V, 20, 20, Img, CopyPut);
+
+    AssertEqual (LightGreen, GetPixel (V, 22, 22));
+    AssertEqual (100, ImageSize (1, 1, 5, 5));
+
+    CloseGraph ();
+end
+
+test 'The Exclusive Or Primitive Answers Known Values';
+begin
+    // The language has no bitwise operators, so this one is foreign and gets
+    // asserted against values worked out by hand.
+    AssertEqual (6, XorWords (12, 10));
+    AssertEqual (0, XorWords (255, 255));
+    AssertEqual (255, XorWords (0, 255));
+    AssertEqual (65535, XorWords (65280, 255));
+
+    // And it is its own inverse, which is the whole reason it is here.
+    AssertEqual (11141120, XorWords (XorWords (11141120, 5635925), 5635925));
+end
+
+test 'XorPut Draws A Line Twice And Leaves No Mark';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'wmode', False);
+
+    var V := ViewPort (1, 1, 60, 40, 1);
+
+    V.SetFillStyle (HatchFill, LightGreen);
+    V.Bar (1, 1, 60, 40);
+
+    var Before := V.GetImage (1, 1, 60, 40);
+
+    AssertEqual (CopyPut, V.GetWriteMode ());
+
+    V.SetWriteMode (XorPut);
+    V.SetColor (Red);
+    V.Line (5, 5, 55, 35);
+
+    AssertTrue (V.GetPixel (5, 5) <> Before.Bits.GetInt (0) + 16777216);
+
+    // The same line again cancels exactly, which is what a rubber band needs.
+    V.Line (5, 5, 55, 35);
+
+    for var Y := 1; Y <= 40; Y := Y + 1 do
+        for var X := 1; X <= 60; X := X + 1 do
+        begin
+            var Was := Before.Bits.GetInt (((Y - 1) * 60 + X - 1) * 4);
+
+            if Was = 0 then AssertEqual (Transparent, V.GetPixel (X, Y));
+            else AssertEqual (Was + 16777216, V.GetPixel (X, Y));
+        end
+
+    CloseGraph ();
+end
+
+test 'The Write Mode Governs Every Verb The Pen Draws';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'wmodeall', False);
+
+    var V := ViewPort (1, 1, 80, 80, 1);
+
+    V.SetFillStyle (SolidFill, Blue);
+    V.Bar (1, 1, 80, 80);
+
+    var Before := V.GetImage (1, 1, 80, 80);
+
+    V.SetWriteMode (XorPut);
+    V.SetColor (Yellow);
+
+    // Turbo Pascal named only the straight verbs. One pen, one rule: the
+    // curves obey it too, and each figure drawn twice cancels.
+    V.Rectangle (10, 10, 40, 30);
+    V.Rectangle (10, 10, 40, 30);
+    V.Circle (50, 50, 20);
+    V.Circle (50, 50, 20);
+    V.Ellipse (30, 60, 0, 360, 18, 10);
+    V.Ellipse (30, 60, 0, 360, 18, 10);
+    V.DrawPoly ([[5, 70], [20, 78], [35, 70], [5, 70]]);
+    V.DrawPoly ([[5, 70], [20, 78], [35, 70], [5, 70]]);
+
+    for var Y := 1; Y <= 80; Y := Y + 1 do
+        for var X := 1; X <= 80; X := X + 1 do
+            AssertEqual (Before.Bits.GetInt (((Y - 1) * 80 + X - 1) * 4) + 16777216,
+                         V.GetPixel (X, Y));
+
+    CloseGraph ();
+end
+
+test 'The Write Mode Leaves The Fills And PutPixel Alone';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'wmodefill', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetWriteMode (XorPut);
+
+    // A fill lays its own pen in runs and does not combine; PutPixel writes a
+    // color of its own and bypasses the pen already.
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (1, 1, 20, 20);
+    V.Bar (1, 1, 20, 20);
+
+    AssertEqual (Red, V.GetPixel (5, 5));
+
+    V.PutPixel (30, 5, Green);
+    V.PutPixel (30, 5, Green);
+
+    AssertEqual (Green, V.GetPixel (30, 5));
+
+    CloseGraph ();
+end
+
+test 'SetWriteMode Refuses A Mode That Is Not A Write Mode';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'wmoderaise', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    var Message := '';
+
+    // PutImage's other four modes are its own; the pen takes two.
+    try V.SetWriteMode (OrPut); except on e : String do Message := e; end
+    AssertEqual ('SetWriteMode wants CopyPut or XorPut.', Message);
+
+    Message := '';
+    try V.SetWriteMode (TransparentPut); except on e : String do Message := e; end
+    AssertEqual ('SetWriteMode wants CopyPut or XorPut.', Message);
+
+    CloseGraph ();
+end
+
+test 'SetUserCharSize Stretches Text By A Ratio';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ucs', False);
+
+    var V := ViewPort (1, 1, 400, 200, 1);
+
+    var W1 := V.TextWidth ('abc');
+    var H1 := V.TextHeight ('abc');
+
+    // Half again as wide at the same height -- which a whole-number CharSize
+    // cannot express at all.
+    V.SetUserCharSize (3, 2, 1, 1);
+
+    AssertEqual (W1 * 3 div 2, V.TextWidth ('abc'));
+    AssertEqual (H1, V.TextHeight ('abc'));
+
+    // And the other way: squeezed, which Turbo Pascal's bitmap font could
+    // not do either.
+    V.SetUserCharSize (1, 2, 1, 2);
+
+    AssertEqual (W1 div 2, V.TextWidth ('abc'));
+    AssertEqual (H1 div 2, V.TextHeight ('abc'));
+
+    // A whole-number size is the ratio N over one, so the two setters agree.
+    V.SetTextStyle (0, 2);
+
+    AssertEqual (W1 * 2, V.TextWidth ('abc'));
+
+    V.SetUserCharSize (2, 1, 2, 1);
+
+    AssertEqual (W1 * 2, V.TextWidth ('abc'));
+    AssertEqual (H1 * 2, V.TextHeight ('abc'));
+
+    CloseGraph ();
+end
+
+test 'A Stretched Glyph Really Covers The Wider Box';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ucsdraw', False);
+
+    var V := ViewPort (1, 1, 300, 100, 1);
+
+    V.SetColor (White);
+    V.SetUserCharSize (3, 1, 1, 1);
+    V.OutTextXY (10, 10, 'M');
+
+    var MinX := 9999; var MaxX := 0; var MaxY := 0;
+
+    for var Y := 1; Y <= 100; Y := Y + 1 do
+        for var X := 1; X <= 300; X := X + 1 do
+            if V.GetPixel (X, Y) <> Transparent then
+            begin
+                if X < MinX then MinX := X;
+                if X > MaxX then MaxX := X;
+                if Y > MaxY then MaxY := Y;
+            end
+
+    // Three times as wide as it is at one to one, and no taller: the
+    // measurement and the ink have to agree or one of them is lying.
+    AssertTrue (MaxX - MinX + 1 > 2 * CellWidth ());
+    AssertTrue (MaxY <= 10 + V.TextHeight ('M'));
+
+    CloseGraph ();
+end
+
+test 'SetUserCharSize Refuses A Term That Is Not Positive';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ucsraise', False);
+
+    var V := ViewPort (1, 1, 100, 50, 1);
+
+    for var Bad in [[0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1], [1, 1, 1, 0]] do
+    begin
+        var Message := '';
+
+        try V.SetUserCharSize (Bad[0], Bad[1], Bad[2], Bad[3]);
+        except on e : String do Message := e; end
+
+        AssertEqual ('SetUserCharSize wants positive terms.', Message);
+    end
+
+    CloseGraph ();
+end
+
+test 'GetTextSettings Saves A Text State That Can Be Put Back';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'textset', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    // A fresh viewport writes upright, at one to one, from the top left.
+    var Fresh := V.GetTextSettings ();
+
+    AssertEqual (0, Fresh.Direction);
+    AssertEqual (1, Fresh.CharSize);
+    AssertEqual (LeftText, Fresh.Horiz);
+    AssertEqual (TopText, Fresh.Vert);
+
+    V.SetTextStyle (90, 2);
+    V.SetTextJustify (CenterText, BottomText);
+
+    var Saved := V.GetTextSettings ();
+
+    AssertEqual (90, Saved.Direction);
+    AssertEqual (2, Saved.CharSize);
+    AssertEqual (CenterText, Saved.Horiz);
+    AssertEqual (BottomText, Saved.Vert);
+    AssertEqual (2, Saved.MultX);
+    AssertEqual (1, Saved.DivX);
+
+    // Change everything, then put the saved state back through the setters
+    // whose arguments the fields are named for.
+    V.SetTextStyle (180, 1);
+    V.SetTextJustify (RightText, TopText);
+
+    V.SetTextStyle (Saved.Direction, Saved.CharSize);
+    V.SetTextJustify (Saved.Horiz, Saved.Vert);
+
+    AssertEqual (90, V.Dir);
+    AssertEqual (2, V.Size);
+    AssertEqual (CenterText, V.HJust);
+    AssertEqual (BottomText, V.VJust);
+
+    CloseGraph ();
+end
+
+test 'A User Char Size Reports Itself As A Ratio And A Zero';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'textsetucs', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    V.SetUserCharSize (3, 2, 5, 4);
+
+    var S := V.GetTextSettings ();
+
+    // Turbo Pascal's convention: a CharSize of zero says the size is a ratio.
+    // The four terms say what it is, so the zero hides nothing.
+    AssertEqual (0, S.CharSize);
+    AssertEqual (3, S.MultX);
+    AssertEqual (2, S.DivX);
+    AssertEqual (5, S.MultY);
+    AssertEqual (4, S.DivY);
+
+    // And it round trips through the verb that set it.
+    V.SetTextStyle (0, 1);
+    AssertEqual (1, V.GetTextSettings ().CharSize);
+
+    V.SetUserCharSize (S.MultX, S.DivX, S.MultY, S.DivY);
+    AssertEqual (0, V.GetTextSettings ().CharSize);
+    AssertEqual (3, V.GetTextSettings ().MultX);
+
+    CloseGraph ();
+end
+
+test 'GetViewSettings Answers The Corners A ViewPort Occupies';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'viewset', False);
+
+    var V := ViewPort (100, 60, 200, 150, 1);
+
+    var S := V.GetViewSettings ();
+
+    // Inclusive corners, so the far one is X + W - 1 -- the arithmetic worth
+    // having a verb for.
+    AssertEqual (100, S.X1);
+    AssertEqual (60, S.Y1);
+    AssertEqual (299, S.X2);
+    AssertEqual (209, S.Y2);
+
+    // A viewport's edge is always its clip; there is no way to ask otherwise.
+    AssertTrue (S.Clip);
+
+    // And it follows the surface when the surface moves.
+    V.MoveTo (10, 20);
+
+    AssertEqual (10, V.GetViewSettings ().X1);
+    AssertEqual (209, V.GetViewSettings ().X2);
+
+    CloseGraph ();
+end
+
+test 'GraphDefaults Puts Every Pen Back Without Erasing Anything';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'defaults', False);
+
+    var V := ViewPort (50, 50, 100, 80, 1);
+
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar (1, 1, 100, 80);
+
+    // Every pen moved away from its default.
+    V.SetColor (Yellow);
+    V.SetLineStyle (DashedLn, 0, 5);
+    V.SetFillStyle (XHatchFill, Green);
+    V.SetBkColor (Blue);
+    V.SetWriteMode (XorPut);
+    V.SetTextStyle (90, 3);
+    V.SetTextJustify (RightText, BottomText);
+    V.PenTo (40, 30);
+
+    V.GraphDefaults ();
+
+    AssertEqual (White, V.GetColor ());
+    AssertEqual (SolidLn, V.GetLineSettings ().Style);
+    AssertEqual (65535, V.GetLineSettings ().Pattern);
+    AssertEqual (NormWidth, V.GetLineSettings ().Thickness);
+    AssertEqual (SolidFill, V.GetFillStyle ());
+    AssertEqual (White, V.GetFillColor ());
+    AssertEqual (255, V.GetFillPattern ()[0]);
+    AssertEqual (Transparent, V.GetBkColor ());
+    AssertEqual (CopyPut, V.GetWriteMode ());
+    AssertEqual (0, V.GetTextSettings ().Direction);
+    AssertEqual (1, V.GetTextSettings ().CharSize);
+    AssertEqual (LeftText, V.GetTextSettings ().Horiz);
+    AssertEqual (1, V.GetX ());
+    AssertEqual (1, V.GetY ());
+
+    // It resets the pens, not the picture -- Clear is what erases.
+    AssertEqual (Red, V.GetPixel (20, 20));
+
+    // Nor what the surface IS: where it sits, how big, how solid.
+    AssertEqual (50, V.GetViewSettings ().X1);
+    AssertEqual (100, V.W);
+    AssertEqual (1, V.Order);
+
+    CloseGraph ();
+end
+
+test 'SetAspectRatio Replaces The Measured Ratio Until InitGraph';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'aspset', False);
+
+    // Measured first, so it can be put back afterward -- which is the way
+    // back, there being no verb for it.
+    var Measured := GetAspectRatio ();
+
+    AssertTrue (Measured < 1.0);
+
+    SetAspectRatio (1.0);
+    AssertEqual (1.0, GetAspectRatio ());
+
+    SetAspectRatio (2.5);
+    AssertEqual (2.5, GetAspectRatio ());
+
+    SetAspectRatio (Measured);
+    AssertEqual (Measured, GetAspectRatio ());
+
+    var Message := '';
+
+    try SetAspectRatio (0.0); except on e : String do Message := e; end
+    AssertEqual ('SetAspectRatio wants a ratio above zero.', Message);
+
+    Message := '';
+    try SetAspectRatio (0.0 - 1.0); except on e : String do Message := e; end
+    AssertEqual ('SetAspectRatio wants a ratio above zero.', Message);
+
+    // A window that closes takes its stretch with it.
+    SetAspectRatio (3.0);
+    CloseGraph ();
+    InitGraph (640, 480, 'aspset2', False);
+
+    AssertEqual (Measured, GetAspectRatio ());
+
+    CloseGraph ();
+
+    Message := '';
+    try SetAspectRatio (1.0); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'The New Settings Verbs Refuse A Closed Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'newdead', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.GetTextSettings (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.GetViewSettings (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.GraphDefaults (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.SetWriteMode (XorPut); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.GetWriteMode (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.SetUserCharSize (1, 1, 1, 1); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'The New Settings Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'newalias', False);
+
+    var V := ViewPort (20, 30, 120, 60, 1);
+
+    SetWriteMode (V, XorPut);
+    AssertEqual (XorPut, GetWriteMode (V));
+
+    SetUserCharSize (V, 3, 2, 1, 1);
+    AssertEqual (0, GetTextSettings (V).CharSize);
+    AssertEqual (3, GetTextSettings (V).MultX);
+
+    AssertEqual (20, GetViewSettings (V).X1);
+    AssertEqual (139, GetViewSettings (V).X2);
+
+    GraphDefaults (V);
+
+    AssertEqual (CopyPut, GetWriteMode (V));
+    AssertEqual (1, GetTextSettings (V).CharSize);
 
     CloseGraph ();
 end
