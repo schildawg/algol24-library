@@ -16,17 +16,19 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` |
-| [`Arc`](#arc) | procedure, alias | `graph` |
+| [`Arc`](#arc) | procedure, alias of `ViewPort.Arc` | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Blink`](#blink) | constant | `graph` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
+| [`Circle`](#circle) | procedure, alias of `ViewPort.Circle` | `graph` |
 | [`ClrEol`](#clreol) | procedure | `graph` |
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Black` … `White`](#colors) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
 | [`Exp`](#exp) | function | `math` |
+| [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`Frac`](#frac) | function | `math` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
@@ -72,6 +74,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
+| [`SetFillStyle`](#setfillstyle) | procedures, aliases of `ViewPort.SetFillStyle` and `SetFillPattern` | `graph` |
 | [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
@@ -580,6 +583,69 @@ closed without complaint
 
 ---
 
+## Circle
+
+*procedure, alias of `ViewPort.Circle`* — unit `graph`
+
+**Function**
+
+Draws a circle on a viewport.
+
+**Declaration**
+
+```algol24
+procedure Circle (V : ViewPort, X : Integer, Y : Integer, Radius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Circle (V, …)` is `V.Circle (…)`.
+
+[`Arc`](#arc) swept the whole way round, and everything said there holds — the
+pen's [color](#setcolor), the [line style](#setlinestyle)'s pattern, thickness
+spreading along the radius, and the pen left where it was.
+
+The **outline** only. A filled disc waits on the figures that take a fill;
+[`SetFillStyle`](#setfillstyle) is the state they will use.
+
+Raises `Circle needs a radius of zero or more.` and `CloseGraph has closed
+this surface.`
+
+**See also**
+
+[`Arc`](#arc), [`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'circle', False);
+
+var V := ViewPort (100, 60, 300, 300, 1);
+
+SetColor (V, LightCyan);
+Circle (V, 150, 150, 120);
+
+SetColor (V, Yellow);
+SetLineStyle (V, DottedLn, 0, ThickWidth);
+Circle (V, 150, 150, 60);
+Show (V);
+
+// Three o'clock on the outer circle is lit; the middle is hollow.
+System.WriteLn (V.Buf.GetInt ((149 * 300 + 269) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((149 * 300 + 149) * 4) = 0);
+
+CloseGraph ();
+```
+
+```console
+true
+true
+```
+
+---
+
 ## ClrEol
 
 *procedure* — unit `graph`
@@ -835,6 +901,55 @@ WriteLn (Exp (1.0));
 1.0
 2.718281828459045
 ```
+
+---
+
+## FillStyles
+
+*constants* — unit `graph`
+
+**Function**
+
+The fill patterns [`SetFillStyle`](#setfillstyle) takes.
+
+**Declaration**
+
+```algol24
+const EmptyFill      := 0;     const HatchFill      := 7;
+const SolidFill      := 1;     const XHatchFill     := 8;
+const LineFill       := 2;     const InterleaveFill := 9;
+const LtSlashFill    := 3;     const WideDotFill    := 10;
+const SlashFill      := 4;     const CloseDotFill   := 11;
+const BkSlashFill    := 5;     const UserFill       := 12;
+const LtBkSlashFill  := 6;
+```
+
+**Remarks**
+
+Turbo Pascal's thirteen names, kept whole because a program written to them
+should still read. Each is an eight-by-eight bit pattern tiled across the
+figure being filled, one bit to the pixel.
+
+The bits themselves are this library's own — Turbo Pascal's exact patterns
+were a BGI implementation detail rather than a promise, the same reasoning
+that governs the [line styles](#linestyles).
+
+⚠️ **`EmptyFill` paints nothing at all**, leaving whatever is beneath showing
+through. Turbo Pascal filled with the background color there, which a surface
+that is transparent by default has no equivalent for — leaving the pixels
+alone is what *empty* means on a stack of surfaces.
+
+⚠️ **`UserFill` is not chosen by name.** It is what
+[`SetFillPattern`](#setfillstyle) sets, since a pattern without bits would be
+meaningless; passing it to `SetFillStyle` raises.
+
+**See also**
+
+[`LineStyles`](#linestyles), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+See [`SetFillStyle`](#setfillstyle).
 
 ---
 
@@ -3087,6 +3202,98 @@ true
 
 ---
 
+## SetFillStyle
+
+*procedures, aliases of `ViewPort.SetFillStyle` and `SetFillPattern`* — unit `graph`
+
+**Function**
+
+Sets the pattern and color figures are filled with.
+
+**Declaration**
+
+```algol24
+procedure SetFillStyle (V : ViewPort, Style : Integer, Color : Integer);
+procedure SetFillPattern (V : ViewPort, Rows : List, Color : Integer);
+
+function GetFillStyle (V : ViewPort) : Integer;
+function GetFillColor (V : ViewPort) : Integer;
+```
+
+**Remarks**
+
+[Aliases](#aliases) of the methods: `SetFillStyle (V, …)` is
+`V.SetFillStyle (…)`.
+
+⚠️ **The fill is a separate pen from the one [`SetColor`](#setcolor) sets.** A
+figure may be outlined in one color and filled in another, which is how Turbo
+Pascal's `Bar3D` and `PieSlice` were drawn. Setting one never disturbs the
+other.
+
+`Style` is one of the [fill patterns](#fillstyles) — an eight-by-eight bit
+pattern tiled across whatever is being filled. `SetFillPattern` supplies eight
+rows of the caller's own instead, each the eight bits of one row with the high
+bit leftmost, and sets the style to `UserFill`:
+
+```algol24
+SetFillPattern (V, [255, 129, 129, 129, 129, 129, 129, 255], Yellow);   // a box
+```
+
+⚠️ **The pattern is tiled from the surface's origin, not the figure's.** Two
+figures side by side therefore share one weave rather than each starting its
+own, which is what makes a patterned fill look woven rather than tiled.
+
+A fresh viewport fills `SolidFill` in `White`, as it draws.
+
+Nothing consults this state yet — the figures that take a fill are still to
+come. It is settled first because they will all want it, and because the
+choice between one pen and two is theirs to inherit rather than to argue.
+
+Raises `SetFillStyle wants a known pattern.`, `SetFillStyle wants UserFill
+from SetFillPattern.` for `UserFill` itself, `SetFillStyle wants an RGB
+color.`, `SetFillPattern wants eight rows.`, and `SetFillPattern wants an RGB
+color.`
+
+**See also**
+
+[`Colors`](#colors), [`FillStyles`](#fillstyles), [`SetColor`](#setcolor), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'fill', False);
+
+var V := ViewPort (10, 10, 100, 100, 1);
+
+SetFillStyle (V, HatchFill, LightGreen);
+
+System.WriteLn (GetFillStyle (V) = HatchFill);
+System.WriteLn (GetFillColor (V) = LightGreen);
+
+// The fill pen and the drawing pen are separate.
+SetColor (V, Red);
+System.WriteLn (GetColor (V) = Red);
+System.WriteLn (GetFillColor (V) = LightGreen);
+
+// A pattern of one's own: a hollow box, eight by eight.
+SetFillPattern (V, [255, 129, 129, 129, 129, 129, 129, 255], Yellow);
+System.WriteLn (GetFillStyle (V) = UserFill);
+
+CloseGraph ();
+```
+
+```console
+true
+true
+true
+true
+true
+```
+
+---
+
 ## SetLineStyle
 
 *procedure, alias of `ViewPort.SetLineStyle`* — unit `graph`
@@ -3839,7 +4046,8 @@ and `ViewPort needs a positive size.`
 **See also**
 
 Its methods each have a free-function [alias](#aliases) with an entry of its
-own: [`Arc`](#arc), [`Line`](#line), [`LineTo`](#lineto), [`LineRel`](#linerel),
+own: [`Arc`](#arc), [`Circle`](#circle), [`Line`](#line),
+[`LineTo`](#lineto), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
 [`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),
