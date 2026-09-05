@@ -112,6 +112,17 @@ procedure FillRect (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
                     Pattern : Pointer, Color : Integer);
     external 'alg_fill_rect' in 'libgraphffi.dylib';
 
+/// Fills a disc sector of the stamp target with an eight-by-eight pattern.
+///
+/// Private to this unit, and the companion to `FillRect` for the same
+/// reason: a slice of any size is thousands of pixels. Angles are degrees in
+/// the unit's own convention, and the C asks whether a point is within the
+/// sweep by cross product rather than arctangent.
+procedure FillSector (CX : Integer, CY : Integer, Radius : Integer,
+                      StartAngle : Integer, Sweep : Integer,
+                      Pattern : Pointer, Color : Integer);
+    external 'alg_fill_sector' in 'libgraphffi.dylib';
+
 /// Scrolls the stamp target up by DY pixel rows, filling the vacated band.
 ///
 /// Private to this unit.
@@ -317,6 +328,14 @@ var GridCols    := 80;
 var GridRows    := 25;
 
 
+// The sixteen bits of a line pattern, most significant first, so that
+// `LineBits[N mod 16]` is the bit position N walks onto. A table because the
+// alternative is computing a power of two per pixel -- a loop of up to
+// fifteen iterations inside the innermost loop of every line, arc and
+// ellipse, which measured as most of the cost of drawing one.
+var LineBits := [32768, 16384, 8192, 4096, 2048, 1024, 512, 256,
+                 128, 64, 32, 16, 8, 4, 2, 1];
+
 // The eight rows of each built-in fill pattern, high bit leftmost. Declared
 // beside the colors because they are the same kind of thing: a vocabulary the
 // era had, kept because a program written to it should still read.
@@ -418,6 +437,15 @@ begin
     SDL_PumpEvents ();
 
     LastPresentMs := Trunc (Clock () * 1000.0);
+end
+
+/// The bit a pattern walk is on at step N.
+///
+/// Private to this unit, and typed rather than a bare list read because a
+/// list answers Any and arithmetic on it would spread that outward.
+function LineBitAt (N : Integer) : Integer;
+begin
+    Exit LineBits[N mod 16];
 end
 
 /// The eight rows of a built-in fill pattern.
@@ -1934,12 +1962,7 @@ begin
         while True do
         begin
             // The pattern repeats every sixteen pixels; bit 15 leads.
-            var Place := 1;
-
-            for var K := 0; K < 15 - Tick mod 16; K := K + 1 do
-                Place := Place * 2;
-
-            if Bits div Place mod 2 = 1 then Nib (X0, Y0, Steep);
+            if Bits div LineBitAt (Tick) mod 2 = 1 then Nib (X0, Y0, Steep);
 
             Tick := Tick + 1;
 
@@ -2031,12 +2054,7 @@ begin
         begin
             var A := (StartAngle + Sweep * I / Steps) * Pi / 180.0;
 
-            var Place := 1;
-
-            for var K := 0; K < 15 - I mod 16; K := K + 1 do
-                Place := Place * 2;
-
-            if Bits div Place mod 2 = 1 then
+            if Bits div LineBitAt (I) mod 2 = 1 then
                 // Thickness spreads along the radius, which is the only
                 // direction that keeps a thick arc the same shape.
                 for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
@@ -2050,6 +2068,69 @@ begin
 
 
 
+
+
+    /// Fills and outlines a pie slice centred on X, Y.
+    ///
+    /// The wedge between two angles: filled with the current fill pattern
+    /// and color, then outlined with the pen and the current line style --
+    /// the arc, and the two radii closing it to the centre.
+    ///
+    /// Angles are `Arc`'s: degrees, zero at three o'clock, counterclockwise,
+    /// ninety at twelve. A sweep of 360 is the whole disc, and its two radii
+    /// coincide, so they are not drawn.
+    ///
+    /// The fill and the outline are separate pens, so a slice may be filled
+    /// in one color and edged in another -- which is what a pie chart wants,
+    /// and what `SetFillStyle` exists for.
+    ///
+    /// The pen is not moved.
+    ///
+    /// # Raises
+    /// `PieSlice needs a radius of zero or more.`, and `CloseGraph has
+    /// closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Pie Slice Fills Only Its Own Wedge`
+    procedure PieSlice (X : Integer, Y : Integer, StartAngle : Integer,
+                        EndAngle : Integer, Radius : Integer);
+    begin
+        Check ();
+
+        if Radius < 0 then raise 'PieSlice needs a radius of zero or more.';
+
+        var Sweep := EndAngle - StartAngle;
+
+        if Sweep < 0 then Sweep := Sweep + 360;
+
+        var WasX := PenX;
+        var WasY := PenY;
+
+        if Filling <> EmptyFill then
+        begin
+            StampTarget (Buf.Address, W, H);
+            FillSector (X, Y, Radius, StartAngle, Sweep, FillBuf.Address, FillInk);
+        end
+
+        // Outlined over the fill, so the edge shows.
+        this.Arc (X, Y, StartAngle, EndAngle, Radius);
+
+        if Sweep < 360 then
+        begin
+            var A := StartAngle * Pi / 180.0;
+            var B := EndAngle * Pi / 180.0;
+
+            this.Line (X, Y, X + Round (Radius * Cos (A)),
+                             Y - Round (Radius * Sin (A)));
+            this.Line (X, Y, X + Round (Radius * Cos (B)),
+                             Y - Round (Radius * Sin (B)));
+        end
+
+        PenX := WasX;
+        PenY := WasY;
+
+        Present ();
+    end
 
     /// Draws the lines joining a list of points.
     ///
@@ -2154,12 +2235,7 @@ begin
         begin
             var A := (StartAngle + Sweep * I / Steps) * Pi / 180.0;
 
-            var Place := 1;
-
-            for var K := 0; K < 15 - I mod 16; K := K + 1 do
-                Place := Place * 2;
-
-            if Bits div Place mod 2 = 1 then
+            if Bits div LineBitAt (I) mod 2 = 1 then
                 for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
                     this.PutPixel (X + Round ((XRadius + K) * Cos (A)),
                                    Y - Round ((YRadius + K) * Sin (A)), Pen);
@@ -3116,6 +3192,13 @@ procedure Bar (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
                Y2 : Integer);
 begin
     V.Bar (X1, Y1, X2, Y2);
+end
+
+/// Fills and outlines a pie slice on a viewport. See `PieSlice`.
+procedure PieSlice (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                    EndAngle : Integer, Radius : Integer);
+begin
+    V.PieSlice (X, Y, StartAngle, EndAngle, Radius);
 end
 
 /// Draws the lines joining a list of points. See `DrawPoly`.
@@ -6422,6 +6505,181 @@ begin
     DrawPoly (V, [[10, 10], [80, 10], [45, 70], [10, 10]]);
 
     AssertTrue (V.Buf.GetInt ((9 * 100 + 44) * 4) <> 0);
+
+    CloseGraph ();
+end
+
+// --------------------------------------------------------- pieslice tests --
+
+/// The wedge and nothing else: a point inside the sweep is filled, the
+/// opposite quadrant is untouched, and the centre belongs to every slice.
+test 'A Pie Slice Fills Only Its Own Wedge';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'pie', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Red);
+    V.PieSlice (100, 100, 0, 90, 60);
+
+    AssertTrue (V.Buf.GetInt ((79 * 200 + 119) * 4) <> 0);      // inside
+    AssertEqual (0, V.Buf.GetInt ((119 * 200 + 79) * 4));       // opposite
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 99) * 4) <> 0);       // the centre
+
+    // Beyond the radius, nothing -- 70 out along the zero ray of a 60 slice.
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 169) * 4));
+
+    CloseGraph ();
+end
+
+/// Two pens: the wedge is laid in the fill colour and edged in the pen's,
+/// drawn over it, which is what a pie chart's labelled slices want.
+test 'A Pie Slice Is Filled In One Colour And Edged In Another';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'pie2', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Red);
+    V.PieSlice (100, 100, 0, 90, 60);
+
+    // Well inside the wedge: the fill colour.
+    AssertEqual (Red - 16777216, V.Buf.GetInt ((84 * 200 + 114) * 4));
+
+    // On the zero-degree radius, which is outline drawn over the fill.
+    AssertEqual (White - 16777216, V.Buf.GetInt ((99 * 200 + 129) * 4));
+
+    CloseGraph ();
+end
+
+/// A whole turn is a disc, and its two radii coincide, so they are not
+/// drawn -- a spoke across a full pie would be a blemish.
+test 'A Pie Slice Of A Whole Turn Is A Disc Without Spokes';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'disc', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Blue);
+    V.PieSlice (100, 100, 0, 360, 60);
+
+    // Filled all the way round.
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((79 * 200 + 119) * 4));
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((119 * 200 + 79) * 4));
+
+    // And the zero ray carries no white spoke: the pixel just inside the
+    // rim on that ray is fill, not outline.
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((99 * 200 + 129) * 4));
+
+    CloseGraph ();
+end
+
+/// EmptyFill leaves the outline alone: the wedge is edged and hollow, which
+/// is how a slice is drawn without a colour.
+test 'A Pie Slice With An Empty Fill Is Only Its Outline';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'hollowpie', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (EmptyFill, Red);
+    V.PieSlice (100, 100, 0, 90, 60);
+
+    // Hollow inside...
+    AssertEqual (0, V.Buf.GetInt ((84 * 200 + 114) * 4));
+
+    // ... and edged: the arc at forty-five degrees, and the zero radius.
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 129) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 159) * 4) <> 0);
+
+    CloseGraph ();
+end
+
+test 'A Pie Slice Leaves The Pen And Refuses A Negative Radius';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'piepen', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.PenTo (13, 14);
+    V.SetFillStyle (SolidFill, White);
+    V.PieSlice (100, 100, 30, 120, 50);
+
+    AssertEqual (13, V.GetX ());
+    AssertEqual (14, V.GetY ());
+
+    var Message := '';
+
+    try V.PieSlice (50, 50, 0, 90, -1); except on e : String do Message := e; end
+    AssertEqual ('PieSlice needs a radius of zero or more.', Message);
+
+    CloseGraph ();
+end
+
+test 'A Pie Slice Is Clipped At The Viewport''s Edges';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'pieclip', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, White);
+    V.PieSlice (20, 15, 0, 360, 900);
+
+    // The whole surface is inside a disc that large, and nothing crashed.
+    var Lit := 0;
+
+    for var I := 0; I < 40 * 30; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (40 * 30, Lit);
+
+    CloseGraph ();
+end
+
+/// The sweep is the counterclockwise one, as everywhere else in the unit.
+test 'A Pie Slice Sweeps The Short Way Across Zero';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'piewrap', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Red);
+    V.PieSlice (100, 100, 340, 20, 60);
+
+    // Across three o'clock, filled...
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 129) * 4) <> 0);
+
+    // ... and the far side untouched.
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 69) * 4));
+
+    CloseGraph ();
+end
+
+test 'The PieSlice Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'piealias', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    SetColor (V, White);
+    SetFillStyle (V, SolidFill, LightGreen);
+    PieSlice (V, 100, 100, 0, 90, 60);
+
+    AssertEqual (LightGreen - 16777216, V.Buf.GetInt ((84 * 200 + 114) * 4));
 
     CloseGraph ();
 end

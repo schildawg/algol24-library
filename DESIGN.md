@@ -218,6 +218,15 @@ Interpreted, that divides into 0.84 s decoding the 630 KB glyph file, 1.46 s
 for the text half, and 3.07 s for the two charts — the line drawing, where
 every pixel is an interpreted `PutPixel`.
 
+The curves cost more again, and for a reason worth knowing: `Arc` and
+`Ellipse` call `Sin` and `Cos` per point, and each is a foreign call. A
+five-slice pie chart of radius 150 draws in about half a second, which is
+fine; forty full discs of radius 190 took thirteen. Replacing the
+power-of-two loop that tested the line pattern with a lookup table took a
+fifth off every line, arc and ellipse and cost nothing in clarity — the
+remaining time is the trig, and the answer to that, if it is ever wanted, is
+the same as everywhere else: draw the curve in C, or compile.
+
 Compiled is 25× faster and instant, which is what `--compile` is for; the
 cost is only ever felt while developing. **Accepted as it stands.** If it
 ever needs addressing, in increasing order of what it spends:

@@ -65,6 +65,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`PenRel`](#penrel) | procedure, alias | `graph` |
 | [`PenTo`](#pento) | procedure, alias | `graph` |
+| [`PieSlice`](#pieslice) | procedure, alias of `ViewPort.PieSlice` | `graph` |
 | [`Pi`](#pi) | constant | `math` |
 | [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
@@ -2849,6 +2850,95 @@ See [`Line`](#line), which begins its series with it.
 
 ---
 
+## PieSlice
+
+*procedure, alias of `ViewPort.PieSlice`* — unit `graph`
+
+**Function**
+
+Fills and outlines a pie slice on a viewport.
+
+**Declaration**
+
+```algol24
+procedure PieSlice (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                    EndAngle : Integer, Radius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `PieSlice (V, …)` is `V.PieSlice (…)`.
+
+The wedge between two angles: filled with the current fill pattern and color,
+then outlined with the pen and the current line style — the arc, and the two
+radii closing it to the centre.
+
+Angles are [`Arc`](#arc)'s: degrees, zero at three o'clock, counterclockwise,
+ninety at twelve, and the sweep is the counterclockwise one.
+
+⚠️ **A sweep of 360 is the whole disc, and draws no radii.** The two would
+coincide, and a spoke across a full pie is a blemish rather than an edge.
+
+⚠️ **Two pens.** The wedge is laid in the fill color and edged in the drawing
+color — which is exactly what a labelled pie chart wants, and what
+[`SetFillStyle`](#setfillstyle) is separate for. With `EmptyFill` the slice is
+outlined and hollow, which is how to draw one without a colour.
+
+The pen is not moved.
+
+The fill is drawn by C, as [`Bar`](#bar)'s is, and for the same reason. It
+asks whether a point lies within the sweep by **cross product rather than
+arctangent** — a ray divides the plane, and which side a point falls on
+answers the question exactly, with no transcendental per pixel and no need
+for a two-argument `ArcTan` the library does not have.
+
+Raises `PieSlice needs a radius of zero or more.` and `CloseGraph has closed
+this surface.`
+
+**See also**
+
+[`Arc`](#arc), [`Circle`](#circle), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'pie', False);
+
+var V := ViewPort (60, 40, 400, 400, 1);
+
+// A pie chart: each slice filled in its own colour and edged in white.
+var Shares := [22, 18, 25, 15, 20];
+var Inks   := [LightRed, Yellow, LightCyan, LightGreen, LightMagenta];
+var At     := 0;
+
+SetColor (V, White);
+
+for var I := 0; I < 5; I := I + 1 do
+begin
+    SetFillStyle (V, SolidFill, Inks[I]);
+    PieSlice (V, 200, 200, At * 36 div 10, (At + Shares[I]) * 36 div 10, 150);
+
+    At := At + Shares[I];
+end
+
+Show (V);
+
+// The first slice starts at three o'clock and sweeps upward.
+System.WriteLn (V.Buf.GetInt ((199 * 340 + 259) * 4) <> 0);
+System.WriteLn (GetColor (V) = White);
+
+CloseGraph ();
+```
+
+```console
+true
+true
+```
+
+---
+
 ## Pi
 
 *constant* — unit `math`
@@ -4399,7 +4489,7 @@ Its methods each have a free-function [alias](#aliases) with an entry of its
 own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`DrawPoly`](#drawpoly),
 [`Ellipse`](#ellipse), [`Line`](#line),
-[`LineTo`](#lineto), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
+[`LineTo`](#lineto), [`PieSlice`](#pieslice), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
 [`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),
