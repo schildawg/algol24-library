@@ -29,6 +29,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Black` … `White`](#colors) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
+| [`DrawPoly`](#drawpoly) | procedure, alias of `ViewPort.DrawPoly` | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias of `ViewPort.Ellipse` | `graph` |
 | [`Exp`](#exp) | function | `math` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
@@ -1036,6 +1037,90 @@ for var Deg := 0; Deg <= 180; Deg := Deg + 90 do
 0 deg -> 1.0
 90 deg -> 6.123233995736766E-17
 180 deg -> -1.0
+```
+
+---
+
+## DrawPoly
+
+*procedure, alias of `ViewPort.DrawPoly`* — unit `graph`
+
+**Function**
+
+Draws the lines joining a list of points.
+
+**Declaration**
+
+```algol24
+procedure DrawPoly (V : ViewPort, Points : List);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `DrawPoly (V, …)` is `V.DrawPoly (…)`.
+
+`Points` is a List of two-number Lists:
+
+```algol24
+DrawPoly (V, [[10, 10], [80, 10], [45, 70]]);
+```
+
+Turbo Pascal took a pointer and a count, because Pascal's array had no length
+of its own. The language has a List, so it is given one.
+
+⚠️ **The figure is not closed.** Three points draw *two* lines; the way to
+close a triangle is to repeat its first point as a fourth. That is Turbo
+Pascal's rule and it is kept because it is the more general of the two — an
+open polyline is a thing worth drawing, and a closing segment nobody asked for
+cannot be taken back. `FillPoly`, when it arrives, will close of its own
+accord, a filled shape having no open reading.
+
+Two points draw exactly a [`Line`](#line) — there is a test asserting the two
+paint the same pixels.
+
+⚠️ **Every point is checked before any line is drawn**, so a malformed list
+leaves the surface untouched rather than a figure broken off where the fault
+was.
+
+Drawn with the pen's [color](#setcolor) and the current
+[line style](#setlinestyle), segment by segment. The pen is not moved.
+
+Raises `DrawPoly wants at least two points.`, `DrawPoly wants points of two
+numbers.`, and `CloseGraph has closed this surface.`
+
+**See also**
+
+[`Line`](#line), [`Rectangle`](#rectangle), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'poly', False);
+
+var V := ViewPort (60, 60, 400, 300, 1);
+
+// A closed pentagon: the first point repeated as the last is what closes it.
+SetColor (V, LightCyan);
+DrawPoly (V, [[200, 30], [340, 130], [285, 270], [115, 270], [60, 130],
+              [200, 30]]);
+
+// And an open path, which is what leaving the repeat off is for.
+SetColor (V, Yellow);
+SetLineStyle (V, DashedLn, 0, ThickWidth);
+DrawPoly (V, [[80, 200], [140, 150], [200, 210], [260, 140], [320, 190]]);
+Show (V);
+
+System.WriteLn (GetX (V));
+System.WriteLn (GetColor (V) = Yellow);
+
+CloseGraph ();
+```
+
+```console
+1
+true
 ```
 
 ---
@@ -4312,6 +4397,7 @@ and `ViewPort needs a positive size.`
 
 Its methods each have a free-function [alias](#aliases) with an entry of its
 own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
+[`DrawPoly`](#drawpoly),
 [`Ellipse`](#ellipse), [`Line`](#line),
 [`LineTo`](#lineto), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),

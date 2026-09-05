@@ -2050,6 +2050,59 @@ begin
 
 
 
+
+    /// Draws the lines joining a list of points.
+    ///
+    /// Points is a List of two-number Lists -- `[[10, 10], [50, 10],
+    /// [30, 40]]` -- where Turbo Pascal took a pointer and a count. The
+    /// language has a List, so it is given one.
+    ///
+    /// The figure is NOT closed: three points draw two lines, and the way to
+    /// close a triangle is to repeat its first point as a fourth. That is
+    /// Turbo Pascal's rule, and it is kept because it is the more general of
+    /// the two -- an open polyline is a thing worth drawing, and a closing
+    /// segment nobody asked for cannot be taken back. `FillPoly`, when it
+    /// arrives, will close of its own accord, because a filled shape has no
+    /// open reading.
+    ///
+    /// Drawn with the pen's color and the current line style, segment by
+    /// segment; every point is checked before any line is drawn, so a
+    /// malformed list leaves the surface untouched rather than half drawn.
+    /// The pen is not moved.
+    ///
+    /// # Raises
+    /// `DrawPoly wants at least two points.` and `DrawPoly wants points of
+    /// two numbers.`, and `CloseGraph has closed this surface.` once the
+    /// window has gone.
+    ///
+    /// # Examples
+    /// `DrawPoly Joins Its Points And Does Not Close Them`
+    procedure DrawPoly (Points : List);
+    begin
+        Check ();
+
+        if Points.Length < 2 then raise 'DrawPoly wants at least two points.';
+
+        // Checked in full first: a malformed list should leave nothing
+        // behind rather than a figure broken off where the fault was.
+        for var P in Points do
+            if P.Length <> 2 then raise 'DrawPoly wants points of two numbers.';
+
+        var WasX := PenX;
+        var WasY := PenY;
+
+        for var I := 0; I < Points.Length - 1; I := I + 1 do
+        begin
+            var A := Points[I];
+            var B := Points[I + 1];
+
+            this.Line (A[0], A[1], B[0], B[1]);
+        end
+
+        PenX := WasX;
+        PenY := WasY;
+    end
+
     /// Draws an elliptical arc centred on X, Y.
     ///
     /// Turbo Pascal's Ellipse takes angles, so a whole ellipse is the sweep
@@ -3063,6 +3116,12 @@ procedure Bar (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
                Y2 : Integer);
 begin
     V.Bar (X1, Y1, X2, Y2);
+end
+
+/// Draws the lines joining a list of points. See `DrawPoly`.
+procedure DrawPoly (V : ViewPort, Points : List);
+begin
+    V.DrawPoly (Points);
 end
 
 /// Draws an elliptical arc on a viewport. See `Ellipse`.
@@ -6196,6 +6255,173 @@ begin
     Ellipse (V, 100, 100, 0, 360, 80, 30);
 
     AssertTrue (V.Buf.GetInt ((99 * 200 + 179) * 4) <> 0);
+
+    CloseGraph ();
+end
+
+// --------------------------------------------------------- drawpoly tests --
+
+/// Three points draw two lines, not three: the figure is left open, and the
+/// closing segment is the caller's to ask for.
+test 'DrawPoly Joins Its Points And Does Not Close Them';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'poly', False);
+
+    var Open   := ViewPort (1, 1, 100, 100, 1);
+    var Closed := ViewPort (1, 1, 100, 100, 2);
+
+    Open.SetColor (White);
+    Open.DrawPoly ([[10, 10], [80, 10], [45, 70]]);
+
+    Closed.SetColor (White);
+    Closed.DrawPoly ([[10, 10], [80, 10], [45, 70], [10, 10]]);
+
+    // Both draw the two given sides...
+    AssertTrue (Open.Buf.GetInt ((9 * 100 + 44) * 4) <> 0);
+    AssertTrue (Closed.Buf.GetInt ((9 * 100 + 44) * 4) <> 0);
+
+    // ... and only the closed one draws the third, from (45,70) to (10,10).
+    // Asked as "is anything on that row to the left of the apex", because
+    // the segment crosses y=40 at x=27.5 and either pixel is right.
+    var OpenLeft   := 0;
+    var ClosedLeft := 0;
+
+    for var X := 0; X < 44; X := X + 1 do
+    begin
+        if Open.Buf.GetInt ((39 * 100 + X) * 4) <> 0 then OpenLeft := OpenLeft + 1;
+        if Closed.Buf.GetInt ((39 * 100 + X) * 4) <> 0 then ClosedLeft := ClosedLeft + 1;
+    end
+
+    AssertEqual (0, OpenLeft);
+    AssertTrue (ClosedLeft > 0);
+
+    CloseGraph ();
+end
+
+test 'DrawPoly Paints Every Vertex It Was Given';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'verts', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    V.SetColor (White);
+    V.DrawPoly ([[10, 10], [80, 10], [80, 60], [10, 60], [10, 10]]);
+
+    for var P in [[10, 10], [80, 10], [80, 60], [10, 60]] do
+        AssertTrue (V.Buf.GetInt (((P[1] - 1) * 100 + P[0] - 1) * 4) <> 0);
+
+    // Hollow: an outline, not a fill.
+    AssertEqual (0, V.Buf.GetInt ((34 * 100 + 44) * 4));
+
+    CloseGraph ();
+end
+
+/// A polyline of two points is a line, which is the smallest thing the verb
+/// can mean and a good check that it means it.
+test 'DrawPoly Of Two Points Is A Line';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twopt', False);
+
+    var P := ViewPort (1, 1, 100, 100, 1);
+    var L := ViewPort (1, 1, 100, 100, 2);
+
+    P.SetColor (White);
+    P.DrawPoly ([[5, 5], [90, 60]]);
+
+    L.SetColor (White);
+    L.Line (5, 5, 90, 60);
+
+    var Same := True;
+
+    for var I := 0; I < 100 * 100; I := I + 1 do
+        if P.Buf.GetInt (I * 4) <> L.Buf.GetInt (I * 4) then Same := False;
+
+    AssertTrue (Same);
+
+    CloseGraph ();
+end
+
+/// A malformed list must leave nothing behind, not a figure broken off
+/// where the fault was -- which is why the points are checked in full first.
+test 'A Malformed DrawPoly Draws Nothing At All';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'badpoly', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+    var Message := '';
+
+    V.SetColor (White);
+
+    // The fault is in the third point, after two good sides.
+    try V.DrawPoly ([[10, 10], [80, 10], [45]]);
+    except on e : String do Message := e; end
+
+    AssertEqual ('DrawPoly wants points of two numbers.', Message);
+
+    var Lit := 0;
+
+    for var I := 0; I < 100 * 100; I := I + 1 do
+        if V.Buf.GetInt (I * 4) <> 0 then Lit := Lit + 1;
+
+    AssertEqual (0, Lit);
+
+    Message := '';
+    try V.DrawPoly ([[10, 10]]); except on e : String do Message := e; end
+    AssertEqual ('DrawPoly wants at least two points.', Message);
+
+    CloseGraph ();
+end
+
+test 'DrawPoly Uses The Line Style And Leaves The Pen';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'polystyle', False);
+
+    var Solid  := ViewPort (1, 1, 100, 100, 1);
+    var Dotted := ViewPort (1, 1, 100, 100, 2);
+
+    Solid.SetColor (White);
+    Solid.PenTo (3, 4);
+    Solid.DrawPoly ([[10, 50], [90, 50]]);
+
+    Dotted.SetColor (White);
+    Dotted.SetLineStyle (DottedLn, 0, NormWidth);
+    Dotted.DrawPoly ([[10, 50], [90, 50]]);
+
+    var Full := 0;
+    var Half := 0;
+
+    for var X := 0; X < 100; X := X + 1 do
+    begin
+        if Solid.Buf.GetInt ((49 * 100 + X) * 4) <> 0 then Full := Full + 1;
+        if Dotted.Buf.GetInt ((49 * 100 + X) * 4) <> 0 then Half := Half + 1;
+    end
+
+    AssertEqual (81, Full);
+    AssertTrue (Half < Full);
+
+    // The pen is where it was, a figure being no journey.
+    AssertEqual (3, Solid.GetX ());
+    AssertEqual (4, Solid.GetY ());
+
+    CloseGraph ();
+end
+
+test 'The DrawPoly Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'polyalias', False);
+
+    var V := ViewPort (1, 1, 100, 100, 1);
+
+    SetColor (V, White);
+    DrawPoly (V, [[10, 10], [80, 10], [45, 70], [10, 10]]);
+
+    AssertTrue (V.Buf.GetInt ((9 * 100 + 44) * 4) <> 0);
 
     CloseGraph ();
 end
