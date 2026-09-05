@@ -103,6 +103,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
 | [`SetFillStyle`](#setfillstyle) | procedures, aliases | `graph` |
 | [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
+| [`SetPalette`](#setpalette) | procedures | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`SetTextJustify`](#settextjustify) | procedure, alias | `graph` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
@@ -203,7 +204,7 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the sixty-six surface methods has a
+is Turbo Pascal's — so each of the seventy surface methods has a
 free-function twin. Each is a one-line delegate adding no behavior whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
@@ -5557,6 +5558,168 @@ See [`Line`](#line), which draws dashed and solid from one viewport.
 
 ---
 
+## SetPalette
+
+*procedures* — unit `graph`
+
+**Function**
+
+Rebinds what the sixteen color names mean on a surface.
+
+**Declaration**
+
+```algol24
+procedure SetPalette (Palette : Map);            // the screen
+procedure SetPalette (Surface, Palette : Map);   // that Window or ViewPort
+
+function  GetPalette () : Map;                   // the screen
+function  GetPalette (Surface) : Map;            // that Window or ViewPort
+```
+
+**Remarks**
+
+A palette is a **Map from one of the sixteen [color names](#colors) to the RGB
+it should mean here**. It is per surface, as every pen is — a themed screen
+with an unthemed window over it is ordinary.
+
+```algol24
+SetPalette (V, [LightGray : 12550144, White : 16768256]);
+```
+
+⚠️ **A name the map does not list means itself.** A partial palette is the
+ordinary case: a theme says only what it changes, and rebinding one color does
+not require restating the other fifteen.
+
+⚠️ **It governs what is drawn next, not what is already drawn.** Setting a
+palette re-themes the pens in force — the drawing color, the fill, the
+background, the ink — so the pen you are holding follows the theme without
+being set again. But pixels and cells already laid keep the colors they were
+laid in. Re-theming a finished picture means drawing it again.
+
+That is the half of Turbo Pascal's palette this cannot do, and the reason is
+structural: `SetPalette` there wrote a hardware register and the framebuffer
+held *indices*, so one write recolored everything already on screen. A surface
+here holds final colors. See `DESIGN.md`.
+
+### The rule
+
+⚠️ **A color equal to one of the sixteen is a name; anything else is a
+literal.** The constants **are** their RGB values — `Red` is `11141120` — so
+at run time the lookup sees a number and cannot tell which was written:
+
+```algol24
+SetColor (V, 11141120)   ==   SetColor (V, Red)
+```
+
+Turbo Pascal had no such ambiguity because there `Red` was `4` — an index, a
+space of its own. Making the constants the CGA RGB values is worth more than
+the collision costs: it is what lets any RGB be passed wherever a color is
+wanted, with the sixteen as a vocabulary rather than a limit.
+
+Three things hold it down, and none needs any care from the caller:
+
+- **Inert until asked for.** No palette, no lookup, and every name means
+  itself.
+- **Unlisted means itself**, so a theme rebinding three names puts only those
+  three at risk.
+- ⚠️ **[`PutPixel`](#putpixel) and [`PutImage`](#getimage) bypass the pens
+  entirely** and are never themed. That is the way to lay an exact color under
+  a palette.
+
+Worth knowing when choosing what to rebind: `Black` and `White` are the two of
+the sixteen that arithmetic actually produces — the end of a fade, the top of
+a ramp — where the other fourteen rarely arise by accident.
+
+### What the getters answer
+
+[`GetColor`](#getcolor), `GetFillColor`, [`GetBkColor`](#setbkcolor) and
+[`GetFillSettings`](#getfillsettings) answer **the name they were given**, not
+what the palette made of it, so save-and-restore round-trips instead of
+theming twice. [`GetPixel`](#getpixel) answers what is actually on the
+surface, which is the themed color. The two are different questions and both
+are worth asking.
+
+[`HighVideo`](#highvideo) and `LowVideo` brighten the **name** and then theme
+it afresh, so `Blue` becomes `LightBlue` and the palette says what that means.
+[`Blink`](#blink) is bit 24 added to an ink rather than a color of its own, so
+it is set aside for the lookup and put back.
+[`GraphDefaults`](#graphdefaults) keeps the palette — it is what the names
+mean here, not itself a pen.
+
+`GetPalette` answers a copy, as [`GetFillPattern`](#getfillpattern) does, and
+what is handed to `SetPalette` is copied too.
+
+The surface-first forms take an **untyped** surface and ask what it is, as
+[`MoveTo`](#moveto) does: both kinds take a palette, so two declarations of
+one arity would put the choice on the argument's type.
+
+Raises `SetPalette wants one of the sixteen color names as a key.`,
+`SetPalette wants RGB colors.`, `SetPalette wants a Window or a ViewPort.`,
+`Graph is not open.`, and `CloseGraph has closed this surface.`
+
+**See also**
+
+[`Colors`](#colors), [`GetColor`](#getcolor), [`PutPixel`](#putpixel),
+[`SetBkColor`](#setbkcolor), [`TextColor`](#textcolor)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'palette', False);
+
+var V := ViewPort (50, 50, 300, 200, 1);
+
+// An amber terminal, in three entries. The thirteen names not listed go on
+// meaning themselves, so a theme says only what it changes.
+var Amber := [LightGray : 12550144, White : 16768256, DarkGray : 5583872];
+
+SetPalette (V, Amber);
+
+SetColor (V, LightGray);
+Line (V, 10, 10, 200, 10);
+
+SetColor (V, LightCyan);
+Line (V, 10, 20, 200, 20);
+
+System.WriteLn ('themed:   ', GetPixel (V, 50, 10) = 12550144);
+System.WriteLn ('untouched:', GetPixel (V, 50, 20) = LightCyan);
+
+// The getter answers the name it was given, not what the theme made of it,
+// so a saved color goes back without being themed twice.
+System.WriteLn ('asked for ', GetColor (V) = LightCyan);
+
+// PutPixel bypasses the pens entirely and so is never themed: it is the way
+// to lay an exact color under a palette.
+PutPixel (V, 5, 5, LightGray);
+System.WriteLn ('exact:    ', GetPixel (V, 5, 5) = LightGray);
+
+// A palette governs what is drawn NEXT, not what is already drawn. The pen
+// is holding LightGray again here, so the new theme reaches it without it
+// being set a second time.
+SetColor (V, LightGray);
+SetPalette (V, [LightGray : Red]);
+
+System.WriteLn ('already drawn stays ', GetPixel (V, 50, 10) = 12550144);
+
+Line (V, 10, 30, 200, 30);
+System.WriteLn ('the pen followed    ', GetPixel (V, 50, 30) = Red);
+
+CloseGraph ();
+```
+
+```console
+themed:   true
+untouched:true
+asked for true
+exact:    true
+already drawn stays true
+the pen followed    true
+```
+
+---
+
 ## SetSeed
 
 *procedure* — unit `random`
@@ -6689,6 +6852,8 @@ function  GetArcCoords () : ArcCoords;
 function  GetTextSettings () : TextSettings;
 function  GetViewSettings () : ViewSettings;
 procedure GraphDefaults ();
+procedure SetPalette (Palette : Map);
+function  GetPalette () : Map;
 procedure SetWriteMode (Mode : Integer);
 function  GetWriteMode () : Integer;
 procedure SetUserCharSize (MultX : Integer, DivX : Integer,
@@ -6794,7 +6959,8 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 `GetLineSettings`, [`GetImage`](#getimage), `PutImage`,
 [`GetTextSettings`](#gettextsettings), `GetViewSettings`,
 [`GraphDefaults`](#graphdefaults), [`SetWriteMode`](#setwritemode),
-`GetWriteMode`, [`SetUserCharSize`](#setusercharsize).
+`GetWriteMode`, [`SetUserCharSize`](#setusercharsize),
+[`SetPalette`](#setpalette), `GetPalette`.
 
 [`Clear`](#clear) is the method `ClearViewPort (V)` reaches.
 
@@ -6923,6 +7089,8 @@ procedure Write (Text : String);
 procedure WriteLn (Text : String);
 procedure ClrEol ();
 procedure Clear ();
+procedure SetPalette (Palette : Map);
+function  GetPalette () : Map;
 procedure DelLine ();
 procedure InsLine ();
 
@@ -6982,7 +7150,7 @@ own: [`Write`](#write), `WriteLn`, [`GotoXY`](#gotoxy), [`WhereX`](#wherex),
 [`TextBackground`](#textbackground), [`HighVideo`](#highvideo),
 [`LowVideo`](#lowvideo), [`NormVideo`](#normvideo), [`ClrEol`](#clreol),
 [`ClrScr`](#clrscr), [`MoveTo`](#moveto), [`DelLine`](#delline),
-`InsLine`.
+`InsLine`, [`SetPalette`](#setpalette), `GetPalette`.
 
 [`Clear`](#clear) is the method `ClrScr (W)` reaches.
 

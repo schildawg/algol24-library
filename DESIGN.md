@@ -176,8 +176,8 @@ A TurboVision-style text window with a pie chart inside it:
 
 ## Color, and the palette that is not a register file
 
-Designed, not built. Nothing here has been implemented; it is written down so
-that when it is, the shape is already settled.
+**Built.** This section was written before the code and the code follows it;
+it is kept as the reasoning behind `SetPalette` rather than as a plan.
 
 **A color is a 24-bit RGB Integer, and that is the whole of it.** `Blue` is
 `170`, `Red` is `11141120`, `Transparent` is `-1`, and `Blink` is bit 24 added
@@ -233,8 +233,8 @@ discover it by being surprised.
 
 ### Where it applies
 
-Exactly five places take a color from a caller and keep it, and the lookup
-belongs at those five and nowhere else:
+Six places take a color from a caller and keep it, and the lookup belongs at
+those six and nowhere else:
 
 | | verb |
 | --- | --- |
@@ -242,6 +242,7 @@ belongs at those five and nowhere else:
 | `Window.Back` | `TextBackground` |
 | `ViewPort.Pen` | `SetColor` |
 | `ViewPort.FillInk` | `SetFillStyle`, `SetFillPattern` |
+| `ViewPort.BkColor` | `SetBkColor` |
 
 Free text follows the pen, so `OutText` and `OutTextXY` are themed without
 knowing about it. `PutPixel` is deliberately **not** in the list: it writes a
@@ -257,6 +258,13 @@ ignores the theme.
 `GetColor` answers the name it was given rather than what the name resolved
 to, so save-and-restore round-trips. `GetPixel` answers the resolved color,
 because that is what is actually on the surface.
+
+That pair needs each surface to keep **both** values — the name asked for and
+the color resolved — which the building made plain and this design had not
+foreseen. Resolving at draw time instead would put a map lookup in the
+per-pixel path; resolving only at set time would leave a pen sitting outside a
+palette set after it. So `SetPalette` re-resolves the pens it finds, which is
+what makes a theme reach the ink already in hand.
 
 ### The name collision, and the rule that settles it
 

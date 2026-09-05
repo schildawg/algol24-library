@@ -559,6 +559,87 @@ begin
     Exit [0, 0, 0, 0, 0, 0, 0, 0];
 end
 
+/// The sixteen color names, as the values they are.
+///
+/// Private to this unit, and what `SetPalette` checks a map's keys against:
+/// a palette rebinds names, and a key that is not one of the sixteen is not
+/// a name.
+var PaletteNames := [Black, Blue, Green, Cyan, Red, Magenta, Brown, LightGray,
+                     DarkGray, LightBlue, LightGreen, LightCyan, LightRed,
+                     LightMagenta, Yellow, White];
+
+/// What a color means under a palette, which for most colors is itself.
+///
+/// Private to this unit, and the whole of the palette mechanism. A color
+/// equal to one of the sixteen is a name and is rebound; anything else is a
+/// literal and passes through. That rule is the settled one, and it is the
+/// reason `SetPalette` documents itself as governing names rather than
+/// colors.
+///
+/// Transparent is not a color and has no entry, so it survives untouched.
+/// Blink is bit 24 added to an ink rather than a color of its own, so it is
+/// set aside before the lookup and put back after -- miss that and blinking
+/// text becomes the one thing on the screen that ignores the theme.
+function Themed (Palette : Map, Color : Integer) : Integer;
+begin
+    if Color < 0 then Exit Color;
+
+    var Flag := 0;
+    var Bare := Color;
+
+    if Bare >= Blink then
+    begin
+        Flag := Blink;
+        Bare := Bare - Blink;
+    end
+
+    if Bare in Palette then Exit ThemedTo (Palette, Bare) + Flag;
+
+    Exit Color;
+end
+
+/// What one palette entry says, typed.
+///
+/// Private to this unit, and separate only because a map read answers Any
+/// and arithmetic on an Any is not what the caller wants back.
+function ThemedTo (Palette : Map, Name : Integer) : Integer;
+begin
+    Exit Palette[Name];
+end
+
+/// A palette checked over, or a raise saying what is wrong with it.
+///
+/// Private to this unit. Both surface kinds take a palette and both check it
+/// the same way, so the checking is said once.
+procedure CheckPalette (Palette : Map);
+begin
+    for var Name in Palette do
+    begin
+        if not (Name in PaletteNames) then
+            raise 'SetPalette wants one of the sixteen color names as a key.';
+
+        if ThemedTo (Palette, Name) < 0 then
+            raise 'SetPalette wants RGB colors.';
+
+        if ThemedTo (Palette, Name) > 16777215 then
+            raise 'SetPalette wants RGB colors.';
+    end
+end
+
+/// A palette copied, so what a caller holds cannot change what a surface
+/// draws.
+///
+/// Private to this unit, on `GetFillPattern`'s reasoning.
+function CopyPalette (Palette : Map) : Map;
+begin
+    var Copy := [:];
+
+    for var Name in Palette do
+        Copy[Name] := ThemedTo (Palette, Name);
+
+    Exit Copy;
+end
+
 /// The bright partner of a palette color, or the color itself.
 ///
 /// Private to this unit; a function rather than a bare map read because a
@@ -1692,6 +1773,9 @@ var
     Pending : Boolean;
     Ink    : Integer;
     Back   : Integer;
+    InkAsked  : Integer;
+    BackAsked : Integer;
+    Palette : Map;
     Blinking : Boolean;
     Order  : Integer;
     Alpha  : Integer;
@@ -1723,6 +1807,9 @@ begin
         Alpha    := 255;
         Ink      := LightGray;
         Back     := Transparent;
+        InkAsked  := LightGray;
+        BackAsked := Transparent;
+        Palette   := [:];
         Blinking := False;
         CurCol   := 1;
         CurRow   := 1;
@@ -1861,7 +1948,8 @@ begin
 
         if Color > 16777215 then raise 'TextColor wants an RGB color, plus Blink at most.';
 
-        Ink := Color;
+        InkAsked := Color;
+        Ink      := Themed (Palette, Color);
     end
 
     /// Sets this window's cell background; Transparent shows what is below.
@@ -1871,7 +1959,8 @@ begin
 
         if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
 
-        Back := Color;
+        BackAsked := Color;
+        Back      := Themed (Palette, Color);
     end
 
     /// Brightens this window's ink, as the intensity bit did.
@@ -1879,11 +1968,16 @@ begin
     begin
         Check ();
 
-        if Ink in BrightPartner then Ink := BrightOf (Ink);
-        else if Ink in DimPartner then Exit;
-        else Ink := (Ink div 65536 + (255 - Ink div 65536) div 2) * 65536
-                  + (Ink div 256 mod 256 + (255 - Ink div 256 mod 256) div 2) * 256
-                  + (Ink mod 256 + (255 - Ink mod 256) div 2);
+        // Brightening acts on the NAME, which is then themed afresh --
+        // so `Blue` becomes `LightBlue` and the palette says what that
+        // means, rather than brightening a color the palette already chose.
+        if InkAsked in BrightPartner then InkAsked := BrightOf (InkAsked);
+        else if InkAsked in DimPartner then Exit;
+        else InkAsked := (InkAsked div 65536 + (255 - InkAsked div 65536) div 2) * 65536
+                  + (InkAsked div 256 mod 256 + (255 - InkAsked div 256 mod 256) div 2) * 256
+                  + (InkAsked mod 256 + (255 - InkAsked mod 256) div 2);
+
+        Ink := Themed (Palette, InkAsked);
     end
 
     /// Dims this window's ink, the mirror of HighVideo.
@@ -1891,11 +1985,13 @@ begin
     begin
         Check ();
 
-        if Ink in DimPartner then Ink := DimOf (Ink);
-        else if Ink in BrightPartner then Exit;
-        else Ink := (Ink div 65536 div 2) * 65536
-                  + (Ink div 256 mod 256 div 2) * 256
-                  + (Ink mod 256 div 2);
+        if InkAsked in DimPartner then InkAsked := DimOf (InkAsked);
+        else if InkAsked in BrightPartner then Exit;
+        else InkAsked := (InkAsked div 65536 div 2) * 65536
+                  + (InkAsked div 256 mod 256 div 2) * 256
+                  + (InkAsked mod 256 div 2);
+
+        Ink := Themed (Palette, InkAsked);
     end
 
     /// Restores this window's startup colors: LightGray on Transparent.
@@ -1903,9 +1999,11 @@ begin
     begin
         Check ();
 
-        Ink      := LightGray;
-        Back     := Transparent;
-        Blinking := False;
+        InkAsked  := LightGray;
+        BackAsked := Transparent;
+        Ink       := Themed (Palette, LightGray);
+        Back      := Transparent;
+        Blinking  := False;
     end
 
     /// The newline both WriteLn and a #10 spell: column 1, next row,
@@ -2134,6 +2232,56 @@ begin
         Present ();
     end
 
+
+    /// Rebinds what the sixteen color names mean on this window.
+    ///
+    /// A palette is a Map from one of the sixteen names to the RGB it should
+    /// mean here. A name the map does not list means itself, so a partial
+    /// palette is the ordinary case: rebinding one color does not require
+    /// restating the other fifteen.
+    ///
+    /// It governs what is drawn next rather than what is already drawn.
+    /// Setting one re-themes the ink and background in force -- the pens
+    /// follow the theme -- but the cells already stamped keep the colors they
+    /// were stamped in. Re-theming a written window means writing it again.
+    ///
+    /// A color equal to one of the sixteen is a name and is rebound; anything
+    /// else is a literal and passes through untouched. That is the settled
+    /// rule, and it is why `SetColor (11184810)` and `SetColor (LightGray)`
+    /// cannot be told apart: the constants are their RGB values.
+    ///
+    /// # Raises
+    /// `SetPalette wants one of the sixteen color names as a key.`,
+    /// `SetPalette wants RGB colors.`, and `CloseGraph has closed this
+    /// surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Palette Rebinds The Names A Window Writes In`
+    procedure SetPalette (Palette : Map);
+    begin
+        Check ();
+
+        CheckPalette (Palette);
+
+        this.Palette := CopyPalette (Palette);
+
+        // The pens follow the theme, or setting one would leave the ink you
+        // are holding outside it.
+        Ink  := Themed (this.Palette, InkAsked);
+        Back := Themed (this.Palette, BackAsked);
+    end
+
+    /// What the sixteen names mean on this window.
+    ///
+    /// The map in force, copied out -- an empty one where no palette has been
+    /// set, every name meaning itself.
+    function GetPalette () : Map;
+    begin
+        Check ();
+
+        Exit CopyPalette (Palette);
+    end
+
     /// Clears all this window's cells to its background and homes its cursor.
     ///
     /// The clearing verb both kinds of surface answer to. What a surface is
@@ -2236,6 +2384,10 @@ var
     FillInk : Integer;
     FillPat : Any;
     BkColor : Integer;
+    PenAsked  : Integer;
+    FillAsked : Integer;
+    BkAsked   : Integer;
+    Palette : Map;
     WMode  : Integer;
     MultX  : Integer;
     DivX   : Integer;
@@ -2288,6 +2440,10 @@ begin
         FillInk := 16777215;      // White, as the pen is
         HasArc  := False;
         BkColor := Transparent;
+        PenAsked  := 16777215;
+        FillAsked := 16777215;
+        BkAsked   := Transparent;
+        Palette   := [:];
         WMode   := CopyPut;
         MultX   := 1;
         DivX    := 1;
@@ -2643,7 +2799,8 @@ begin
         if Color < Transparent then
             raise 'SetBkColor wants a color or Transparent.';
 
-        BkColor := Color;
+        BkAsked := Color;
+        BkColor := Themed (Palette, Color);
     end
 
     /// The color `Clear` returns this viewport to.
@@ -2651,7 +2808,7 @@ begin
     begin
         Check ();
 
-        Exit BkColor;
+        Exit BkAsked;
     end
 
     /// The pixel value this viewport is cleared to.
@@ -2757,7 +2914,7 @@ begin
     begin
         Check ();
 
-        Exit FillSettings (Filling, FillInk);
+        Exit FillSettings (Filling, FillAsked);
     end
 
     /// The style, bit pattern and thickness this viewport draws lines with.
@@ -3020,13 +3177,21 @@ begin
     begin
         Check ();
 
-        Pen   := 16777215;                 // White, as a fresh viewport draws
-        Style := SolidLn;
-        Bits  := 65535;
-        Thick := NormWidth;
+        // The pens go back to their defaults, which the palette then says
+        // the meaning of: a themed surface reset gives the theme's white,
+        // not the CGA one. The palette is what the names mean here, and is
+        // not itself a pen.
+        PenAsked  := 16777215;             // White, as a fresh viewport draws
+        FillAsked := 16777215;
+        BkAsked   := Transparent;
+
+        Pen     := Themed (Palette, PenAsked);
+        Style   := SolidLn;
+        Bits    := 65535;
+        Thick   := NormWidth;
 
         Filling := SolidFill;
-        FillInk := 16777215;
+        FillInk := Themed (Palette, FillAsked);
         FillPat := FillRowsOf (SolidFill);
 
         LoadFillPattern ();
@@ -3049,6 +3214,54 @@ begin
         CurY := 1;
     end
 
+
+    /// Rebinds what the sixteen color names mean on this viewport.
+    ///
+    /// A palette is a Map from one of the sixteen names to the RGB it should
+    /// mean here. A name the map does not list means itself, so a partial
+    /// palette is the ordinary case and rebinding one color does not require
+    /// restating the other fifteen.
+    ///
+    /// It governs what is drawn next rather than what is already drawn.
+    /// Setting one re-themes the pens in force -- the drawing color, the fill
+    /// and the background -- but the pixels already laid keep the colors they
+    /// were laid in. Re-theming a picture means drawing it again.
+    ///
+    /// A color equal to one of the sixteen is a name and is rebound; anything
+    /// else is a literal and passes through untouched. That is the settled
+    /// rule, and it is why `SetColor (11141120)` and `SetColor (Red)` cannot
+    /// be told apart: the constants are their RGB values. `PutPixel` and
+    /// `PutImage` bypass the pens entirely and so are never themed, which is
+    /// the way to lay an exact color under a palette.
+    ///
+    /// # Raises
+    /// `SetPalette wants one of the sixteen color names as a key.`,
+    /// `SetPalette wants RGB colors.`, and `CloseGraph has closed this
+    /// surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Palette Rebinds The Names A ViewPort Draws In`
+    procedure SetPalette (Palette : Map);
+    begin
+        Check ();
+
+        CheckPalette (Palette);
+
+        this.Palette := CopyPalette (Palette);
+
+        Pen     := Themed (this.Palette, PenAsked);
+        FillInk := Themed (this.Palette, FillAsked);
+        BkColor := Themed (this.Palette, BkAsked);
+    end
+
+    /// What the sixteen names mean on this viewport.
+    function GetPalette () : Map;
+    begin
+        Check ();
+
+        Exit CopyPalette (Palette);
+    end
+
     /// Sets the color the pen draws and free text is written in.
     ///
     /// Turbo Pascal's `SetColor`, and it governs `Line`, `LineTo`, `LineRel`
@@ -3064,7 +3277,8 @@ begin
 
         if Color < 0 then raise 'SetColor wants an RGB color.';
 
-        Pen := Color;
+        PenAsked := Color;
+        Pen      := Themed (Palette, Color);
     end
 
     /// The color the pen is drawing in.
@@ -3072,7 +3286,9 @@ begin
     begin
         Check ();
 
-        Exit Pen;
+        // The name that was given, not what the palette made of it, so
+        // save-and-restore round trips instead of theming twice.
+        Exit PenAsked;
     end
 
     /// Sets the pattern and thickness lines are drawn with.
@@ -3757,9 +3973,10 @@ begin
 
         if Color < 0 then raise 'SetFillStyle wants an RGB color.';
 
-        Filling := Style;
-        FillInk := Color;
-        FillPat := FillRowsOf (Style);
+        Filling   := Style;
+        FillAsked := Color;
+        FillInk   := Themed (Palette, Color);
+        FillPat   := FillRowsOf (Style);
 
         LoadFillPattern ();
     end
@@ -3783,9 +4000,10 @@ begin
         if Rows.Length <> 8 then raise 'SetFillPattern wants eight rows.';
         if Color < 0 then raise 'SetFillPattern wants an RGB color.';
 
-        Filling := UserFill;
-        FillInk := Color;
-        FillPat := Rows;
+        Filling   := UserFill;
+        FillAsked := Color;
+        FillInk   := Themed (Palette, Color);
+        FillPat   := Rows;
 
         LoadFillPattern ();
     end
@@ -3813,7 +4031,7 @@ begin
     begin
         Check ();
 
-        Exit FillInk;
+        Exit FillAsked;
     end
 
     /// Whether the fill pattern covers the pixel at X, Y.
@@ -4482,6 +4700,42 @@ begin
     Root.ClrEol ();
 end
 
+/// Rebinds what the sixteen color names mean on the screen.
+///
+/// The base console layer -- the root grid at Order 0 -- and nothing else in
+/// the stack. Every surface carries its own palette, so a themed screen and
+/// an unthemed window over it are both ordinary.
+///
+/// # Raises
+/// `Graph is not open.` without a window, and `SetPalette`'s own messages for
+/// a palette that is not one.
+///
+/// # Examples
+/// `A Palette Rebinds The Names A Window Writes In`
+procedure SetPalette (Palette : Map);
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureRoot ();
+    Root.SetPalette (Palette);
+end
+
+/// What the sixteen names mean on the screen.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `A Palette Rebinds The Names A Window Writes In`
+function GetPalette () : Map;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureRoot ();
+
+    Exit Root.GetPalette ();
+end
+
 /// Deletes the cursor's row of the screen; the rows below move up.
 ///
 /// The base console layer -- the root grid at Order 0 -- and nothing else in
@@ -4617,6 +4871,28 @@ end
 procedure ClrEol (W : Window);
 begin
     W.ClrEol ();
+end
+
+/// Rebinds what the sixteen names mean on a surface. See `SetPalette`.
+///
+/// The surface is untyped and asked what it is, as `MoveTo` is: both kinds
+/// take a palette, so two declarations of one arity would put the choice on
+/// the argument's type, which a gradual type system settles at run time and
+/// warns about.
+procedure SetPalette (Surface, Palette : Map);
+begin
+    if Surface is Window then Surface.SetPalette (Palette);
+    else if Surface is ViewPort then Surface.SetPalette (Palette);
+    else raise 'SetPalette wants a Window or a ViewPort.';
+end
+
+/// What the sixteen names mean on a surface. See `SetPalette`.
+function GetPalette (Surface) : Map;
+begin
+    if Surface is Window then Exit Surface.GetPalette ();
+    if Surface is ViewPort then Exit Surface.GetPalette ();
+
+    raise 'GetPalette wants a Window or a ViewPort.';
 end
 
 /// Deletes a window's cursor row, pulling the rows below up. See `Window`.
@@ -11584,6 +11860,403 @@ begin
 
     AssertEqual (CopyPut, GetWriteMode (V));
     AssertEqual (1, GetTextSettings (V).CharSize);
+
+    CloseGraph ();
+end
+
+test 'A Palette Rebinds The Names A ViewPort Draws In';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palvp', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    // An amber terminal: the grays and the white become amber, everything
+    // else is left alone.
+    V.SetPalette ([LightGray : 12550144, White : 16768256]);
+
+    V.SetColor (LightGray);
+    V.Line (1, 1, 20, 1);
+
+    AssertEqual (12550144, V.GetPixel (5, 1));
+
+    // A name the palette does not list means itself.
+    V.SetColor (LightCyan);
+    V.Line (1, 3, 20, 3);
+
+    AssertEqual (LightCyan, V.GetPixel (5, 3));
+
+    // The fill and the background are themed by the same map.
+    V.SetFillStyle (SolidFill, White);
+    V.Bar (1, 10, 20, 20);
+
+    AssertEqual (16768256, V.GetPixel (5, 15));
+
+    CloseGraph ();
+end
+
+test 'A Palette Rebinds The Names A Window Writes In';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palwin', False);
+
+    var W := Window (1, 1, 20, 4, 1);
+
+    W.SetPalette ([Blue : 4210816]);
+    W.TextBackground (Blue);
+    W.Clear ();
+
+    AssertEqual (4210816 - 16777216, W.Buf.GetInt (0));
+
+    // And the screen keeps its own, every surface carrying a palette of its
+    // own rather than sharing one.
+    TextBackground (Blue);
+    ClrScr ();
+
+    AssertEqual (Blue - 16777216, Root.Buf.GetInt (0));
+
+    SetPalette ([Blue : 2105376]);
+    TextBackground (Blue);
+    ClrScr ();
+
+    AssertEqual (2105376 - 16777216, Root.Buf.GetInt (0));
+    AssertEqual (4210816 - 16777216, W.Buf.GetInt (0));
+
+    CloseGraph ();
+end
+
+test 'An Unlisted Name Means Itself';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palpartial', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    // A partial palette is the ordinary case, and is what holds the rule's
+    // blast radius down: rebinding three names leaves the other thirteen
+    // literal.
+    V.SetPalette ([White : Red]);
+
+    for var Name in [Black, Blue, Green, Cyan, Magenta, Brown, LightGray,
+                     DarkGray, LightBlue, LightGreen, LightCyan, LightRed,
+                     LightMagenta, Yellow] do
+    begin
+        V.SetColor (Name);
+        V.PutPixel (1, 1, Transparent);
+        V.Line (1, 1, 2, 1);
+
+        AssertEqual (Name, V.GetPixel (1, 1));
+    end
+
+    CloseGraph ();
+end
+
+test 'A Color Equal To One Of The Sixteen Is A Name';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palrule', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetPalette ([Red : Green]);
+
+    // The settled rule, stated as a test: the constants ARE their RGB
+    // values, so a literal that equals one cannot be told from the name.
+    V.SetColor (11141120);
+    V.Line (1, 1, 5, 1);
+
+    AssertEqual (Green, V.GetPixel (1, 1));
+
+    // One away, and it is a literal again.
+    V.SetColor (11141121);
+    V.Line (1, 3, 5, 3);
+
+    AssertEqual (11141121, V.GetPixel (1, 3));
+
+    // PutPixel and PutImage bypass the pens, so they are never themed --
+    // which is the way to lay an exact color under a palette.
+    V.PutPixel (10, 10, Red);
+
+    AssertEqual (Red, V.GetPixel (10, 10));
+
+    CloseGraph ();
+end
+
+test 'A Palette Governs What Is Drawn Next And Not What Is Drawn';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palnext', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetColor (White);
+    V.Line (1, 1, 20, 1);
+
+    AssertEqual (White, V.GetPixel (5, 1));
+
+    V.SetPalette ([White : Red]);
+
+    // The pixels already laid keep the color they were laid in.
+    AssertEqual (White, V.GetPixel (5, 1));
+
+    // But the pen follows the theme without being set again, or the ink in
+    // hand would sit outside it.
+    V.Line (1, 3, 20, 3);
+
+    AssertEqual (Red, V.GetPixel (5, 3));
+
+    CloseGraph ();
+end
+
+test 'The Getters Answer The Name And Not What The Palette Made Of It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palget', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetPalette ([White : Red, Green : Blue]);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Green);
+    V.SetBkColor (White);
+
+    // Save and restore has to round trip: answering the themed color would
+    // theme it a second time on the way back.
+    AssertEqual (White, V.GetColor ());
+    AssertEqual (Green, V.GetFillColor ());
+    AssertEqual (White, V.GetBkColor ());
+    AssertEqual (Green, V.GetFillSettings ().Color);
+
+    var Saved := V.GetColor ();
+
+    V.SetColor (Yellow);
+    V.SetColor (Saved);
+    V.Line (1, 1, 5, 1);
+
+    AssertEqual (Red, V.GetPixel (1, 1));
+
+    // GetPixel answers what is actually on the surface, which is the themed
+    // color -- the two questions are different and both are worth asking.
+    AssertTrue (V.GetColor () <> V.GetPixel (1, 1));
+
+    CloseGraph ();
+end
+
+test 'Blink Survives A Palette Lookup';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palblink', False);
+
+    var W := Window (1, 1, 20, 3, 1);
+
+    W.SetPalette ([Yellow : Red]);
+    W.TextColor (Yellow + Blink);
+
+    // Blink is bit 24 added to an ink rather than a color of its own, so it
+    // is set aside for the lookup and put back -- miss that and blinking
+    // text is the one thing on the screen ignoring the theme.
+    AssertTrue (W.Blinking);
+    AssertEqual (Red, W.Ink);
+
+    // And the primitive itself, on a value with the bit still attached.
+    AssertEqual (Red + Blink, Themed ([Yellow : Red], Yellow + Blink));
+    AssertEqual (Transparent, Themed ([Yellow : Red], Transparent));
+
+    CloseGraph ();
+end
+
+test 'HighVideo Brightens The Name And Then Themes It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palbright', False);
+
+    var W := Window (1, 1, 20, 3, 1);
+
+    W.SetPalette ([LightBlue : Yellow]);
+    W.TextColor (Blue);
+
+    AssertEqual (Blue, W.Ink);
+
+    // Blue brightens to LightBlue, and the palette says what LightBlue
+    // means -- rather than brightening whatever the palette already chose.
+    W.HighVideo ();
+
+    AssertEqual (Yellow, W.Ink);
+    AssertEqual (LightBlue, W.InkAsked);
+
+    W.LowVideo ();
+
+    AssertEqual (Blue, W.Ink);
+
+    CloseGraph ();
+end
+
+test 'GraphDefaults Keeps The Theme And Resets Under It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'paldefaults', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    V.SetPalette ([White : Red]);
+    V.SetColor (Blue);
+
+    V.GraphDefaults ();
+
+    // The pens go back to their defaults; the palette says what those mean.
+    // A palette is what the names mean here, not itself a pen.
+    AssertEqual (White, V.GetColor ());
+    AssertEqual (1, V.GetPalette ().Length);
+
+    V.Line (1, 1, 5, 1);
+
+    AssertEqual (Red, V.GetPixel (1, 1));
+
+    CloseGraph ();
+end
+
+test 'A Palette Is Copied Both Ways';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palcopy', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    var Mine := [White : Red];
+
+    V.SetPalette (Mine);
+
+    // Changing what was handed in must not reach the surface.
+    Mine[White] := Green;
+
+    V.SetColor (White);
+    V.Line (1, 1, 5, 1);
+
+    AssertEqual (Red, V.GetPixel (1, 1));
+
+    // Nor may scribbling on what was answered, as with GetFillPattern.
+    var Got := V.GetPalette ();
+
+    Got[White] := Blue;
+
+    V.SetColor (White);
+    V.Line (1, 3, 5, 3);
+
+    AssertEqual (Red, V.GetPixel (1, 3));
+
+    CloseGraph ();
+end
+
+test 'A Fresh Surface Has An Empty Palette';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palfresh', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+    var W := Window (1, 1, 10, 3, 2);
+
+    AssertEqual (0, V.GetPalette ().Length);
+    AssertEqual (0, W.GetPalette ().Length);
+
+    // Inert until asked for: with no palette, every name means itself and
+    // nothing can be surprised by the rule at all.
+    V.SetColor (Red);
+
+    AssertEqual (Red, V.GetColor ());
+
+    V.Line (1, 1, 5, 1);
+
+    AssertEqual (Red, V.GetPixel (1, 1));
+
+    CloseGraph ();
+end
+
+test 'SetPalette Refuses A Key That Is Not A Name';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palraise', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+
+    var Message := '';
+
+    try V.SetPalette ([12345 : Red]); except on e : String do Message := e; end
+    AssertEqual ('SetPalette wants one of the sixteen color names as a key.', Message);
+
+    Message := '';
+    try V.SetPalette ([White : Transparent]); except on e : String do Message := e; end
+    AssertEqual ('SetPalette wants RGB colors.', Message);
+
+    Message := '';
+    try V.SetPalette ([White : 16777216]); except on e : String do Message := e; end
+    AssertEqual ('SetPalette wants RGB colors.', Message);
+
+    // A refused palette leaves the surface as it was.
+    AssertEqual (0, V.GetPalette ().Length);
+
+    // An empty palette is legal and means every name means itself.
+    V.SetPalette ([:]);
+    AssertEqual (0, V.GetPalette ().Length);
+
+    CloseGraph ();
+end
+
+test 'The Palette Verbs Refuse A Closed Surface And A Shut Window';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'paldead', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+    var W := Window (1, 1, 10, 3, 2);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.SetPalette ([White : Red]); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try W.GetPalette (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try SetPalette ([White : Red]); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try GetPalette (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'The Palette Aliases Reach Both Kinds Of Surface';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'palalias', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+    var W := Window (1, 1, 10, 3, 2);
+
+    SetPalette (V, [White : Red]);
+    SetPalette (W, [LightGray : Blue]);
+
+    AssertEqual (Red, GetPalette (V)[White]);
+    AssertEqual (Blue, GetPalette (W)[LightGray]);
+
+    SetColor (V, White);
+    Line (V, 1, 1, 5, 1);
+
+    AssertEqual (Red, GetPixel (V, 1, 1));
+
+    var Message := '';
+
+    try SetPalette (42, [White : Red]); except on e : String do Message := e; end
+    AssertEqual ('SetPalette wants a Window or a ViewPort.', Message);
+
+    Message := '';
+    try GetPalette (42); except on e : String do Message := e; end
+    AssertEqual ('GetPalette wants a Window or a ViewPort.', Message);
 
     CloseGraph ();
 end
