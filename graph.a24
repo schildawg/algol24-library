@@ -1253,6 +1253,40 @@ end
 /// stacks by `Order`: negative under the root grid, positive over it, ties
 /// by creation. `Order` and `Alpha` may be assigned after creation;
 /// `MoveTo` drags it. `CloseGraph` invalidates it.
+/// Where the last arc drawn on a surface was centred, began and ended.
+///
+/// Turbo Pascal's `ArcCoordsType`, with its six field names kept whole so a
+/// program written to them still reads. It is answered as an object rather
+/// than written into a `var` parameter -- the same record with the awkward
+/// half of Pascal's calling convention left out.
+///
+/// The six are a snapshot taken as the arc was drawn. A later arc makes a
+/// new one rather than changing this, so a value held on to stays true to
+/// the figure it came from.
+class ArcCoords;
+var
+    X      : Integer;
+    Y      : Integer;
+    XStart : Integer;
+    YStart : Integer;
+    XEnd   : Integer;
+    YEnd   : Integer;
+
+begin
+    constructor Init (X : Integer, Y : Integer, XStart : Integer,
+                      YStart : Integer, XEnd : Integer, YEnd : Integer);
+    begin
+        // The parameters shadow the fields, as Window's do, so they can be
+        // named for what they are and reached through `this`.
+        this.X      := X;
+        this.Y      := Y;
+        this.XStart := XStart;
+        this.YStart := YStart;
+        this.XEnd   := XEnd;
+        this.YEnd   := YEnd;
+    end
+end
+
 class Window;
 var
     X1     : Integer;
@@ -1730,6 +1764,13 @@ var
     Filling : Integer;
     FillInk : Integer;
     FillPat : Any;
+    ArcX   : Integer;
+    ArcY   : Integer;
+    ArcXS  : Integer;
+    ArcYS  : Integer;
+    ArcXE  : Integer;
+    ArcYE  : Integer;
+    HasArc : Boolean;
     FillBuf : Any;
     Order  : Integer;
     Alpha  : Integer;
@@ -1766,6 +1807,7 @@ begin
         Thick  := NormWidth;
         Filling := SolidFill;
         FillInk := 16777215;      // White, as the pen is
+        HasArc  := False;
         FillPat := [255, 255, 255, 255, 255, 255, 255, 255];
         FillBuf := Buffer (32);
 
@@ -1897,6 +1939,67 @@ begin
         Flood (X, Y, Border, FillBuf.Address, FillInk);
 
         Present ();
+    end
+
+
+    /// Notes where an arc was centred, began and ended.
+    ///
+    /// Private to this unit, and called by the two curve primitives rather
+    /// than by the six verbs -- `Arc` and `Ellipse` are what actually walk a
+    /// curve, so recording there is what makes `Circle`, `PieSlice`,
+    /// `Sector` and `FillEllipse` record too, without any of them saying so.
+    ///
+    /// The endpoints are computed the way the drawing loop computes its
+    /// pixels, so the point answered is a point the figure really reached
+    /// rather than one worked out a second way.
+    procedure RecordArc (CX : Integer, CY : Integer, XRadius : Integer,
+                         YRadius : Integer, From : Integer, To : Integer);
+    begin
+        var A := From * Pi / 180.0;
+        var B := To * Pi / 180.0;
+
+        ArcX   := CX;
+        ArcY   := CY;
+        ArcXS  := CX + Round (XRadius * Cos (A));
+        ArcYS  := CY - Round (YRadius * Sin (A));
+        ArcXE  := CX + Round (XRadius * Cos (B));
+        ArcYE  := CY - Round (YRadius * Sin (B));
+        HasArc := True;
+    end
+
+    /// Where the last arc on this surface was centred, began and ended.
+    ///
+    /// Turbo Pascal's `GetArcCoords`, answering an `ArcCoords` rather than
+    /// filling a `var` record. What it is for is joining something to a
+    /// curve: a line from the end of an `Arc`, a label at the lip of a
+    /// `PieSlice`, a second figure hung off the first. Recomputing those
+    /// points from the angles is the obvious alternative and is subtly
+    /// wrong -- rounding puts the recomputed point a pixel from the drawn
+    /// one often enough to show.
+    ///
+    /// All six figures record: `Arc` and `Ellipse` because they walk the
+    /// curve, and `Circle`, `PieSlice`, `Sector` and `FillEllipse` because
+    /// each is drawn through one of those two. Turbo Pascal documented only
+    /// `Arc`, `Ellipse` and `PieSlice`; there is no reason to leave the
+    /// other three out when they cost nothing.
+    ///
+    /// For a whole turn the two endpoints coincide, which is the truth about
+    /// a closed figure rather than a defect in the answer.
+    ///
+    /// # Raises
+    /// `No arc has been drawn on this surface.` before any of the six have
+    /// run, rather than answering six meaningless numbers, and `CloseGraph
+    /// has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `GetArcCoords Answers Where The Last Arc Ran`
+    function GetArcCoords () : ArcCoords;
+    begin
+        Check ();
+
+        if not HasArc then raise 'No arc has been drawn on this surface.';
+
+        Exit ArcCoords (ArcX, ArcY, ArcXS, ArcYS, ArcXE, ArcYE);
     end
 
     /// Sets the color the pen draws and free text is written in.
@@ -2111,6 +2214,10 @@ begin
     /// thickened across the radius so a thick arc stays an arc. The pen is
     /// not moved: an arc is a figure, not a journey.
     ///
+    /// Where the curve began and ended is remembered for `GetArcCoords`,
+    /// which is also how `Circle` and `PieSlice` come to record -- both are
+    /// drawn through here.
+    ///
     /// # Raises
     /// `Arc needs a radius of zero or more.`, and `CloseGraph has closed
     /// this surface.` once the window has gone.
@@ -2144,6 +2251,8 @@ begin
                     this.PutPixel (X + Round ((Radius + K) * Cos (A)),
                                    Y - Round ((Radius + K) * Sin (A)), Pen);
         end
+
+        RecordArc (X, Y, Radius, Radius, StartAngle, StartAngle + Sweep);
 
         Present ();
     end
@@ -2287,6 +2396,10 @@ begin
     /// by drawing the neighbouring ellipses -- which keeps a thick ellipse an
     /// ellipse. The pen is not moved.
     ///
+    /// Where the curve began and ended is remembered for `GetArcCoords`,
+    /// which is also how `Sector` and `FillEllipse` come to record -- both
+    /// are drawn through here.
+    ///
     /// # Raises
     /// `Ellipse needs radii of zero or more.`, and `CloseGraph has closed
     /// this surface.` once the window has gone.
@@ -2324,6 +2437,8 @@ begin
                     this.PutPixel (X + Round ((XRadius + K) * Cos (A)),
                                    Y - Round ((YRadius + K) * Sin (A)), Pen);
         end
+
+        RecordArc (X, Y, XRadius, YRadius, StartAngle, StartAngle + Sweep);
 
         Present ();
     end
@@ -3382,6 +3497,12 @@ end
 procedure PutPixel (V : ViewPort, X : Integer, Y : Integer, Color : Integer);
 begin
     V.PutPixel (X, Y, Color);
+end
+
+/// Where a viewport's last arc ran. See `GetArcCoords`.
+function GetArcCoords (V : ViewPort) : ArcCoords;
+begin
+    Exit V.GetArcCoords ();
 end
 
 /// The color of a pixel of a viewport. See `ViewPort`.
@@ -7822,6 +7943,227 @@ begin
     AssertEqual (LightCyan, GetPixel (V, 20, 17));
     AssertEqual (Red, GetPixel (V, 10, 10));
     AssertEqual (Transparent, GetPixel (V, 1, 1));
+
+    CloseGraph ();
+end
+
+test 'GetArcCoords Answers Where The Last Arc Ran';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arccoords', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (Yellow);
+    V.Arc (100, 100, 0, 90, 50);
+
+    var C := V.GetArcCoords ();
+
+    AssertEqual (100, C.X);
+    AssertEqual (100, C.Y);
+
+    // Three o'clock is the start, twelve o'clock the end -- and Y grows
+    // downward, so the end sits ABOVE the centre.
+    AssertEqual (150, C.XStart);
+    AssertEqual (100, C.YStart);
+    AssertEqual (100, C.XEnd);
+    AssertEqual (50,  C.YEnd);
+
+    CloseGraph ();
+end
+
+test 'The Recorded Endpoints Are Pixels The Arc Really Drew';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcreal', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (LightGreen);
+    V.Arc (100, 100, 20, 160, 60);
+
+    var C := V.GetArcCoords ();
+
+    // The whole point of asking rather than recomputing: the answer is a
+    // point the figure actually reached, so something joined to it meets the
+    // curve instead of landing a pixel off it.
+    AssertEqual (LightGreen, V.GetPixel (C.XStart, C.YStart));
+    AssertEqual (LightGreen, V.GetPixel (C.XEnd, C.YEnd));
+
+    CloseGraph ();
+end
+
+test 'Every Curve Verb Records Its Coordinates';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcall', False);
+
+    var V := ViewPort (1, 1, 300, 300, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Blue);
+
+    // Circle is Arc swept the whole way round, so it records through Arc.
+    V.Circle (100, 100, 50);
+
+    var C := V.GetArcCoords ();
+
+    AssertEqual (100, C.X);
+    AssertEqual (150, C.XStart);
+
+    // PieSlice outlines with Arc, so the wedge records too.
+    V.PieSlice (100, 100, 90, 180, 40);
+
+    C := V.GetArcCoords ();
+
+    AssertEqual (100, C.XStart);
+    AssertEqual (60,  C.YStart);
+    AssertEqual (60,  C.XEnd);
+    AssertEqual (100, C.YEnd);
+
+    // Ellipse walks its own curve and records two radii, not one.
+    V.Ellipse (100, 100, 0, 180, 60, 30);
+
+    C := V.GetArcCoords ();
+
+    AssertEqual (160, C.XStart);
+    AssertEqual (100, C.YStart);
+    AssertEqual (40,  C.XEnd);
+    AssertEqual (100, C.YEnd);
+
+    // Sector outlines with Ellipse, and FillEllipse is Sector of a whole
+    // turn -- so both reach the recorder without saying so themselves.
+    V.Sector (100, 100, 0, 90, 60, 30);
+
+    C := V.GetArcCoords ();
+
+    AssertEqual (160, C.XStart);
+    AssertEqual (100, C.XEnd);
+    AssertEqual (70,  C.YEnd);
+
+    V.FillEllipse (200, 200, 40, 20);
+
+    C := V.GetArcCoords ();
+
+    AssertEqual (200, C.X);
+    AssertEqual (240, C.XStart);
+
+    CloseGraph ();
+end
+
+test 'A Whole Turn Puts Both Endpoints In The Same Place';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcround', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Arc (100, 100, 0, 360, 50);
+
+    var C := V.GetArcCoords ();
+
+    // A closed figure has no two ends. Reporting one point twice is the
+    // truth about it rather than a gap in the answer.
+    AssertEqual (C.XStart, C.XEnd);
+    AssertEqual (C.YStart, C.YEnd);
+
+    CloseGraph ();
+end
+
+test 'A Later Arc Does Not Disturb Coordinates Already Answered';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcsnap', False);
+
+    var V := ViewPort (1, 1, 300, 300, 1);
+
+    V.SetColor (White);
+    V.Arc (100, 100, 0, 90, 50);
+
+    var First := V.GetArcCoords ();
+
+    V.Arc (200, 200, 0, 90, 30);
+
+    var Second := V.GetArcCoords ();
+
+    // A snapshot, not a window onto the surface's state: the value held from
+    // before still describes the figure it came from.
+    AssertEqual (100, First.X);
+    AssertEqual (150, First.XStart);
+    AssertEqual (200, Second.X);
+    AssertEqual (230, Second.XStart);
+
+    CloseGraph ();
+end
+
+test 'Each Surface Keeps Its Own Arc Coordinates';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcown', False);
+
+    var A := ViewPort (1, 1, 200, 200, 1);
+    var B := ViewPort (1, 1, 200, 200, 2);
+
+    A.SetColor (White);
+    B.SetColor (White);
+
+    A.Arc (50, 50, 0, 90, 20);
+    B.Arc (150, 150, 0, 90, 40);
+
+    AssertEqual (50,  A.GetArcCoords ().X);
+    AssertEqual (150, B.GetArcCoords ().X);
+
+    CloseGraph ();
+end
+
+test 'GetArcCoords Raises Before Any Arc And After CloseGraph';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcraise', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    var Message := '';
+
+    // Six meaningless numbers would be worse than a refusal: nothing about
+    // them would look wrong at the call site.
+    try V.GetArcCoords (); except on e : String do Message := e; end
+    AssertEqual ('No arc has been drawn on this surface.', Message);
+
+    // A figure that draws no curve leaves the answer alone.
+    V.SetColor (White);
+    V.Rectangle (10, 10, 40, 40);
+    V.Line (1, 1, 20, 20);
+
+    Message := '';
+    try V.GetArcCoords (); except on e : String do Message := e; end
+    AssertEqual ('No arc has been drawn on this surface.', Message);
+
+    V.Arc (100, 100, 0, 90, 50);
+    AssertEqual (100, V.GetArcCoords ().X);
+
+    CloseGraph ();
+
+    Message := '';
+    try V.GetArcCoords (); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+end
+
+test 'The GetArcCoords Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'arcalias', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    SetColor (V, LightCyan);
+    Arc (V, 100, 100, 0, 90, 50);
+
+    var C := GetArcCoords (V);
+
+    AssertEqual (150, C.XStart);
+    AssertEqual (50,  C.YEnd);
 
     CloseGraph ();
 end

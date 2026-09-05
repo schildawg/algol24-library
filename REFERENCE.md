@@ -17,6 +17,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` |
 | [`Arc`](#arc) | procedure, alias | `graph` |
+| [`ArcCoords`](#arccoords) | class | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Bar`](#bar) | procedure, alias | `graph` |
@@ -37,6 +38,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`FloodFill`](#floodfill) | procedure, alias | `graph` |
 | [`Frac`](#frac) | function | `math` |
+| [`GetArcCoords`](#getarccoords) | function, alias | `graph` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
@@ -180,7 +182,7 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the forty-five surface methods has a
+is Turbo Pascal's — so each of the forty-six surface methods has a
 free-function twin. Each is a one-line delegate adding no behaviour whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
@@ -268,7 +270,8 @@ surface.`
 
 **See also**
 
-[`Line`](#line), [`SetColor`](#setcolor), [`SetLineStyle`](#setlinestyle), [`ViewPort`](#viewport)
+[`GetArcCoords`](#getarccoords), [`Line`](#line), [`SetColor`](#setcolor),
+[`SetLineStyle`](#setlinestyle), [`ViewPort`](#viewport)
 
 **Example**
 
@@ -299,6 +302,55 @@ CloseGraph ();
 true
 true
 ```
+
+---
+
+## ArcCoords
+
+*class* — unit `graph`
+
+**Function**
+
+Where the last arc on a surface was centred, began and ended.
+
+**Declaration**
+
+```algol24
+constructor ArcCoords (X : Integer, Y : Integer, XStart : Integer,
+                       YStart : Integer, XEnd : Integer, YEnd : Integer);
+
+// readable
+X, Y : Integer                  the centre the arc was drawn about
+XStart, YStart : Integer        where the curve began
+XEnd, YEnd : Integer            where it ended
+```
+
+**Remarks**
+
+Turbo Pascal's `ArcCoordsType`, with its six field names kept whole so a
+program written to them still reads.
+
+⚠️ **It is answered, not filled in.** Turbo Pascal's `GetArcCoords` took a
+`var` record and wrote into it; [`GetArcCoords`](#getarccoords) here returns
+one of these. That is the same record with the awkward half of Pascal's
+calling convention left out — there is nothing to declare before the call,
+and nothing to leave uninitialised if the call is skipped.
+
+⚠️ **The six are a snapshot.** A later arc makes a new `ArcCoords` rather than
+changing an existing one, so a value held on to still describes the figure it
+came from.
+
+Constructing one directly is legal and occasionally useful — for stashing the
+geometry of a figure drawn some other way — but the usual source is
+`GetArcCoords`.
+
+**See also**
+
+[`Arc`](#arc), [`GetArcCoords`](#getarccoords), [`ViewPort`](#viewport)
+
+**Example**
+
+See [`GetArcCoords`](#getarccoords).
 
 ---
 
@@ -800,7 +852,8 @@ this surface.`
 
 **See also**
 
-[`Arc`](#arc), [`Ellipse`](#ellipse), [`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
+[`Arc`](#arc), [`Ellipse`](#ellipse), [`GetArcCoords`](#getarccoords),
+[`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -1178,7 +1231,8 @@ surface.`
 
 **See also**
 
-[`Arc`](#arc), [`Circle`](#circle), [`SetLineStyle`](#setlinestyle)
+[`Arc`](#arc), [`Circle`](#circle), [`GetArcCoords`](#getarccoords),
+[`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -1298,7 +1352,8 @@ this surface.`
 
 **See also**
 
-[`Ellipse`](#ellipse), [`PieSlice`](#pieslice), [`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
+[`Ellipse`](#ellipse), [`GetArcCoords`](#getarccoords),
+[`PieSlice`](#pieslice), [`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
 
 **Example**
 
@@ -1621,6 +1676,107 @@ WriteLn (Frac (3.7));
 -0.5
 3.5
 0.7000000000000002
+```
+
+---
+
+## GetArcCoords
+
+*function, alias of `ViewPort.GetArcCoords`* — unit `graph`
+
+**Function**
+
+Where the last arc on a viewport was centred, began and ended.
+
+**Declaration**
+
+```algol24
+function GetArcCoords (V : ViewPort) : ArcCoords;
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `GetArcCoords (V)` is
+`V.GetArcCoords ()`. It answers an [`ArcCoords`](#arccoords).
+
+What it is for is **joining something to a curve**: a line continuing from the
+end of an [`Arc`](#arc), a label at the lip of a [`PieSlice`](#pieslice), a
+second figure hung off the first.
+
+⚠️ **Recomputing those points from the angles is the obvious alternative and
+is subtly wrong.** Rounding puts the recomputed point a pixel away from the
+drawn one often enough to show as a gap, and the drawing loop's rounding is
+not something a caller should have to reproduce. The endpoints here are
+computed the way the drawing loop computes its pixels, so what is answered is
+a point the figure really reached.
+
+**All six curve verbs record**, which is more than Turbo Pascal promised:
+
+| verb | records because |
+| --- | --- |
+| [`Arc`](#arc) | it walks the curve |
+| [`Ellipse`](#ellipse) | it walks the curve |
+| [`Circle`](#circle) | drawn through `Arc` |
+| [`PieSlice`](#pieslice) | outlined with `Arc` |
+| [`Sector`](#sector) | outlined with `Ellipse` |
+| [`FillEllipse`](#fillellipse) | drawn through `Sector`, so through `Ellipse` |
+
+Turbo Pascal documented only the first three of those. Recording in the two
+primitives rather than in the six verbs is what makes the other three free —
+and is why they cannot drift apart from each other.
+
+For a whole turn the two endpoints coincide, a closed figure having no two
+ends. Figures that draw no curve — [`Line`](#line),
+[`Rectangle`](#rectangle), [`Bar`](#bar), [`DrawPoly`](#drawpoly) — leave the
+answer alone.
+
+Each surface keeps its own, as it keeps its own pen.
+
+Raises `No arc has been drawn on this surface.` before any of the six have
+run — six meaningless numbers would be worse than a refusal, since nothing
+about them would look wrong at the call site — and `CloseGraph has closed this
+surface.` once the window has gone.
+
+**See also**
+
+[`Arc`](#arc), [`ArcCoords`](#arccoords), [`PieSlice`](#pieslice),
+[`Sector`](#sector)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'arccoords', False);
+
+var V := ViewPort (100, 60, 300, 300, 1);
+
+SetColor (V, LightCyan);
+Arc (V, 150, 150, 0, 120, 100);
+
+var C := GetArcCoords (V);
+
+System.WriteLn ('centre ', C.X, ' ', C.Y);
+System.WriteLn ('start  ', C.XStart, ' ', C.YStart);
+System.WriteLn ('end    ', C.XEnd, ' ', C.YEnd);
+
+// The end is a pixel the arc really drew, which is why a line started there
+// meets the curve instead of landing beside it.
+System.WriteLn ('on the arc: ', GetPixel (V, C.XEnd, C.YEnd) = LightCyan);
+
+SetColor (V, Yellow);
+PenTo (V, C.XEnd, C.YEnd);
+LineRel (V, -50, -30);
+Show (V);
+
+CloseGraph ();
+```
+
+```console
+centre 150 150
+start  250 150
+end    100 63
+on the arc: true
 ```
 
 ---
@@ -3240,7 +3396,8 @@ this surface.`
 
 **See also**
 
-[`Arc`](#arc), [`Circle`](#circle), [`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
+[`Arc`](#arc), [`Circle`](#circle), [`GetArcCoords`](#getarccoords),
+[`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
 
 **Example**
 
@@ -3911,7 +4068,9 @@ surface.`
 
 **See also**
 
-[`Ellipse`](#ellipse), [`FillEllipse`](#fillellipse), [`PieSlice`](#pieslice), [`SetFillStyle`](#setfillstyle)
+[`Ellipse`](#ellipse), [`FillEllipse`](#fillellipse),
+[`GetArcCoords`](#getarccoords), [`PieSlice`](#pieslice),
+[`SetFillStyle`](#setfillstyle)
 
 **Example**
 
@@ -4851,6 +5010,7 @@ procedure MoveTo (PX : Integer, PY : Integer);
 procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
 function  GetPixel (PX : Integer, PY : Integer) : Integer;
 procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
+function  GetArcCoords () : ArcCoords;
 procedure OutText (Text : String);
 procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
 procedure SetTextStyle (Direction : Integer, CharSize : Integer);
@@ -4930,6 +5090,7 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
 [`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),
 [`PutPixel`](#putpixel), [`GetPixel`](#getpixel), [`FloodFill`](#floodfill),
+[`GetArcCoords`](#getarccoords),
 [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
 [`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto).
 
