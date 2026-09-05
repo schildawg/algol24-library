@@ -115,11 +115,13 @@ procedure FillRect (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
 /// Fills a disc sector of the stamp target with an eight-by-eight pattern.
 ///
 /// Private to this unit, and the companion to `FillRect` for the same
-/// reason: a slice of any size is thousands of pixels. Angles are degrees in
-/// the unit's own convention, and the C asks whether a point is within the
-/// sweep by cross product rather than arctangent.
-procedure FillSector (CX : Integer, CY : Integer, Radius : Integer,
-                      StartAngle : Integer, Sweep : Integer,
+/// reason: a slice of any size is thousands of pixels. Two radii, so that
+/// `PieSlice` is the equal-radii case of `Sector` exactly as `Circle` is of
+/// `Ellipse`. Angles are degrees in the unit's own convention, and the C
+/// asks whether a point is within the sweep by cross product rather than
+/// arctangent.
+procedure FillSector (CX : Integer, CY : Integer, XRadius : Integer,
+                      YRadius : Integer, StartAngle : Integer, Sweep : Integer,
                       Pattern : Pointer, Color : Integer);
     external 'alg_fill_sector' in 'libgraphffi.dylib';
 
@@ -2109,7 +2111,8 @@ begin
         if Filling <> EmptyFill then
         begin
             StampTarget (Buf.Address, W, H);
-            FillSector (X, Y, Radius, StartAngle, Sweep, FillBuf.Address, FillInk);
+            FillSector (X, Y, Radius, Radius, StartAngle, Sweep,
+                        FillBuf.Address, FillInk);
         end
 
         // Outlined over the fill, so the edge shows.
@@ -2529,6 +2532,68 @@ begin
 
         PenX := WasX;
         PenY := WasY;
+    end
+
+
+    /// Fills and outlines an elliptical sector centred on X, Y.
+    ///
+    /// `PieSlice` with two radii, exactly as `Ellipse` is `Circle` with two:
+    /// the wedge is filled with the current fill pattern and color, then
+    /// outlined with the pen -- the elliptical arc, and the two radii closing
+    /// it to the centre.
+    ///
+    /// Angles are the parametric ones `Ellipse` uses, so a sector of a wide
+    /// ellipse spans the same fraction of the figure that the same angles
+    /// span of a circle. A sweep of 360 is the whole ellipse and draws no
+    /// radii, they would coincide.
+    ///
+    /// The pen is not moved.
+    ///
+    /// # Raises
+    /// `Sector needs radii of zero or more.`, and `CloseGraph has closed this
+    /// surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Sector Of Equal Radii Is A Pie Slice`
+    procedure Sector (X : Integer, Y : Integer, StartAngle : Integer,
+                      EndAngle : Integer, XRadius : Integer, YRadius : Integer);
+    begin
+        Check ();
+
+        if XRadius < 0 or YRadius < 0 then
+            raise 'Sector needs radii of zero or more.';
+
+        var Sweep := EndAngle - StartAngle;
+
+        if Sweep < 0 then Sweep := Sweep + 360;
+
+        var WasX := PenX;
+        var WasY := PenY;
+
+        if Filling <> EmptyFill then
+        begin
+            StampTarget (Buf.Address, W, H);
+            FillSector (X, Y, XRadius, YRadius, StartAngle, Sweep,
+                        FillBuf.Address, FillInk);
+        end
+
+        this.Ellipse (X, Y, StartAngle, EndAngle, XRadius, YRadius);
+
+        if Sweep < 360 then
+        begin
+            var A := StartAngle * Pi / 180.0;
+            var B := EndAngle * Pi / 180.0;
+
+            this.Line (X, Y, X + Round (XRadius * Cos (A)),
+                             Y - Round (YRadius * Sin (A)));
+            this.Line (X, Y, X + Round (XRadius * Cos (B)),
+                             Y - Round (YRadius * Sin (B)));
+        end
+
+        PenX := WasX;
+        PenY := WasY;
+
+        Present ();
     end
 
     /// Sets the direction and size free text on this viewport is drawn in.
@@ -3111,6 +3176,13 @@ end
 procedure OutTextXY (V : ViewPort, X : Integer, Y : Integer, Text : String);
 begin
     V.OutTextXY (X, Y, Text);
+end
+
+/// Fills and outlines an elliptical sector on a viewport. See `Sector`.
+procedure Sector (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                  EndAngle : Integer, XRadius : Integer, YRadius : Integer);
+begin
+    V.Sector (X, Y, StartAngle, EndAngle, XRadius, YRadius);
 end
 
 /// Sets a viewport's text turn and magnification. See `SetTextStyle`.
@@ -6680,6 +6752,143 @@ begin
     PieSlice (V, 100, 100, 0, 90, 60);
 
     AssertEqual (LightGreen - 16777216, V.Buf.GetInt ((84 * 200 + 114) * 4));
+
+    CloseGraph ();
+end
+
+// ----------------------------------------------------------- sector tests --
+
+/// The same statement Ellipse makes about Circle, one level up: with equal
+/// radii a sector must be the pie slice, pixel for pixel, or the two are
+/// filling different shapes.
+test 'A Sector Of Equal Radii Is A Pie Slice';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'sector', False);
+
+    var S := ViewPort (1, 1, 200, 200, 1);
+    var P := ViewPort (1, 1, 200, 200, 2);
+
+    for var V in [S, P] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (SolidFill, Red);
+    end
+
+    S.Sector (100, 100, 20, 160, 60, 60);
+    P.PieSlice (100, 100, 20, 160, 60);
+
+    var Same := True;
+
+    for var I := 0; I < 200 * 200; I := I + 1 do
+        if S.Buf.GetInt (I * 4) <> P.Buf.GetInt (I * 4) then Same := False;
+
+    AssertTrue (Same);
+
+    CloseGraph ();
+end
+
+/// Each radius governs its own axis, and the wedge is bounded by both.
+test 'A Sector Fills Within Both Its Radii';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'esector', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Red);
+    V.Sector (100, 100, 0, 90, 80, 30);
+
+    // Inside the wedge, well within both radii.
+    AssertTrue (V.Buf.GetInt ((94 * 200 + 129) * 4) <> 0);
+
+    // Beyond the short radius but within the long one: outside the ellipse.
+    AssertEqual (0, V.Buf.GetInt ((59 * 200 + 109) * 4));
+
+    // The opposite quadrant, untouched.
+    AssertEqual (0, V.Buf.GetInt ((119 * 200 + 79) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Sector Of A Whole Turn Is A Filled Ellipse Without Spokes';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fullell', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Blue);
+    V.Sector (100, 100, 0, 360, 80, 30);
+
+    // Filled to either side, and to top and bottom within the short radius.
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((99 * 200 + 149) * 4));
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((99 * 200 + 49) * 4));
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((79 * 200 + 99) * 4));
+
+    // No spoke along the zero ray.
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((99 * 200 + 129) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Sector With An Empty Fill Is Only Its Outline';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'hollowsec', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (EmptyFill, Red);
+    V.Sector (100, 100, 0, 90, 80, 40);
+
+    AssertEqual (0, V.Buf.GetInt ((89 * 200 + 119) * 4));      // hollow
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 139) * 4) <> 0);     // the radius
+
+    CloseGraph ();
+end
+
+test 'A Sector Leaves The Pen And Refuses Negative Radii';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'secpen', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.PenTo (15, 16);
+    V.SetFillStyle (SolidFill, White);
+    V.Sector (100, 100, 30, 120, 50, 25);
+
+    AssertEqual (15, V.GetX ());
+    AssertEqual (16, V.GetY ());
+
+    var Message := '';
+
+    try V.Sector (50, 50, 0, 90, -1, 10); except on e : String do Message := e; end
+    AssertEqual ('Sector needs radii of zero or more.', Message);
+
+    Message := '';
+    try V.Sector (50, 50, 0, 90, 10, -1); except on e : String do Message := e; end
+    AssertEqual ('Sector needs radii of zero or more.', Message);
+
+    CloseGraph ();
+end
+
+test 'The Sector Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'secalias', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    SetColor (V, White);
+    SetFillStyle (V, SolidFill, LightCyan);
+    Sector (V, 100, 100, 0, 90, 80, 30);
+
+    AssertEqual (LightCyan - 16777216, V.Buf.GetInt ((94 * 200 + 129) * 4));
 
     CloseGraph ();
 end

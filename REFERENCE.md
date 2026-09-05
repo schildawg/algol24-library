@@ -77,6 +77,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
+| [`Sector`](#sector) | procedure, alias of `ViewPort.Sector` | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
 | [`SetFillStyle`](#setfillstyle) | procedures, aliases of `ViewPort.SetFillStyle` and `SetFillPattern` | `graph` |
@@ -2897,7 +2898,7 @@ this surface.`
 
 **See also**
 
-[`Arc`](#arc), [`Circle`](#circle), [`SetFillStyle`](#setfillstyle)
+[`Arc`](#arc), [`Circle`](#circle), [`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
 
 **Example**
 
@@ -3520,6 +3521,93 @@ System.WriteLn (ScreenWidth () >= 640);
 true
 true
 true
+```
+
+---
+
+## Sector
+
+*procedure, alias of `ViewPort.Sector`* — unit `graph`
+
+**Function**
+
+Fills and outlines an elliptical sector on a viewport.
+
+**Declaration**
+
+```algol24
+procedure Sector (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                  EndAngle : Integer, XRadius : Integer, YRadius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Sector (V, …)` is `V.Sector (…)`.
+
+[`PieSlice`](#pieslice) with two radii, exactly as [`Ellipse`](#ellipse) is
+[`Circle`](#circle) with two — filled with the current fill pattern and color,
+then outlined with the pen: the elliptical arc, and the two radii closing it
+to the centre.
+
+With equal radii it *is* `PieSlice`: there is a test asserting the two paint
+the same pixels. They share one primitive underneath, so they cannot drift
+into filling different shapes.
+
+Angles are the **parametric** ones [`Ellipse`](#ellipse) uses, so a sector of a
+wide ellipse spans the same fraction of the figure that the same angles span of
+a circle — which is what makes a pie chart drawn in perspective come out with
+its shares intact. A sweep of 360 is the whole ellipse and draws no radii, the
+two coinciding.
+
+The fill and the outline are separate pens, and the pen is not moved.
+
+Raises `Sector needs radii of zero or more.` and `CloseGraph has closed this
+surface.`
+
+**See also**
+
+[`Ellipse`](#ellipse), [`PieSlice`](#pieslice), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'sector', False);
+
+var V := ViewPort (40, 60, 520, 320, 1);
+
+// A pie chart drawn in perspective: the same shares as a round one, laid on
+// an ellipse, which is what a sector is for.
+var Shares := [30, 25, 20, 15, 10];
+var Inks   := [LightRed, Yellow, LightCyan, LightGreen, LightMagenta];
+var At     := 0;
+
+SetColor (V, White);
+
+for var I := 0; I < 5; I := I + 1 do
+begin
+    SetFillStyle (V, SolidFill, Inks[I]);
+    Sector (V, 250, 160, At * 36 div 10, (At + Shares[I]) * 36 div 10, 200, 90);
+
+    At := At + Shares[I];
+end
+
+Show (V);
+
+// Wide across, shallow down: the rim is 200 out but only 90 up, so a point
+// 100 above the centre is outside it and one 80 above is not.
+System.WriteLn (V.Buf.GetInt ((159 * 480 + 429) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((79 * 480 + 249) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((59 * 480 + 249) * 4) <> 0);
+
+CloseGraph ();
+```
+
+```console
+true
+true
+false
 ```
 
 ---
@@ -4489,7 +4577,7 @@ Its methods each have a free-function [alias](#aliases) with an entry of its
 own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`DrawPoly`](#drawpoly),
 [`Ellipse`](#ellipse), [`Line`](#line),
-[`LineTo`](#lineto), [`PieSlice`](#pieslice), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
+[`LineTo`](#lineto), [`PieSlice`](#pieslice), [`Sector`](#sector), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
 [`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),

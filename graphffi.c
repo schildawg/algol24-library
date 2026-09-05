@@ -236,18 +236,22 @@ void alg_fill_rect (int64_t x1, int64_t y1, int64_t x2, int64_t y2,
     }
 }
 
-/* Fill a disc sector of the stamp target with an eight-by-eight pattern.
+/* Fill an elliptical sector of the stamp target with an eight-by-eight
+ * pattern.
  *
  * The companion to alg_fill_rect, and there for the same reason: a slice of
  * any size is thousands of pixels and the interpreted loop cannot afford
- * them.  The unit still decides the centre, the radius, the angles, the
+ * them.  The unit still decides the centre, the radii, the angles, the
  * pattern and the colour.
  *
+ * Two radii rather than one, so that PieSlice is the equal-radii case of
+ * Sector exactly as Circle is of Ellipse -- one primitive, and the two verbs
+ * cannot drift into computing different shapes.
+ *
  * Angles are DEGREES, zero at three o'clock, counterclockwise, and the sweep
- * is measured counterclockwise from the start -- the convention the whole
- * unit keeps.  Because a screen's Y grows downward the test flips it, so the
- * mathematics here is in the ordinary orientation and only the read of the
- * pixel is upside down.
+ * is measured counterclockwise from the start.  Because a screen's Y grows
+ * downward the test flips it, so the mathematics is in the ordinary
+ * orientation and only the read of the pixel is upside down.
  *
  * Whether a point lies within the sweep is asked WITHOUT an arctangent, which
  * the library does not have in two-argument form: a ray at angle A divides
@@ -257,19 +261,23 @@ void alg_fill_rect (int64_t x1, int64_t y1, int64_t x2, int64_t y2,
  * the two half-planes overlap and it is either.  Exact, and no transcendental
  * per pixel.
  *
+ * The angle is the PARAMETRIC one, as Ellipse's is, which is why the point is
+ * divided by the radii before the test: on a stretched circle the parametric
+ * angle is the circle's, and dividing undoes the stretch.
+ *
  * Total: no target, no pattern, a radius below zero, or a sector wholly
  * outside writes nothing.
  */
-void alg_fill_sector (int64_t cx, int64_t cy, int64_t r,
+void alg_fill_sector (int64_t cx, int64_t cy, int64_t xr, int64_t yr,
                       int64_t start_deg, int64_t sweep_deg,
                       void *pattern, int64_t color)
 {
     const int32_t *rows = (const int32_t *) pattern;
 
-    if (target == 0 || rows == 0 || r < 0) return;
+    if (target == 0 || rows == 0 || xr < 0 || yr < 0) return;
+    if (xr == 0 || yr == 0) return;
 
     int32_t ink = (int32_t) (0xFF000000u | (uint32_t) color);
-    int64_t rr  = r * r;
 
     double s = (double) start_deg * 3.14159265358979323846 / 180.0;
     double e = (double) (start_deg + sweep_deg) * 3.14159265358979323846 / 180.0;
@@ -280,26 +288,36 @@ void alg_fill_sector (int64_t cx, int64_t cy, int64_t r,
     int whole = sweep_deg >= 360 || sweep_deg <= -360;
     int wide  = sweep_deg > 180;
 
-    for (int64_t y = cy - r; y <= cy + r; y++)
+    int64_t bound = xr > yr ? xr : yr;
+
+    for (int64_t y = cy - yr; y <= cy + yr; y++)
     {
         if (y < 1 || y > target_h) continue;
 
         uint32_t row  = (uint32_t) rows[(y - 1) % 8];
         int32_t *line = target + (y - 1) * target_w;
 
-        for (int64_t x = cx - r; x <= cx + r; x++)
+        for (int64_t x = cx - xr; x <= cx + xr; x++)
         {
             if (x < 1 || x > target_w) continue;
 
             int64_t px = x - cx;
             int64_t py = cy - y;              /* the screen's Y is upside down */
 
-            if (px * px + py * py > rr) continue;
+            /* Inside the ellipse: (px/xr)^2 + (py/yr)^2 <= 1, multiplied out
+             * so the test stays in integers. */
+            if (px * px * yr * yr + py * py * xr * xr > xr * xr * yr * yr)
+                continue;
 
             if (!whole)
             {
-                double from_start = sx * (double) py - sy * (double) px;
-                double to_end     = ex * (double) py - ey * (double) px;
+                /* Undo the stretch before asking the angle, the parametric
+                 * angle being the circle's. */
+                double nx = (double) px / (double) xr;
+                double ny = (double) py / (double) yr;
+
+                double from_start = sx * ny - sy * nx;
+                double to_end     = ex * ny - ey * nx;
 
                 if (wide)
                 {
@@ -311,4 +329,6 @@ void alg_fill_sector (int64_t cx, int64_t cy, int64_t r,
             if ((row >> (7 - (x - 1) % 8)) & 1) line[x - 1] = ink;
         }
     }
+
+    (void) bound;
 }
