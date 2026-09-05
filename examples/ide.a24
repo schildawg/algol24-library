@@ -24,22 +24,22 @@ end
 procedure Frame (W, Title : String);
 begin
     W.GotoXY (1, 1);
-    W.Print ('╔' + Fill ('═', W.Cols - 2) + '╗');
+    W.Write ('╔' + Fill ('═', W.Cols - 2) + '╗');
 
     for var R := 2; R < W.Rows; R := R + 1 do
     begin
         W.GotoXY (1, R);
-        W.Print ('║');
+        W.Write ('║');
         W.GotoXY (W.Cols, R);
-        W.Print ('║');
+        W.Write ('║');
     end
 
     W.GotoXY (1, W.Rows);
-    W.Print ('╚' + Fill ('═', W.Cols - 2) + '╝');
+    W.Write ('╚' + Fill ('═', W.Cols - 2) + '╝');
 
     W.GotoXY (3, 1);
     W.TextColor (Yellow);
-    W.Print (' ' + Title + ' ');
+    W.Write (' ' + Title + ' ');
     W.TextColor (LightGray);
 end
 
@@ -47,18 +47,18 @@ end
 procedure MenuItem (Text : String);
 begin
     TextColor (Red);
-    Print (Str (Text[0]));
+    Write (Str (Text[0]));
     TextColor (Black);
-    Print (Copy (Text, 1, Length (Text) - 1) + '  ');
+    Write (Copy (Text, 1, Length (Text) - 1) + '  ');
 end
 
 /// One status key: the key red, its label black.
 procedure StatusKey (Key : String, Label : String);
 begin
     TextColor (Red);
-    Print (Key);
+    Write (Key);
     TextColor (Black);
-    Print (' ' + Label + '  ');
+    Write (' ' + Label + '  ');
 end
 
 begin
@@ -77,10 +77,10 @@ begin
     // ------------------------------------------------------- the menu bar --
     TextBackground (LightGray);
     GotoXY (1, 1);
-    Print (Fill (' ', Cols - 1));
+    Write (Fill (' ', Cols - 1));
     GotoXY (2, 1);
     TextColor (Red);
-    Print ('≡');
+    Write ('≡');
     GotoXY (5, 1);
 
     for var Item in ['File', 'Edit', 'Search', 'Run', 'Compile',
@@ -97,27 +97,27 @@ begin
     var Side  := Inner div 2;
 
     GotoXY (1, 2);
-    Print ('╔═[');
+    Write ('╔═[');
     TextColor (LightGreen);
-    Print ('■');
+    Write ('■');
     TextColor (White);
-    Print (']' + Fill ('═', Side) + Title + Fill ('═', Inner - Side) + '1═[');
+    Write (']' + Fill ('═', Side) + Title + Fill ('═', Inner - Side) + '1═[');
     TextColor (LightGreen);
-    Print ('↕');
+    Write ('↕');
     TextColor (White);
-    Print (']═╗');
+    Write (']═╗');
 
     for var Row := 3; Row < Bottom; Row := Row + 1 do
     begin
         GotoXY (1, Row);
-        Print ('║');
+        Write ('║');
         GotoXY (Cols, Row);
 
         TextColor (Cyan);
 
-        if Row = 3 then Print ('▲');
-        else if Row = Bottom - 1 then Print ('▼');
-        else Print ('▒');
+        if Row = 3 then Write ('▲');
+        else if Row = Bottom - 1 then Write ('▼');
+        else Write ('▒');
 
         TextColor (White);
     end
@@ -125,34 +125,34 @@ begin
     var HBar := Cols - 17;                     // between the fixed ends
 
     GotoXY (1, Bottom);
-    Print ('╚═ 1:1 ' + Fill ('═', 4));
+    Write ('╚═ 1:1 ' + Fill ('═', 4));
     TextColor (Cyan);
-    Print ('◄' + Fill ('▒', HBar) + '►');
+    Write ('◄' + Fill ('▒', HBar) + '►');
     TextColor (White);
-    Print (Fill ('═', 2) + '╝');
+    Write (Fill ('═', 2) + '╝');
 
     // The editing cursor, waiting at the top of the empty file -- blinking,
     // which is the whole reason it reads as a cursor and not a brick.
     GotoXY (2, 3);
     TextColor (Yellow + Blink);
-    Print ('▄');
+    Write ('▄');
 
     // Three lines of the file, one per intensity: the same cyan dimmed and
     // brightened around NormVideo's everyday LightGray.
     GotoXY (3, 5);
     TextColor (LightCyan);
     LowVideo ();
-    Print ('{ LowVideo  -- for the quiet aside }');
+    Write ('{ LowVideo  -- for the quiet aside }');
 
     GotoXY (3, 6);
     NormVideo ();
     TextBackground (Blue);     // NormVideo resets the background too --
-    Print ('{ NormVideo -- the everyday text }');   // Transparent would let
+    Write ('{ NormVideo -- the everyday text }');   // Transparent would let
                                                     // the black show through
     GotoXY (3, 7);
     TextColor (Cyan);
     HighVideo ();
-    Print ('{ HighVideo -- for the loud parts }');
+    Write ('{ HighVideo -- for the loud parts }');
 
     // --------------------------------------- two windows that OVERLAP, --
     // --------------------------------------- each with a chart over it  --
@@ -305,7 +305,7 @@ begin
     // ----------------------------------------------------- the status line --
     TextBackground (LightGray);
     GotoXY (1, Rows);
-    Print (Fill (' ', Cols - 1));
+    Write (Fill (' ', Cols - 1));
     GotoXY (2, Rows);
 
     for var Pair in [['F1', 'Help'], ['F2', 'Save'], ['F3', 'Open'],

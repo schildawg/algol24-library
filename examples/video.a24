@@ -11,79 +11,79 @@ uses graph;
 begin
     InitGraph (1280, 800, 'HighVideo and LowVideo', False);
 
-    PrintLn ('NormVideo: LightGray on Transparent, the startup colors.');
-    PrintLn ('');
+    WriteLn ('NormVideo: LightGray on Transparent, the startup colors.');
+    WriteLn ('');
 
     // Every dim color, then the same colors through HighVideo.
-    Print ('LowVideo   ');
+    Write ('LowVideo   ');
 
     for var C in [Blue, Green, Cyan, Red, Magenta, Brown, LightGray, DarkGray] do
     begin
         TextColor (C);
         LowVideo ();
-        Print ('████ ');
+        Write ('████ ');
     end
 
     NormVideo ();
-    PrintLn ('');
-    Print ('HighVideo  ');
+    WriteLn ('');
+    Write ('HighVideo  ');
 
     for var C in [Blue, Green, Cyan, Red, Magenta, Brown, LightGray, DarkGray] do
     begin
         TextColor (C);
         HighVideo ();
-        Print ('████ ');
+        Write ('████ ');
     end
 
     NormVideo ();
-    PrintLn ('');
-    PrintLn ('');
+    WriteLn ('');
+    WriteLn ('');
 
     // The adapter's odd couple.
-    Print ('Brown      ');
+    Write ('Brown      ');
     TextColor (Brown);
-    Print ('████  ');
+    Write ('████  ');
     NormVideo ();
-    Print ('HighVideo makes it ');
+    Write ('HighVideo makes it ');
     TextColor (Brown);
     HighVideo ();
-    PrintLn ('Yellow ████');
+    WriteLn ('Yellow ████');
     NormVideo ();
-    PrintLn ('');
+    WriteLn ('');
 
     // Off the palette there is no intensity bit, so each call moves halfway.
-    PrintLn ('An off-palette color, stepped by repeated calls:');
-    PrintLn ('');
-    Print ('darker     ');
+    WriteLn ('An off-palette color, stepped by repeated calls:');
+    WriteLn ('');
+    Write ('darker     ');
 
     TextColor (8405024);           // 0x804020
 
     for var Step := 0; Step < 5; Step := Step + 1 do
     begin
-        Print ('████');
+        Write ('████');
         LowVideo ();
     end
 
     TextColor (8405024);
-    PrintLn ('');
-    Print ('brighter   ');
+    WriteLn ('');
+    Write ('brighter   ');
 
     for var Step := 0; Step < 5; Step := Step + 1 do
     begin
-        Print ('████');
+        Write ('████');
         HighVideo ();
     end
 
     NormVideo ();
-    PrintLn ('');
-    PrintLn ('');
+    WriteLn ('');
+    WriteLn ('');
 
     TextColor (LightRed + Blink);
-    Print ('Blink');
+    Write ('Blink');
     NormVideo ();
-    PrintLn ('      -- TextColor (LightRed + Blink), on the language''s own clock');
-    PrintLn ('');
-    PrintLn ('close the window, or press any key, to finish.');
+    WriteLn ('      -- TextColor (LightRed + Blink), on the language''s own clock');
+    WriteLn ('');
+    WriteLn ('close the window, or press any key, to finish.');
 
     // Wait for any key, or the close button -- ReadKey blocks, and keeps the
     // blink phase beating while it does.

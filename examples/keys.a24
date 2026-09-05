@@ -14,9 +14,9 @@ begin
     ClrScr ();
 
     TextColor (White);
-    PrintLn ('Press keys. One Char each: characters as themselves, specials');
-    PrintLn ('by name, Ctrl letters as their low characters.  Esc finishes.');
-    PrintLn ('');
+    WriteLn ('Press keys. One Char each: characters as themselves, specials');
+    WriteLn ('by name, Ctrl letters as their low characters.  Esc finishes.');
+    WriteLn ('');
 
     var Names := [KeyUp : 'KeyUp',   KeyDown : 'KeyDown', KeyLeft : 'KeyLeft',
                   KeyRight : 'KeyRight', KeyHome : 'KeyHome', KeyEnd : 'KeyEnd',
@@ -38,17 +38,17 @@ begin
         if K in Names then
         begin
             TextColor (LightCyan);
-            Print (Names[K] + ' ');
+            Write (Names[K] + ' ');
         end
         else if Ord (K) < 32 then
         begin
             TextColor (LightGreen);
-            Print ('Ctrl-' + Str (Char (Ord (K) + 96)) + ' ');
+            Write ('Ctrl-' + Str (Char (Ord (K) + 96)) + ' ');
         end
         else
         begin
             TextColor (Yellow);
-            Print (Str (K));
+            Write (Str (K));
         end
     end
 end

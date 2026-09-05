@@ -1142,7 +1142,7 @@ end
 ///
 /// A Window carries the whole text vocabulary as methods, with its own
 /// cursor, its own colors, its own blink ink and its own scrolling -- its
-/// `PrintLn` at its own bottom row scrolls its cells and nothing else's. It
+/// `WriteLn` at its own bottom row scrolls its cells and nothing else's. It
 /// is placed in the root grid's cell space, inclusive and one-based, and
 /// stacks by `Order`: negative under the root grid, positive over it, ties
 /// by creation. `Order` and `Alpha` may be assigned after creation;
@@ -1382,7 +1382,7 @@ begin
         Blinking := False;
     end
 
-    /// The newline both PrintLn and a #10 spell: column 1, next row,
+    /// The newline both WriteLn and a #10 spell: column 1, next row,
     /// scrolling THIS window's cells at its bottom.
     procedure NewLine ();
     begin
@@ -1477,28 +1477,44 @@ begin
         end
     end
 
-    /// Writes Text at this window's cursor, in its colors, advancing it.
+    /// Stamps one string at the cursor, without presenting.
     ///
-    /// Wraps at the window's own last column and scrolls its own cells at
-    /// its bottom row; a #10 starts a new row. Everything the screen-wide
-    /// Print does, within these walls.
-    procedure Print (Text : String);
+    /// Private to this unit; `Write` and `WriteLn` are the verbs.
+    procedure Emit (Text : String);
     begin
-        Check ();
-
         for var I := 0; I < Length (Text); I := I + 1 do
         begin
             if Text[I] = #10 then NewLine ();
             else StampAt (Ord (Text[I]));
         end
+    end
+
+    /// Writes its arguments at this window's cursor, advancing it.
+    ///
+    /// Variadic, and each value rendered as `Str` would render it, which is
+    /// the built-in `Write`'s own contract [RT-015] kept within these walls.
+    /// Wraps at the window's own last column and scrolls its own cells at
+    /// its bottom row; a #10 starts a new row.
+    procedure Write (Values : List of Any);
+    begin
+        Check ();
+
+        for var V in Values do
+            Emit (Str (V));
 
         Present ();
     end
 
-    /// Writes Text and moves to the start of this window's next row.
-    procedure PrintLn (Text : String);
+    /// Writes its arguments and moves to the start of the next row.
+    ///
+    /// `W.WriteLn ()` is a bare newline.
+    procedure WriteLn (Values : List of Any);
     begin
-        Print (Text);
+        Check ();
+
+        for var V in Values do
+            Emit (Str (V));
+
         NewLine ();
         Present ();
     end
@@ -2264,40 +2280,58 @@ begin
     Root.NormVideo ();
 end
 
-/// Writes Text at the screen's cursor, in its colors, advancing it.
+/// Writes its arguments at the screen's cursor, advancing it.
 ///
-/// The screen is the root Window, and this is its Print: celled text that
+/// The screen is the root Window, and this is its `Write`: celled text that
 /// wraps at the last column, scrolls the grid -- and only the grid -- at the
-/// bottom, and is what `ClrEol` and `ClrScr` erase. The name is a
-/// placeholder Write and WriteLn absorb when the compiler learns to
-/// overload built-ins.
+/// bottom, and is what `ClrEol` and `ClrScr` erase. Variadic, and each value
+/// rendered as `Str` would render it, which is the built-in's own contract
+/// [RT-015].
+///
+/// This name shadows that built-in for any program that says `uses graph`,
+/// which is the intent: in a graphics program `Write` should reach the
+/// window. The console is still there under its own unit's name --
+/// `System.Write` and `System.WriteLn` -- and the library's own examples use
+/// it to report while a window is open.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
 ///
 /// # Examples
-/// `Print Stamps Cells And Advances The Cursor`
-procedure Print (Text : String);
+/// `Write Stamps Cells And Advances The Cursor`
+procedure Write (Values : List of Any);
 begin
     if SdlWin = nil then raise 'Graph is not open.';
 
     EnsureRoot ();
-    Root.Print (Text);
+
+    for var V in Values do
+        Root.Emit (Str (V));
+
+    Present ();
 end
 
-/// Writes Text and moves to the start of the screen's next row.
+/// Writes its arguments and moves to the start of the screen's next row.
+///
+/// `WriteLn ()` is a bare newline. Everything said of `Write` holds here,
+/// `System.WriteLn` included.
 ///
 /// # Raises
 /// `Graph is not open.` without a window.
 ///
 /// # Examples
-/// `PrintLn Moves To The Start Of The Next Row`
-procedure PrintLn (Text : String);
+/// `WriteLn Moves To The Start Of The Next Row`
+procedure WriteLn (Values : List of Any);
 begin
     if SdlWin = nil then raise 'Graph is not open.';
 
     EnsureRoot ();
-    Root.PrintLn (Text);
+
+    for var V in Values do
+        Root.Emit (Str (V));
+
+    Root.NewLine ();
+    Present ();
 end
 
 /// Clears the screen from its cursor to the end of the row.
@@ -2745,7 +2779,7 @@ begin
     AssertEqual (25, TextRows ());
 
     // And the new grid stamps at its own size.
-    Print ('A');
+    Write ('A');
     AssertEqual (2, WhereX ());
 
     CloseGraph ();
@@ -2759,7 +2793,7 @@ begin
 
     TextBackground (Blue);
     TextColor (Yellow);
-    Print ('old');
+    Write ('old');
     GotoXY (5, 3);
 
     TextMode (40, 25);
@@ -2768,7 +2802,7 @@ begin
     AssertEqual (1, WhereY ());
 
     // A stamped space shows the defaults are back: transparent background.
-    Print (' ');
+    Write (' ');
     AssertEqual (0, Root.Buf.GetInt (0));
 
     CloseGraph ();
@@ -2802,7 +2836,7 @@ begin
     AssertEqual ('Graph is not open.', Message);
 
     Message := '';
-    try Print ('x'); except on e : String do Message := e; end
+    try Write ('x'); except on e : String do Message := e; end
     AssertEqual ('Graph is not open.', Message);
 end
 
@@ -2843,12 +2877,12 @@ begin
     CloseGraph ();
 end
 
-test 'Print Stamps Cells And Advances The Cursor';
+test 'Write Stamps Cells And Advances The Cursor';
 begin
     CloseGraph ();
     InitGraph (320, 200, 'print', False);
 
-    Print ('AB');
+    Write ('AB');
 
     AssertEqual (3, WhereX ());
     AssertEqual (1, WhereY ());
@@ -2866,13 +2900,13 @@ begin
 end
 
 /// TextMode makes the wrap reachable in one short string.
-test 'Print Wraps At The Last Column';
+test 'Write Wraps At The Last Column';
 begin
     CloseGraph ();
     InitGraph (320, 200, 'wrap', False);
 
     TextMode (4, 2);
-    Print ('ABCDE');
+    Write ('ABCDE');
 
     AssertEqual (2, WhereX ());
     AssertEqual (2, WhereY ());
@@ -2880,17 +2914,17 @@ begin
     CloseGraph ();
 end
 
-test 'PrintLn Moves To The Start Of The Next Row';
+test 'WriteLn Moves To The Start Of The Next Row';
 begin
     CloseGraph ();
     InitGraph (320, 200, 'line', False);
 
-    PrintLn ('AB');
+    WriteLn ('AB');
 
     AssertEqual (1, WhereX ());
     AssertEqual (2, WhereY ());
 
-    PrintLn ('');
+    WriteLn ('');
 
     AssertEqual (3, WhereY ());
 
@@ -2902,7 +2936,7 @@ begin
     CloseGraph ();
     InitGraph (320, 200, 'wide', False);
 
-    Print ('你');
+    Write ('你');
 
     AssertEqual (3, WhereX ());
 
@@ -2920,7 +2954,7 @@ begin
 
     TextColor (White);
     TextBackground (Blue);
-    Print ('█ ');
+    Write ('█ ');
 
     // The block's centre pixel is opaque white.
     AssertEqual (-1, Root.Buf.GetInt ((16 * Root.PxW + 8) * 4));
@@ -2936,7 +2970,7 @@ begin
     CloseGraph ();
     InitGraph (320, 200, 'clear', False);
 
-    Print (' ');
+    Write (' ');
 
     var Painted := 0;
 
@@ -2978,7 +3012,7 @@ begin
 
     AssertTrue (Chart > 0);
 
-    Print ('ABCD');
+    Write ('ABCD');
     GotoXY (1, 1);
     ClrEol ();
 
@@ -3026,8 +3060,8 @@ begin
     var Chart := LitPixels (1, 1, 64, 64);
 
     TextMode (4, 2);
-    PrintLn ('A');
-    PrintLn ('B');
+    WriteLn ('A');
+    WriteLn ('B');
 
     var TopHalf := 0;
     var LowHalf := 0;
@@ -3202,7 +3236,7 @@ begin
 
     TextBackground (Blue);
     TextColor (White + Blink);
-    Print ('█');
+    Write ('█');
 
     // The text layer's cell is pure background -- the white went elsewhere.
     AssertEqual (Blue - 16777216, Root.Buf.GetInt ((16 * Root.PxW + 8) * 4));
@@ -3219,11 +3253,11 @@ begin
     InitGraph (320, 200, 'steady', False);
 
     TextColor (White + Blink);
-    Print ('█');
+    Write ('█');
 
     GotoXY (1, 1);
     TextColor (White);
-    Print (' ');
+    Write (' ');
 
     AssertEqual (0, Root.BBuf.GetInt ((16 * Root.PxW + 8) * 4));
 
@@ -3236,7 +3270,7 @@ begin
     InitGraph (320, 200, 'clear', False);
 
     TextColor (White + Blink);
-    Print ('██');
+    Write ('██');
     ClrScr ();
 
     var Lit := 0;
@@ -3257,8 +3291,8 @@ begin
 
     TextMode (4, 2);
     TextColor (White + Blink);
-    PrintLn ('');
-    PrintLn ('█');           // stamped on the last row, then scrolled up
+    WriteLn ('');
+    WriteLn ('█');           // stamped on the last row, then scrolled up
 
     // The ink now sits in the top half of the blink layer.
     var Top := 0;
@@ -3283,7 +3317,7 @@ begin
 
     TextColor (White + Blink);
     TextMode (40, 25);
-    Print ('');                        // TextMode rebuilt the root lazily
+    Write ('');                        // TextMode rebuilt the root lazily
     AssertTrue (not Root.Blinking);
 
     CloseGraph ();
@@ -3543,14 +3577,14 @@ begin
     CloseGraph ();
 end
 
-test 'A Window Prints Into Its Own Cells And Not The Screen''s';
+test 'A Window Writes Into Its Own Cells And Not The Screen''s';
 begin
     CloseGraph ();
     InitGraph (320, 200, 'cells', False);
 
     var A := Window (2, 2, 11, 4, 1);
 
-    A.Print ('X');
+    A.Write ('X');
 
     var Own := 0;
 
@@ -3576,13 +3610,13 @@ begin
 
     var A := Window (3, 3, 6, 4, 1);        // 4 cols, 2 rows
 
-    A.Print ('ABCDE');
+    A.Write ('ABCDE');
 
     AssertEqual (2, A.WhereX ());
     AssertEqual (2, A.WhereY ());
 
-    A.PrintLn ('');
-    A.Print ('F');
+    A.WriteLn ('');
+    A.Write ('F');
 
     // The scroll happened in A's buffer: its lower half is now background.
     var Low := 0;
@@ -3627,7 +3661,7 @@ begin
     var A := Window (1, 1, 10, 3, 1);
 
     A.TextColor (White + Blink);
-    A.Print ('█');
+    A.Write ('█');
 
     AssertEqual (-1, A.BBuf.GetInt ((16 * A.PxW + 8) * 4));
 
@@ -3688,7 +3722,7 @@ begin
 
     var Message := '';
 
-    try A.Print ('x'); except on e : String do Message := e; end
+    try A.Write ('x'); except on e : String do Message := e; end
     AssertEqual ('CloseGraph has closed this surface.', Message);
 
     Message := '';
@@ -3764,7 +3798,7 @@ begin
     CloseGraph ();
     InitGraph (320, 200, 'keepers', False);
 
-    Print ('wake the root');
+    Write ('wake the root');
 
     var V := ViewPort (1, 1, 8, 8, 1);
 
@@ -3774,7 +3808,7 @@ begin
     AssertEqual (Green - 16777216, V.Buf.GetInt ((1 * 8 + 1) * 4));
     AssertEqual (1, Surfaces.Length);       // the root went, the port stayed
 
-    Print ('');
+    Write ('');
     AssertEqual (2, Surfaces.Length);       // and the root came back lazily
 
     CloseGraph ();
@@ -3791,10 +3825,10 @@ begin
     var A := Window (1, 1, 4, 3, 1);
 
     A.GotoXY (1, 1);
-    A.Print ('TTTT');                  // the top border, exactly four wide
+    A.Write ('TTTT');                  // the top border, exactly four wide
 
     A.GotoXY (1, 3);
-    A.Print ('BBBB');                  // the bottom border, filling the row
+    A.Write ('BBBB');                  // the bottom border, filling the row
 
     // Nothing scrolled: the top row still holds what was put there.
     var Top := 0;
@@ -3820,12 +3854,12 @@ begin
 
     var A := Window (1, 1, 4, 3, 1);
 
-    A.Print ('ABCD');
+    A.Write ('ABCD');
 
     AssertEqual (4, A.WhereX ());
     AssertEqual (1, A.WhereY ());
 
-    A.Print ('E');
+    A.Write ('E');
 
     AssertEqual (2, A.WhereX ());
     AssertEqual (2, A.WhereY ());
@@ -3841,13 +3875,13 @@ begin
 
     var A := Window (1, 1, 4, 3, 1);
 
-    A.Print ('ABCD');
+    A.Write ('ABCD');
     AssertTrue (A.Pending);
 
     A.GotoXY (2, 2);
     AssertTrue (not A.Pending);
 
-    A.Print ('ABC');
+    A.Write ('ABC');
     A.ClrScr ();
     AssertTrue (not A.Pending);
     AssertEqual (1, A.WhereX ());
@@ -3862,12 +3896,12 @@ begin
     InitGraph (320, 200, 'screen', False);
 
     TextMode (4, 2);
-    Print ('ABCD');
+    Write ('ABCD');
 
     AssertEqual (4, WhereX ());
     AssertEqual (1, WhereY ());
 
-    Print ('E');
+    Write ('E');
 
     AssertEqual (2, WhereX ());
     AssertEqual (2, WhereY ());
@@ -4018,7 +4052,7 @@ begin
     V.OutTextXY (1, 90, 'X');
 
     // The grid stamps its cell 1:1 and upright afterward: one cell wide.
-    Print ('A');
+    Write ('A');
 
     AssertEqual (2, WhereX ());
 
@@ -4368,6 +4402,56 @@ begin
     V.Rectangle (X1: 2, Y1: 2, X2: 8, Y2: 8);
 
     AssertEqual (2, V.GetX ());
+
+    CloseGraph ();
+end
+
+/// The screen's Write shadows the built-in for any program that says
+/// `uses graph`, which is the intent -- and the console is still reachable
+/// under its own unit's name, which is what makes that safe.
+test 'System Write Reaches The Console While A Window Is Open';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'system', False);
+
+    // Ours writes cells...
+    Write ('to the grid');
+
+    AssertEqual (12, WhereX ());
+
+    // ... and System's writes nothing to them.
+    var Before := WhereX ();
+
+    System.Write ('');
+    System.WriteLn ('');
+
+    AssertEqual (Before, WhereX ());
+
+    CloseGraph ();
+end
+
+/// Variadic, as the built-in is: every argument rendered as Str renders it,
+/// and a bare call is a newline.
+test 'Write Takes Any Number Of Arguments Of Any Type';
+begin
+    CloseGraph ();
+    InitGraph (320, 200, 'variadic', False);
+
+    Write ('a', 42, ' ', 3.5);
+
+    // 'a42 3.5' is seven cells, so the cursor rests on the eighth.
+    AssertEqual (8, WhereX ());
+
+    WriteLn ();
+
+    AssertEqual (1, WhereX ());
+    AssertEqual (2, WhereY ());
+
+    var W := Window (1, 1, 20, 5, 1);
+
+    W.Write ('x', 1, True);         // 'x1true'
+
+    AssertEqual (7, W.WhereX ());
 
     CloseGraph ();
 end

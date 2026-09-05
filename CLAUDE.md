@@ -127,6 +127,13 @@ The house style, which `../algol24.com/gen/Strings.a24` models well:
   platform. Nothing is required of `Sin`, `Cos`, `Exp`, `Ln` or `ArcTan`, whose
   last bit may differ between one libm and another — those get `AssertNear`.
   Using a tolerance where exactness holds only weakens the test.
+- ⚠️ **`graph` shadows `Write` and `WriteLn`, so a graph program reports to
+  the console through `System.Write` and `System.WriteLn`.** The built-ins
+  stay reachable under their own unit's name, variadic and untouched, and
+  every `graph` example in `REFERENCE.md` uses them. Getting this backwards
+  is easy: a bulk rename that qualifies a *grid* write sends window text to
+  the console, which `check-reference.py` catches only because the example
+  then prints the wrong thing.
 - ⚠️ **`Fail` and the assertions exist only under `--test`.** A helper that
   calls `Fail` answers `Undefined variable 'Fail'.` in an ordinary program, so a
   `REFERENCE.md` example for one has to be a `test` block.
@@ -267,7 +274,7 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `testing` | `AssertNear` | 9 | complete |
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
-| `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Print`, `PrintLn`, `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `ClrScr`, `ClrEol`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid; `ViewPort.SetTextStyle` turns and magnifies free text; the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 177 | complete |
+| `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `ClrScr`, `ClrEol`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid; `ViewPort.SetTextStyle` turns and magnifies free text; the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 179 | complete |
 
 ⚠️ **`graph` has a design document, `DESIGN.md`, and it governs.** The unit is
 one world — celled text on a grid at Order 0, Canvas objects above and below

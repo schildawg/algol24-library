@@ -50,8 +50,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`Pi`](#pi) | constant | `math` |
-| [`Print`](#print) | procedure | `graph` |
-| [`PrintLn`](#println) | procedure | `graph` |
+
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
@@ -76,6 +75,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ViewPort`](#viewport) | class | `graph` |
 | [`WhereX`](#wherex) | function | `graph` |
 | [`WhereY`](#wherey) | function | `graph` |
+| [`Write`](#write) `WriteLn` | procedures | `graph` |
 | [`Window`](#window) | class | `graph` |
 
 ---
@@ -278,7 +278,7 @@ BASIC's `COLOR 16` and up wrote. Here 128 is a legitimate navy, so the flag
 rides bit 24 and the spelling survives unchanged.
 
 The phase advances whenever something presents, on the language's own
-`clock ()`. A program drawing or sitting in a loop that ticks `Print ('')`
+`clock ()`. A program drawing or sitting in a loop that ticks `Write ('')`
 blinks; one that draws once and halts shows whichever phase it landed in.
 
 **See also**
@@ -293,12 +293,12 @@ uses graph;
 InitGraph (640, 480, 'blink', False);
 
 TextColor (LightRed + Blink);
-Print ('this text blinks');
+Write ('this text blinks');
 
 NormVideo ();
-PrintLn (' and this does not');
+WriteLn (' and this does not');
 
-WriteLn (WhereY ());
+System.WriteLn (WhereY ());
 
 CloseGraph ();
 ```
@@ -348,7 +348,7 @@ InitGraph (320, 200, 'brief', False);
 CloseGraph ();
 CloseGraph ();                       // already closed: does nothing
 
-WriteLn ('closed without complaint');
+System.WriteLn ('closed without complaint');
 ```
 
 ```console
@@ -410,10 +410,10 @@ var Chart := ViewPort (W.PixelLeft () + CellWidth (),
                        (W.Cols - 2) * CellWidth (),
                        (W.Rows - 2) * CellHeight (), 2);
 
-WriteLn (CellWidth ());
-WriteLn (CellHeight ());
-WriteLn (Chart.X);
-WriteLn (Chart.Y);
+System.WriteLn (CellWidth ());
+System.WriteLn (CellHeight ());
+System.WriteLn (Chart.X);
+System.WriteLn (Chart.Y);
 
 CloseGraph ();
 ```
@@ -455,7 +455,7 @@ Raises `Graph is not open.` without a window.
 
 **See also**
 
-[`ClrScr`](#clrscr), [`Print`](#print), [`TextBackground`](#textbackground)
+[`ClrScr`](#clrscr), [`Write`](#write), [`TextBackground`](#textbackground)
 
 **Example**
 
@@ -464,11 +464,11 @@ uses graph;
 
 InitGraph (320, 200, 'eol', False);
 
-Print ('doomed text');
+Write ('doomed text');
 GotoXY (1, 1);
 ClrEol ();
 
-WriteLn (WhereX ());
+System.WriteLn (WhereX ());
 
 CloseGraph ();
 ```
@@ -519,8 +519,8 @@ GotoXY (5, 3);
 TextBackground (Blue);
 ClrScr ();
 
-WriteLn (WhereX ());
-WriteLn (WhereY ());
+System.WriteLn (WhereX ());
+System.WriteLn (WhereY ());
 
 CloseGraph ();
 ```
@@ -574,9 +574,9 @@ spelling because `0` is a legitimate black. Only
 ```algol24
 uses graph;
 
-WriteLn (White);
-WriteLn (Blue);
-WriteLn (Transparent);
+System.WriteLn (White);
+System.WriteLn (Blue);
+System.WriteLn (Transparent);
 ```
 
 ```console
@@ -782,7 +782,7 @@ var Columns := 0;
 for var X := 1; X <= GetMaxX (); X := X + 1 do
     Columns := Columns + 1;
 
-WriteLn (Columns);
+System.WriteLn (Columns);
 
 CloseGraph ();
 ```
@@ -857,7 +857,7 @@ Raises `Graph is not open.` without a window.
 
 **See also**
 
-[`Print`](#print), [`WhereX`](#wherex), [`WhereY`](#wherey)
+[`Write`](#write), [`WhereX`](#wherex), [`WhereY`](#wherey)
 
 **Example**
 
@@ -868,8 +868,8 @@ InitGraph (320, 200, 'goto', False);
 
 GotoXY (10, 5);
 
-WriteLn (WhereX ());
-WriteLn (WhereY ());
+System.WriteLn (WhereX ());
+System.WriteLn (WhereY ());
 
 CloseGraph ();
 ```
@@ -923,12 +923,12 @@ InitGraph (640, 480, 'video', False);
 
 TextColor (Brown);
 HighVideo ();
-Print ('now yellow');
+Write ('now yellow');
 
 NormVideo ();
-PrintLn (' and back to normal');
+WriteLn (' and back to normal');
 
-WriteLn (WhereY ());
+System.WriteLn (WhereY ());
 
 CloseGraph ();
 ```
@@ -1054,8 +1054,8 @@ uses graph;
 
 InitGraph (640, 480, 'My Program', False);
 
-WriteLn (GetMaxX ());
-WriteLn (GetMaxY ());
+System.WriteLn (GetMaxX ());
+System.WriteLn (GetMaxY ());
 
 CloseGraph ();
 ```
@@ -1128,7 +1128,7 @@ InstallUserFont ('romfont.hex');
 OutTextXY (10, 60, 'one bit per pixel');
 
 CloseGraph ();
-WriteLn ('two fonts, one window');
+System.WriteLn ('two fonts, one window');
 ```
 
 ```console
@@ -1473,9 +1473,9 @@ V.SetLineStyle (SolidLn, 0, NormWidth);
 V.Rectangle (40, 20, 380, 260);
 V.Show ();
 
-WriteLn (V.GetX ());
-WriteLn (V.GetY ());
-WriteLn (V.GetColor () = Yellow);
+System.WriteLn (V.GetX ());
+System.WriteLn (V.GetY ());
+System.WriteLn (V.GetColor () = Yellow);
 
 CloseGraph ();
 ```
@@ -1880,7 +1880,7 @@ OutText ('line, ');
 OutText ('in pieces');
 
 CloseGraph ();
-WriteLn ('drawn');
+System.WriteLn ('drawn');
 ```
 
 ```console
@@ -1974,111 +1974,6 @@ WriteLn ('area:          ' + Str (Pi * Sqr (Radius)));
 ```console
 circumference: 18.84955592153876
 area:          28.274333882308138
-```
-
----
-
-## Print
-
-*procedure* — unit `graph`
-
-**Function**
-
-Writes text at the cursor, in the current colors, advancing it.
-
-**Declaration**
-
-```algol24
-procedure Print (Text : String);
-```
-
-**Remarks**
-
-This is **celled** text: it lands on the grid, wraps at the last column,
-scrolls the grid — and only the grid — at the bottom row, and is what
-[`ClrEol`](#clreol) and [`ClrScr`](#clrscr) erase. Free, pixel-placed text is
-[`OutTextXY`](#outtextxy)'s job, and the two never meet.
-
-A `#10` in the text starts a new row. A wide (CJK) glyph takes two cells,
-an emoji likewise, and a codepoint the font lacks takes one blank cell.
-
-The name is a placeholder with a settled future: when the compiler learns to
-overload built-ins, `Write` and `WriteLn` absorb `Print` and
-[`PrintLn`](#println).
-
-Raises `Graph is not open.` without a window.
-
-**See also**
-
-[`GotoXY`](#gotoxy), [`PrintLn`](#println), [`TextColor`](#textcolor)
-
-**Example**
-
-Three narrow glyphs, then two wide ones at two cells each.
-
-```algol24
-uses graph;
-
-InitGraph (320, 200, 'print', False);
-
-Print ('Hi 你好');
-
-WriteLn (WhereX ());
-
-CloseGraph ();
-```
-
-```console
-8
-```
-
----
-
-## PrintLn
-
-*procedure* — unit `graph`
-
-**Function**
-
-Writes text and moves the cursor to the start of the next row.
-
-**Declaration**
-
-```algol24
-procedure PrintLn (Text : String);
-```
-
-**Remarks**
-
-`PrintLn ('')` is a bare newline. At the bottom row the grid scrolls, taking
-the current background into the vacated band; graphics stay put.
-
-Everything said of [`Print`](#print) holds here, the placeholder name
-included.
-
-Raises `Graph is not open.` without a window.
-
-**See also**
-
-[`Print`](#print)
-
-**Example**
-
-```algol24
-uses graph;
-
-InitGraph (320, 200, 'lines', False);
-
-PrintLn ('one');
-PrintLn ('two');
-
-WriteLn (WhereY ());
-
-CloseGraph ();
-```
-
-```console
-3
 ```
 
 ---
@@ -2343,7 +2238,7 @@ Raises `Graph is not open.` without a window.
 The idiom is a loop, and it needs a keyboard:
 
     while ReadKey () <> #27 do
-        Print ('.');
+        Write ('.');
 
 `examples/keys.a24` is that loop grown up — every key echoed by name until
 Esc. What can run unattended is the empty-queue side:
@@ -2353,10 +2248,10 @@ uses graph;
 
 InitGraph (640, 480, 'keys', False);
 
-WriteLn (KeyPressed ());
+System.WriteLn (KeyPressed ());
 
 CloseGraph ();
-WriteLn ('no key was waiting');
+System.WriteLn ('no key was waiting');
 ```
 
 ```console
@@ -2502,9 +2397,9 @@ screen.
 uses graph;
 
 // The desktop's size is the machine's, so only its soundness can be shown.
-WriteLn (ScreenWidth () > 0);
-WriteLn (ScreenHeight () > 0);
-WriteLn (ScreenWidth () >= 640);
+System.WriteLn (ScreenWidth () > 0);
+System.WriteLn (ScreenHeight () > 0);
+System.WriteLn (ScreenWidth () >= 640);
 ```
 
 ```console
@@ -2562,10 +2457,10 @@ InitGraph (640, 480, 'cadence', False);
 SetBlinkRate (533);
 
 TextColor (Yellow + Blink);
-Print ('the unhurried blink');
+Write ('the unhurried blink');
 
 CloseGraph ();
-WriteLn ('set');
+System.WriteLn ('set');
 ```
 
 ```console
@@ -2692,8 +2587,8 @@ Chart.SetTextStyle (0, 1);
 Chart.OutTextXY (60, 290, 'seconds');
 Chart.Show ();
 
-WriteLn (Chart.Dir);
-WriteLn (Chart.Size);
+System.WriteLn (Chart.Dir);
+System.WriteLn (Chart.Size);
 
 CloseGraph ();
 ```
@@ -2883,9 +2778,9 @@ InitGraph (320, 200, 'bg', False);
 
 TextBackground (Blue);
 TextColor (Yellow);
-Print ('classic');
+Write ('classic');
 
-WriteLn ('painted');
+System.WriteLn ('painted');
 
 CloseGraph ();
 ```
@@ -2921,7 +2816,7 @@ Ink is the one thing a cell always has, so `Transparent` raises
 
 **See also**
 
-[`Colors`](#colors), [`Print`](#print), [`TextBackground`](#textbackground)
+[`Colors`](#colors), [`Write`](#write), [`TextBackground`](#textbackground)
 
 **Example**
 
@@ -2962,8 +2857,8 @@ uses graph;
 
 InitGraph (1280, 800, 'classic', False);
 
-WriteLn (TextCols ());
-WriteLn (TextRows ());
+System.WriteLn (TextCols ());
+System.WriteLn (TextRows ());
 
 CloseGraph ();
 ```
@@ -3019,12 +2914,12 @@ uses graph;
 
 InitGraph (640, 480, 'modes', False);
 
-WriteLn (TextCols ());
+System.WriteLn (TextCols ());
 
 TextMode (40, 25);
 
-WriteLn (TextCols ());
-WriteLn (TextRows ());
+System.WriteLn (TextCols ());
+System.WriteLn (TextRows ());
 
 CloseGraph ();
 ```
@@ -3223,7 +3118,7 @@ beneath it; `Alpha` ghosts the whole surface at once. Both `Alpha` and
 
 `OutTextXY` draws **free** text: a graphic that happens to be letters, with
 no cursor, no wrap, and no text verb that will ever erase it — see
-[`Print`](#print) for the celled kind. `OutText` draws at the viewport's own
+[`Write`](#write) for the celled kind. `OutText` draws at the viewport's own
 current position and advances it.
 [`SetTextStyle`](#settextstyle) turns that text by a quarter and magnifies
 it, neither of which celled text can have.
@@ -3256,12 +3151,12 @@ Chart.PutPixel (201, 1, Red);
 Chart.OutTextXY (8, 8, 'a label');
 Chart.Show ();
 
-WriteLn (Chart.W);
-WriteLn (Chart.H);
-WriteLn (Chart.Order);
+System.WriteLn (Chart.W);
+System.WriteLn (Chart.H);
+System.WriteLn (Chart.Order);
 
 Chart.Order := -1;
-WriteLn (Chart.Order);
+System.WriteLn (Chart.Order);
 
 CloseGraph ();
 ```
@@ -3302,7 +3197,7 @@ Raises `Graph is not open.` without a window.
 
 **Example**
 
-See [`GotoXY`](#gotoxy) and [`Print`](#print).
+See [`GotoXY`](#gotoxy) and [`Write`](#write).
 
 ---
 
@@ -3330,7 +3225,7 @@ One-based. Everything said of [`WhereX`](#wherex) holds here.
 
 **Example**
 
-See [`GotoXY`](#gotoxy) and [`PrintLn`](#println).
+See [`GotoXY`](#gotoxy) and [`WriteLn`](#write).
 
 ---
 
@@ -3357,8 +3252,8 @@ procedure TextBackground (Color : Integer);
 procedure HighVideo ();
 procedure LowVideo ();
 procedure NormVideo ();
-procedure Print (Text : String);
-procedure PrintLn (Text : String);
+procedure Write (Text : String);
+procedure WriteLn (Text : String);
 procedure ClrEol ();
 procedure ClrScr ();
 
@@ -3379,7 +3274,7 @@ are cells of the root grid's space, **inclusive and one-based**, so
 ⚠️ **A window is a terminal of its own.** It carries the whole text
 vocabulary as methods, each acting on its own cells: its own cursor
 (`1, 1` is *its* corner), its own ink and background, its own blink ink, and
-its own scrolling — `PrintLn` at the window's bottom row scrolls **that
+its own scrolling — `WriteLn` at the window's bottom row scrolls **that
 window's** cells and nothing else's. `ClrScr` clears it alone.
 
 That is the design's one rule, and where it pays: `B.ClrEol` erases B's
@@ -3412,7 +3307,7 @@ and `Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.`
 
 **See also**
 
-[`Print`](#print), [`TextColor`](#textcolor), [`ViewPort`](#viewport)
+[`Write`](#write), [`TextColor`](#textcolor), [`ViewPort`](#viewport)
 
 **Example**
 
@@ -3428,15 +3323,15 @@ var W := Window (10, 5, 49, 19, 1);
 
 W.TextBackground (Blue);
 W.ClrScr ();
-W.Print ('its own cursor and colors');
+W.Write ('its own cursor and colors');
 
-WriteLn (W.Cols);
-WriteLn (W.Rows);
-WriteLn (W.WhereX ());
-WriteLn (WhereX ());
+System.WriteLn (W.Cols);
+System.WriteLn (W.Rows);
+System.WriteLn (W.WhereX ());
+System.WriteLn (WhereX ());
 
 W.MoveTo (2, 2);
-WriteLn (W.X2);
+System.WriteLn (W.X2);
 
 CloseGraph ();
 ```
@@ -3447,4 +3342,78 @@ CloseGraph ();
 26
 1
 41
+```
+
+---
+
+## Write
+
+*procedures* — unit `graph`
+
+**Function**
+
+Writes to the screen's text grid, advancing its cursor.
+
+**Declaration**
+
+```algol24
+procedure Write (Values : List of Any);
+procedure WriteLn (Values : List of Any);
+```
+
+**Remarks**
+
+The screen is the root [`Window`](#window), and these are its `Write` and
+`WriteLn` — celled text that wraps at the last column, scrolls the grid *and
+only the grid* at the bottom row, and is what [`ClrEol`](#clreol) and
+[`ClrScr`](#clrscr) erase. A `#10` in a value starts a new row, a wide (CJK)
+glyph takes two cells, and `WriteLn ()` is a bare newline.
+
+Variadic, and each value rendered as `Str` renders it, which is the built-in's
+own contract [RT-015] kept: `Write ('a', 42, ' ', 3.5)` writes `a42 3.5`.
+
+⚠️ **These shadow the built-ins for any program that says `uses graph`**, and
+that is the intent — in a graphics program `WriteLn` should reach the window
+rather than standard output. The console remains reachable under its own
+unit's name:
+
+```algol24
+WriteLn ('this lands in the window');
+System.WriteLn ('this lands on the console');
+```
+
+`System.Write` and `System.WriteLn` are the built-ins exactly as they were,
+variadic and untouched, and every example in this reference uses them to
+report a value while a window is open. Nothing is lost by the shadowing; it
+only has to be named.
+
+Free, pixel-placed text is [`OutTextXY`](#outtextxy)'s job, and the two never
+meet. A [`Window`](#window) has its own `Write` and `WriteLn` writing into its
+own cells.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`ClrScr`](#clrscr), [`GotoXY`](#gotoxy), [`TextColor`](#textcolor), [`Window`](#window)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'write', False);
+
+Write ('Hi ', 42, ' 你好');
+WriteLn ();
+
+System.WriteLn (WhereX ());
+System.WriteLn (WhereY ());
+
+CloseGraph ();
+```
+
+```console
+1
+2
 ```

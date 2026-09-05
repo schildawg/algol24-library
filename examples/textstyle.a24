@@ -14,7 +14,7 @@ begin
     ClrScr ();
     TextColor (White);
     GotoXY (2, 1);
-    Print ('Free text on a ViewPort turns and scales.  Celled text does neither.');
+    Write ('Free text on a ViewPort turns and scales.  Celled text does neither.');
 
     // The turns, drawn from the middle of a viewport outward.
     var Turns := ViewPort (60, 80, 560, 560, 1);

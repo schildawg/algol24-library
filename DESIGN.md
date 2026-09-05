@@ -93,7 +93,7 @@ meets a string index as `Text[Col - 1]`.
 | background color | yes, per cell; transparent by default | no — ink only |
 | magnification | none; the cell is the size | any whole number, by `SetTextStyle` |
 | orientation | upright only | 0° / 90° / 180° / 270°, by `SetTextStyle` |
-| written by | `WriteLn` | `OutText`, `OutTextXY` |
+| written by | `Write`, `WriteLn` | `OutText`, `OutTextXY` |
 
 Two of those rows are forced rather than chosen. A cell is half as wide as it
 is tall, so a glyph rotated 90° cannot sit on the grid — rotation is not
@@ -178,10 +178,12 @@ Nothing below is designed yet; nothing above blocks any of it.
 - **The background as the root ViewPort.** The window's own surface may one
   day be simply a ViewPort at the bottom of the stack, and the global pixel
   verbs its methods, completing the symmetry the root Window began.
-- **`WriteLn` onto the grid** waits on the compiler growing overloading for
-  built-ins. Until it lands, the celled writers are named **`Print` and
-  `PrintLn`**, which `Write`/`WriteLn` absorb when the fix arrives; `OutText`
-  carries free text throughout.
+- ~~`WriteLn` onto the grid~~ — arrived in 0.1.4, which lets a unit overload
+  a built-in. The celled writers are `Write` and `WriteLn`, variadic as
+  [RT-015] has them, and they shadow the built-ins for any program that says
+  `uses graph` — which is the intent. `System.Write` and `System.WriteLn`
+  reach the console, so nothing is lost by the shadowing; it only has to be
+  named. `Print` and `PrintLn` were the placeholders, and are gone.
 - ~~A per-canvas text grid~~ — arrived as the Window class: a window that
   scrolls its own celled contents is exactly what a Window is.
 - **ViewPort scaling** — a texture can be presented at other than 1:1, which

@@ -24,21 +24,21 @@ end
 procedure Frame (W, Title : String);
 begin
     W.GotoXY (1, 1);
-    W.Print ('╔' + Fill ('═', W.Cols - 2) + '╗');
+    W.Write ('╔' + Fill ('═', W.Cols - 2) + '╗');
 
     for var R := 2; R < W.Rows; R := R + 1 do
     begin
         W.GotoXY (1, R);
-        W.Print ('║');
+        W.Write ('║');
         W.GotoXY (W.Cols, R);
-        W.Print ('║');
+        W.Write ('║');
     end
 
     W.GotoXY (1, W.Rows);
-    W.Print ('╚' + Fill ('═', W.Cols - 2) + '╝');
+    W.Write ('╚' + Fill ('═', W.Cols - 2) + '╝');
 
     W.GotoXY (3, 1);
-    W.Print (' ' + Title + ' ');
+    W.Write (' ' + Title + ' ');
 end
 
 begin
@@ -49,7 +49,7 @@ begin
     ClrScr ();
     TextColor (LightGray);
     GotoXY (2, 1);
-    Print ('The desktop is the root grid.  Arrows drag B;  Tab restacks it;  Esc quits.');
+    Write ('The desktop is the root grid.  Arrows drag B;  Tab restacks it;  Esc quits.');
 
     // Window A, with text of its own.
     var A := Window (4, 4, 44, 20, 1);
@@ -60,15 +60,15 @@ begin
     Frame (A, 'A');
 
     A.GotoXY (3, 3);
-    A.Print ('This window''s own text.');
+    A.Write ('This window''s own text.');
     A.GotoXY (3, 4);
-    A.Print ('The chart below is a ViewPort');
+    A.Write ('The chart below is a ViewPort');
     A.GotoXY (3, 5);
-    A.Print ('at a HIGHER Order, so it covers');
+    A.Write ('at a HIGHER Order, so it covers');
     A.GotoXY (3, 6);
-    A.Print ('these words -- and window B, at a');
+    A.Write ('these words -- and window B, at a');
     A.GotoXY (3, 7);
-    A.Print ('higher Order still, covers IT.');
+    A.Write ('higher Order still, covers IT.');
 
     // The chart: a ViewPort over A's text, in A's client area.
     var Chart := ViewPort (200, 300, 300, 200, 2);
@@ -93,14 +93,14 @@ begin
     Frame (B, 'B');
 
     B.GotoXY (3, 3);
-    B.Print ('Window B, Order 3.');
+    B.Write ('Window B, Order 3.');
     B.GotoXY (3, 4);
-    B.Print ('Celled text OVER a graphic --');
+    B.Write ('Celled text OVER a graphic --');
     B.GotoXY (3, 5);
-    B.Print ('which is over other text.');
+    B.Write ('which is over other text.');
     B.GotoXY (3, 7);
     B.TextColor (Yellow + Blink);
-    B.Print ('drag me');
+    B.Write ('drag me');
 
     var Under := False;
 
@@ -124,6 +124,6 @@ begin
             else B.Order := 3;
         end
 
-        B.Print ('');
+        B.Write ('');
     end
 end
