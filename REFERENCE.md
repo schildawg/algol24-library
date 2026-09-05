@@ -20,6 +20,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Bar`](#bar) | procedure, alias of `ViewPort.Bar` | `graph` |
+| [`Bar3D`](#bar3d) | procedure, alias of `ViewPort.Bar3D` | `graph` |
 | [`Blink`](#blink) | constant | `graph` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
@@ -484,6 +485,98 @@ CloseGraph ();
 
 ```console
 true
+true
+```
+
+---
+
+## Bar3D
+
+*procedure, alias of `ViewPort.Bar3D`* — unit `graph`
+
+**Function**
+
+Fills a bar and draws it in three dimensions.
+
+**Declaration**
+
+```algol24
+procedure Bar3D (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
+                 Y2 : Integer, Depth : Integer, Top : Boolean);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Bar3D (V, …)` is `V.Bar3D (…)`.
+
+The front face is filled with the current fill pattern and outlined with the
+current line style and pen — [`Bar`](#bar) and [`Rectangle`](#rectangle) in one
+call, which is what Turbo Pascal's `Bar3D` was. `Depth` then projects it up and
+to the right at forty-five degrees, drawing the right face and, when `Top` is
+true, the top one.
+
+⚠️ **`Top` exists for stacking.** A column of bars wants the cap on the topmost
+alone; drawn with `Top` false, the ones beneath get their right face but no lid
+cutting across the stack. The right face is always drawn — it is what makes the
+bar look solid.
+
+⚠️ **Only the front face carries the pattern.** The other faces are outlines,
+which is what keeps a patterned bar legible in three dimensions.
+
+Turbo Pascal suggested a `Depth` of a quarter the bar's width, which still
+reads well. A depth of zero is exactly a `Bar` with a `Rectangle` over it —
+there is a test asserting the two are pixel-identical.
+
+The pen is not moved: a figure is not a journey, which is the rule
+[`Arc`](#arc), [`Circle`](#circle), `Bar` and [`Rectangle`](#rectangle) keep as
+well. Only [`Line`](#line), [`LineTo`](#lineto) and [`LineRel`](#linerel) move
+it, because moving it is what they are for.
+
+Raises `Bar3D needs a depth of zero or more.` and `CloseGraph has closed this
+surface.`
+
+**See also**
+
+[`Bar`](#bar), [`Rectangle`](#rectangle), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'bar3d', False);
+
+var V := ViewPort (60, 60, 420, 280, 1);
+
+// A row of solid bars, each capped -- the depth is a quarter of the width,
+// which is what Turbo Pascal suggested and still reads well.
+var Heights := [180, 120, 210, 90];
+
+SetColor (V, White);
+
+for var I := 0; I < 4; I := I + 1 do
+begin
+    var Left := 40 + I * 90;
+
+    SetFillStyle (V, [SolidFill, HatchFill, SlashFill, XHatchFill][I], LightCyan);
+    Bar3D (V, Left, 250 - Heights[I], Left + 60, 250, 15, True);
+end
+
+// And a stack: only the topmost is capped, so no lid cuts across it.
+SetFillStyle (V, SolidFill, LightRed);
+Bar3D (V, 380, 190, 400, 250, 12, False);
+Bar3D (V, 380, 130, 400, 190, 12, True);
+
+Show (V);
+
+System.WriteLn (GetX (V));
+System.WriteLn (GetColor (V) = White);
+
+CloseGraph ();
+```
+
+```console
+1
 true
 ```
 
@@ -1918,6 +2011,7 @@ SetLineStyle (V, SolidLn, 0, NormWidth);
 Rectangle (V, 40, 20, 380, 260);
 Show (V);
 
+// The pen is where the last LineTo left it: Rectangle does not move it.
 System.WriteLn (GetX (V));
 System.WriteLn (GetY (V));
 System.WriteLn (GetColor (V) = Yellow);
@@ -1926,8 +2020,8 @@ CloseGraph ();
 ```
 
 ```console
+380
 40
-20
 true
 ```
 
@@ -3002,9 +3096,12 @@ procedure Rectangle (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer, Y2 
 An [alias](#aliases) of the method: `Rectangle (V, …)` is
 `V.Rectangle (…)`.
 
-Four [`Line`](#line) calls in the current style and thickness, returning the
-pen to the corner it began at — which is what makes the four sides one figure
-rather than four.
+Four [`Line`](#line) calls in the current style and thickness.
+
+⚠️ **The pen is put back where it was**, not left at the figure's corner: a
+figure is not a journey, and [`Arc`](#arc), [`Circle`](#circle), [`Bar`](#bar)
+and [`Bar3D`](#bar3d) keep the same rule. Only `Line`, [`LineTo`](#lineto) and
+[`LineRel`](#linerel) move the pen, because moving it is what they are for.
 
 The outline only; there is no filled form yet.
 
@@ -3013,7 +3110,7 @@ has gone.
 
 **See also**
 
-[`Line`](#line), [`SetLineStyle`](#setlinestyle)
+[`Bar`](#bar), [`Bar3D`](#bar3d), [`Line`](#line), [`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -4132,7 +4229,8 @@ and `ViewPort needs a positive size.`
 **See also**
 
 Its methods each have a free-function [alias](#aliases) with an entry of its
-own: [`Arc`](#arc), [`Bar`](#bar), [`Circle`](#circle), [`Line`](#line),
+own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
+[`Line`](#line),
 [`LineTo`](#lineto), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),

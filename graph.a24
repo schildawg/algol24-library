@@ -2048,6 +2048,87 @@ begin
     end
 
 
+
+    /// Fills a bar and draws it in three dimensions.
+    ///
+    /// The front face is filled with the current fill pattern and outlined
+    /// with the current line style and pen -- `Bar` and `Rectangle` in one
+    /// call, which is what Turbo Pascal's Bar3D was. Depth then projects it
+    /// up and to the right at forty-five degrees, drawing the right face and,
+    /// when Top is true, the top one.
+    ///
+    /// Top exists for stacking: a column of bars wants the cap on the topmost
+    /// alone, and the ones beneath drawn with it False so no lid cuts across
+    /// the stack. Turbo Pascal suggested a Depth of a quarter the bar's
+    /// width, which still reads well.
+    ///
+    /// The faces are outlined, not filled: only the front carries the
+    /// pattern, which is what keeps a patterned bar legible in three
+    /// dimensions.
+    ///
+    /// The pen is not moved.
+    ///
+    /// # Raises
+    /// `Bar3D needs a depth of zero or more.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Bar3D Fills Its Front And Projects Up And To The Right`
+    procedure Bar3D (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
+                     Depth : Integer, Top : Boolean);
+    begin
+        Check ();
+
+        if Depth < 0 then raise 'Bar3D needs a depth of zero or more.';
+
+        var WasX := PenX;
+        var WasY := PenY;
+
+        var Left  := X1;
+        var Right := X2;
+        var Upper := Y1;
+        var Lower := Y2;
+
+        if Right < Left then
+        begin
+            Left  := X2;
+            Right := X1;
+        end
+
+        if Lower < Upper then
+        begin
+            Upper := Y2;
+            Lower := Y1;
+        end
+
+        // The front: filled, then outlined over the fill so the border shows.
+        this.Bar (Left, Upper, Right, Lower);
+        this.Rectangle (Left, Upper, Right, Lower);
+
+        if Depth = 0 then
+        begin
+            PenX := WasX;
+            PenY := WasY;
+
+            Exit;
+        end
+
+        // The right face, always -- it is what makes the bar solid.
+        this.Line (Right, Lower, Right + Depth, Lower - Depth);
+        this.Line (Right + Depth, Lower - Depth, Right + Depth, Upper - Depth);
+        this.Line (Right, Upper, Right + Depth, Upper - Depth);
+
+        // The top, only when asked, so bars may be stacked without lids.
+        if Top then
+        begin
+            this.Line (Left, Upper, Left + Depth, Upper - Depth);
+            this.Line (Left + Depth, Upper - Depth, Right + Depth, Upper - Depth);
+        end
+
+        PenX := WasX;
+        PenY := WasY;
+    end
+
     /// Draws a circle centred on X, Y.
     ///
     /// `Arc` swept the whole way round, and everything said there holds: the
@@ -2235,16 +2316,24 @@ begin
 
     /// Draws the outline of a rectangle with opposite corners at the points.
     ///
-    /// Four lines in the current style and thickness; the pen ends where it
-    /// began, which is what makes the four sides one figure.
+    /// Four lines in the current style and thickness. The pen is put back
+    /// where it was: a figure is not a journey, which is the rule `Arc`,
+    /// `Circle`, `Bar` and `Bar3D` keep as well -- only `Line`, `LineTo` and
+    /// `LineRel` move the pen, because moving it is what they are for.
     procedure Rectangle (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
     begin
         Check ();
+
+        var WasX := PenX;
+        var WasY := PenY;
 
         this.Line (X1, Y1, X2, Y1);
         this.Line (X2, Y1, X2, Y2);
         this.Line (X2, Y2, X1, Y2);
         this.Line (X1, Y2, X1, Y1);
+
+        PenX := WasX;
+        PenY := WasY;
     end
 
     /// Sets the direction and size free text on this viewport is drawn in.
@@ -2908,6 +2997,13 @@ procedure Bar (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
                Y2 : Integer);
 begin
     V.Bar (X1, Y1, X2, Y2);
+end
+
+/// Fills a bar and draws it in three dimensions. See `Bar3D`.
+procedure Bar3D (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
+                 Y2 : Integer, Depth : Integer, Top : Boolean);
+begin
+    V.Bar3D (X1, Y1, X2, Y2, Depth, Top);
 end
 
 /// Draws a circle on a viewport. See `Circle`.
@@ -4821,6 +4917,7 @@ begin
 
     var V := ViewPort (1, 1, 100, 100, 1);
 
+    V.PenTo (7, 8);
     V.Rectangle (10, 10, 60, 40);
 
     // The four corners are painted...
@@ -4832,9 +4929,9 @@ begin
     // ... the middle is not ...
     AssertEqual (0, V.Buf.GetInt ((25 * 100 + 30) * 4));
 
-    // ... and the pen ended where it began.
-    AssertEqual (10, V.GetX ());
-    AssertEqual (10, V.GetY ());
+    // ... and the pen is back where it was, a figure being no journey.
+    AssertEqual (7, V.GetX ());
+    AssertEqual (8, V.GetY ());
 
     CloseGraph ();
 end
@@ -4991,7 +5088,7 @@ begin
 
     V.Rectangle (X1: 2, Y1: 2, X2: 8, Y2: 8);
 
-    AssertEqual (2, V.GetX ());
+    AssertEqual (20, V.GetX ());        // unmoved by the figure
 
     CloseGraph ();
 end
@@ -5118,8 +5215,10 @@ begin
     LineRel (V, -10, 0);
     AssertEqual (30, GetX (V));
 
+    // Rectangle puts the pen back: the LineRel above left it at 30, and a
+    // figure is not a journey.
     Rectangle (V, 2, 2, 20, 15);
-    AssertEqual (2, GetX (V));
+    AssertEqual (30, GetX (V));
 
     SetTextStyle (V, 90, 2);
     AssertEqual (90, V.Dir);
@@ -5744,6 +5843,157 @@ begin
     Bar (V, 5, 5, 14, 14);
 
     AssertEqual (Yellow - 16777216, V.Buf.GetInt ((9 * 40 + 9) * 4));
+
+    CloseGraph ();
+end
+
+// ------------------------------------------------------------ bar3d tests --
+
+/// The front is filled and outlined, and the projection runs up and to the
+/// right -- so the far top corner sits above and beyond the near one.
+test 'A Bar3D Fills Its Front And Projects Up And To The Right';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bar3d', False);
+
+    var V := ViewPort (1, 1, 100, 80, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Red);
+    V.Bar3D (20, 40, 60, 70, 15, True);
+
+    // The front face is the fill colour...
+    AssertEqual (Red - 16777216, V.Buf.GetInt ((54 * 100 + 39) * 4));
+
+    // ... its border the pen's, drawn over the fill.
+    AssertEqual (White - 16777216, V.Buf.GetInt ((39 * 100 + 39) * 4));
+
+    // The far top-right corner is up and to the right of the near one:
+    // (60, 40) projects to (75, 25).
+    AssertTrue (V.Buf.GetInt ((24 * 100 + 74) * 4) <> 0);
+
+    // And the far corner is NOT filled -- only the front face carries the
+    // pattern, the other faces being outlines.
+    AssertEqual (0, V.Buf.GetInt ((29 * 100 + 68) * 4));
+
+    CloseGraph ();
+end
+
+/// Top is what lets bars stack: with it False no lid is drawn across the
+/// top, while the right face stays, because that is what makes it solid.
+test 'A Bar3D Without A Top Keeps Its Right Face';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'notop', False);
+
+    var Capped := ViewPort (1, 1, 100, 80, 1);
+    var Bare   := ViewPort (1, 1, 100, 80, 2);
+
+    for var V in [Capped, Bare] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (SolidFill, Blue);
+    end
+
+    Capped.Bar3D (20, 40, 60, 70, 15, True);
+    Bare.Bar3D (20, 40, 60, 70, 15, False);
+
+    // The top edge, halfway along: present when capped, absent when not.
+    AssertTrue (Capped.Buf.GetInt ((24 * 100 + 49) * 4) <> 0);
+    AssertEqual (0, Bare.Buf.GetInt ((24 * 100 + 49) * 4));
+
+    // The right face's far edge is in both.
+    AssertTrue (Capped.Buf.GetInt ((44 * 100 + 74) * 4) <> 0);
+    AssertTrue (Bare.Buf.GetInt ((44 * 100 + 74) * 4) <> 0);
+
+    CloseGraph ();
+end
+
+/// A depth of nothing is a Bar with a Rectangle over it, which is what the
+/// call decomposes to -- and a good check that it does.
+test 'A Bar3D Of No Depth Is A Bar And A Rectangle';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'flat', False);
+
+    var Flat  := ViewPort (1, 1, 60, 50, 1);
+    var Parts := ViewPort (1, 1, 60, 50, 2);
+
+    for var V in [Flat, Parts] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (HatchFill, LightGreen);
+    end
+
+    Flat.Bar3D (10, 10, 40, 35, 0, True);
+
+    Parts.Bar (10, 10, 40, 35);
+    Parts.Rectangle (10, 10, 40, 35);
+
+    var Same := True;
+
+    for var I := 0; I < 60 * 50; I := I + 1 do
+        if Flat.Buf.GetInt (I * 4) <> Parts.Buf.GetInt (I * 4) then Same := False;
+
+    AssertTrue (Same);
+
+    CloseGraph ();
+end
+
+test 'A Bar3D Uses Both Pens And Moves Neither';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'pens3d', False);
+
+    var V := ViewPort (1, 1, 100, 80, 1);
+
+    V.SetColor (Yellow);
+    V.SetFillStyle (SolidFill, Blue);
+    V.PenTo (3, 4);
+    V.Bar3D (20, 40, 60, 70, 10, True);
+
+    AssertEqual (Blue - 16777216, V.Buf.GetInt ((54 * 100 + 39) * 4));
+    AssertEqual (Yellow - 16777216, V.Buf.GetInt ((39 * 100 + 39) * 4));
+
+    AssertEqual (3, V.GetX ());
+    AssertEqual (4, V.GetY ());
+
+    CloseGraph ();
+end
+
+test 'A Bar3D Refuses A Negative Depth And Is Clipped';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bad3d', False);
+
+    var V := ViewPort (1, 1, 40, 30, 1);
+    var Message := '';
+
+    try V.Bar3D (1, 1, 10, 10, -1, True); except on e : String do Message := e; end
+    AssertEqual ('Bar3D needs a depth of zero or more.', Message);
+
+    // Projecting far past the edge is clipped, not fatal.
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, White);
+    V.Bar3D (20, 20, 39, 29, 500, True);
+
+    AssertTrue (True);
+
+    CloseGraph ();
+end
+
+test 'The Bar3D Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'alias3d', False);
+
+    var V := ViewPort (1, 1, 100, 80, 1);
+
+    SetColor (V, White);
+    SetFillStyle (V, SolidFill, LightMagenta);
+    Bar3D (V, 20, 40, 60, 70, 15, True);
+
+    AssertEqual (LightMagenta - 16777216, V.Buf.GetInt ((54 * 100 + 39) * 4));
 
     CloseGraph ();
 end
