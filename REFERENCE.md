@@ -101,6 +101,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`TextCols`](#textcols) | function | `graph` |
 | [`TextMode`](#textmode) | procedure | `graph` |
 | [`TextRows`](#textrows) | function | `graph` |
+| [`TextWidth` `TextHeight`](#textwidth) | functions | `graph` |
 | [`Trunc`](#trunc) | function | `math` |
 | [`ViewPort`](#viewport) | class | `graph` |
 | [`WhereX`](#wherex) | function | `graph` |
@@ -184,7 +185,7 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 **Remarks**
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's — so each of the forty-seven surface methods has a
+is Turbo Pascal's — so each of the forty-nine surface methods has a
 free-function twin. Each is a one-line delegate adding no behavior whatever,
 and each has its own entry in this reference, marked *alias of* the method it
 reaches.
@@ -5048,6 +5049,116 @@ See [`TextCols`](#textcols).
 
 ---
 
+## TextWidth
+
+*functions* — unit `graph`
+
+**Function**
+
+How much room a string would take up, in pixels.
+
+**Declaration**
+
+```algol24
+function TextWidth (Text : String) : Integer;                  // the background
+function TextWidth (V : ViewPort, Text : String) : Integer;    // that viewport
+
+function TextHeight (Text : String) : Integer;                 // the background
+function TextHeight (V : ViewPort, Text : String) : Integer;   // that viewport
+```
+
+**Remarks**
+
+The viewport forms are [aliases](#aliases) of `V.TextWidth` and
+`V.TextHeight`.
+
+⚠️ **This has to be asked for; it cannot be worked out.** Glyphs are not one
+width — a CJK ideograph is twice a Latin letter, an emoji likewise, and a code
+the font lacks is half a cell — so `Length (Text) * CellWidth ()` is wrong for
+anything but plain ASCII, and the per-glyph widths are private to the unit.
+
+```algol24
+TextWidth (V, 'A')      // 16
+TextWidth (V, '你')     // 32, on the same font
+```
+
+What it measures is the box the text would occupy **on the surface**, in the
+turn and magnification [`SetTextStyle`](#settextstyle) is holding. Width and
+height are the surface's axes rather than the string's, so a quarter turn
+swaps them:
+
+| turn | `TextWidth` | `TextHeight` |
+| --- | --- | --- |
+| 0, 180 | the glyphs end to end | one line of the font |
+| 90, 270 | one line of the font | the glyphs end to end |
+
+Both scale with `CharSize`. Half a turn runs the text the other way but
+occupies the same box as none.
+
+`TextWidth` is exactly what [`OutText`](#outtext) advances the position by,
+computed once and shared, so laying text out by hand lands where drawing it
+would. Turned a quarter, the advance is `TextHeight` instead — it is the one
+along the direction of travel.
+
+The **screen-wide forms measure the background**, which has no
+`SetTextStyle` of its own and so never turns or magnifies.
+
+An empty string occupies nothing, both ways. `TextHeight` takes a string it
+barely consults — the font is one height throughout — but takes one as Turbo
+Pascal's did, so that an empty string can answer nothing and so a font of
+varying height would not change the signature.
+
+Raises `CloseGraph has closed this surface.` on a viewport whose window has
+gone, and `Graph is not open.` for the screen-wide forms without a window.
+
+**See also**
+
+[`CellWidth`](#cellwidth), [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
+[`SetTextStyle`](#settextstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'measure', False);
+
+var V := ViewPort (40, 40, 300, 120, 1);
+
+// Length times a cell width is wrong the moment a string leaves ASCII: a CJK
+// ideograph is twice a Latin letter, and the font knows which is which.
+System.WriteLn ('A is      ', TextWidth (V, 'A'), ' wide');
+System.WriteLn ('你 is     ', TextWidth (V, '你'), ' wide');
+System.WriteLn ('a line is ', TextHeight (V, 'A'), ' tall');
+
+// Centering needs the real width, so it needs to be asked for.
+var Caption := 'Hello 你好';
+var Left    := (300 - TextWidth (V, Caption)) div 2 + 1;
+
+SetColor (V, LightCyan);
+OutTextXY (V, Left, 50, Caption);
+Show (V);
+
+System.WriteLn ('centered at ', Left, ' of 300');
+
+// Turned a quarter, the same string occupies the other way about.
+SetTextStyle (V, 90, 1);
+System.WriteLn ('turned:   ', TextWidth (V, Caption), ' by ',
+                TextHeight (V, Caption));
+
+CloseGraph ();
+```
+
+```console
+A is      16 wide
+你 is     32 wide
+a line is 32 tall
+centered at 71 of 300
+turned:   32 by 160
+```
+
+---
+
 ## Trunc
 
 *function* — unit `math`
@@ -5153,6 +5264,8 @@ procedure PutPixel (PX : Integer, PY : Integer, Color : Integer);
 function  GetPixel (PX : Integer, PY : Integer) : Integer;
 procedure FloodFill (X : Integer, Y : Integer, Border : Integer);
 function  GetArcCoords () : ArcCoords;
+function  TextWidth (Text : String) : Integer;
+function  TextHeight (Text : String) : Integer;
 procedure Clear ();
 procedure OutText (Text : String);
 procedure OutTextXY (PX : Integer, PY : Integer, Text : String);
@@ -5236,7 +5349,7 @@ own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`GetArcCoords`](#getarccoords),
 [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
 [`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto),
-[`ClearViewPort`](#clearviewport).
+[`ClearViewPort`](#clearviewport), [`TextWidth`](#textwidth).
 
 [`Clear`](#clear) is the method `ClearViewPort (V)` reaches.
 

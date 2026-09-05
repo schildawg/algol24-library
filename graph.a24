@@ -513,6 +513,23 @@ begin
     Exit FontHeight div 2;
 end
 
+/// The width in pixels of Text's glyphs laid end to end, at magnification 1.
+///
+/// Private to this unit, and the one place the sum is worked out: `OutText`
+/// advances by it and `TextWidth` answers it, so the two cannot come to
+/// disagree about how far a string reaches. Glyphs are not all one width --
+/// a CJK ideograph is twice a Latin letter and an unknown code is half a
+/// cell -- which is why the sum has to be walked rather than multiplied.
+function GlyphRun (Text : String) : Integer;
+begin
+    var Step := 0;
+
+    for var I := 0; I < Length (Text); I := I + 1 do
+        Step := Step + GlyphWidthOf (Ord (Text[I]));
+
+    Exit Step;
+end
+
 /// The value of one hex digit; anything else is zero.
 ///
 /// Private to this unit.
@@ -1020,6 +1037,48 @@ begin
         CurrentX := CurrentX + DrawGlyph (Ord (Text[I]), CurrentX, CurrentY, 16777215);
 
     Present ();
+end
+
+/// The width in pixels the text would occupy on the background.
+///
+/// The background draws free text upright and at one to one -- there is no
+/// `SetTextStyle` for it, that being a viewport's own -- so this is simply
+/// the glyphs laid end to end. `TextWidth (V, Text)` measures a viewport
+/// instead, in whatever turn and magnification it is holding.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Screen Measures Its Text Upright And At One To One`
+function TextWidth (Text : String) : Integer;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    Exit GlyphRun (Text);
+end
+
+/// The height in pixels the text would occupy on the background.
+///
+/// One line of the font, the background never turning or magnifying its
+/// text, and nothing at all for an empty string.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Screen Measures Its Text Upright And At One To One`
+function TextHeight (Text : String) : Integer;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    EnsureFont ();
+
+    if Length (Text) = 0 then Exit 0;
+
+    Exit FontHeight;
 end
 
 /// Draws Text with its top-left corner at X, Y.
@@ -2066,6 +2125,67 @@ begin
         Present ();
     end
 
+
+    /// The width in pixels the text would occupy on this viewport.
+    ///
+    /// The extent along X of what `OutTextXY` would draw, in the turn and
+    /// magnification `SetTextStyle` is holding -- so a turned string answers
+    /// the height of one line, not the length of the string, because that is
+    /// how wide it really is on the surface. `TextHeight` is its partner and
+    /// the two swap on a quarter turn.
+    ///
+    /// It has to be asked rather than worked out. Glyphs are not one width:
+    /// a CJK ideograph is twice a Latin letter, an emoji likewise, and a code
+    /// the font lacks is half a cell -- so `Length (Text) * CellWidth ()` is
+    /// wrong for anything but plain ASCII, and `GlyphWidthOf` is private.
+    ///
+    /// An empty string occupies nothing, in both directions.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `TextWidth Measures What OutText Will Advance By`
+    function TextWidth (Text : String) : Integer;
+    begin
+        Check ();
+        EnsureFont ();
+
+        if Length (Text) = 0 then Exit 0;
+
+        if Dir = 90 or Dir = 270 then Exit FontHeight * Size;
+
+        Exit GlyphRun (Text) * Size;
+    end
+
+    /// The height in pixels the text would occupy on this viewport.
+    ///
+    /// The extent along Y of what `OutTextXY` would draw, and `TextWidth`'s
+    /// partner in every respect: upright it is one line of the font, turned a
+    /// quarter it is the length of the string instead.
+    ///
+    /// The font is one height throughout, so upright this does not depend on
+    /// which characters are in the string -- but it takes one anyway, as
+    /// Turbo Pascal's did, so that an empty string can answer nothing and so
+    /// that a font of varying height would not change the signature.
+    ///
+    /// # Raises
+    /// `CloseGraph has closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Turned String Swaps Its Width And Its Height`
+    function TextHeight (Text : String) : Integer;
+    begin
+        Check ();
+        EnsureFont ();
+
+        if Length (Text) = 0 then Exit 0;
+
+        if Dir = 90 or Dir = 270 then Exit GlyphRun (Text) * Size;
+
+        Exit FontHeight * Size;
+    end
+
     /// Sets the color the pen draws and free text is written in.
     ///
     /// Turbo Pascal's `SetColor`, and it governs `Line`, `LineTo`, `LineRel`
@@ -3078,10 +3198,7 @@ begin
         // OutTextXY -- which draws on the background, not on this surface.
         this.OutTextXY (CurX, CurY, Text);
 
-        var Step := 0;
-
-        for var I := 0; I < Length (Text); I := I + 1 do
-            Step := Step + GlyphWidthOf (Ord (Text[I])) * Size;
+        var Step := GlyphRun (Text) * Size;
 
         if Dir = 0 then CurX := CurX + Step;
         else if Dir = 90 then CurY := CurY - Step;
@@ -3573,6 +3690,18 @@ end
 function GetArcCoords (V : ViewPort) : ArcCoords;
 begin
     Exit V.GetArcCoords ();
+end
+
+/// The width in pixels text would occupy on a viewport. See `ViewPort`.
+function TextWidth (V : ViewPort, Text : String) : Integer;
+begin
+    Exit V.TextWidth (Text);
+end
+
+/// The height in pixels text would occupy on a viewport. See `ViewPort`.
+function TextHeight (V : ViewPort, Text : String) : Integer;
+begin
+    Exit V.TextHeight (Text);
 end
 
 /// The color of a pixel of a viewport. See `ViewPort`.
@@ -8406,6 +8535,207 @@ begin
     ClearViewPort (V);
 
     AssertEqual (Transparent, GetPixel (V, 20, 10));
+
+    CloseGraph ();
+end
+
+test 'TextWidth Measures What OutText Will Advance By';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twadv', False);
+
+    var V := ViewPort (1, 1, 300, 100, 1);
+
+    V.PenTo (1, 1);
+    V.OutText ('Hello');
+
+    // The measurement and the advance are the same sum, computed once -- so
+    // laying text out by hand lands exactly where drawing it would.
+    AssertEqual (1 + V.TextWidth ('Hello'), V.CurX);
+
+    CloseGraph ();
+end
+
+test 'TextWidth Counts A Wide Glyph As Wide';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twwide', False);
+
+    var V := ViewPort (1, 1, 300, 100, 1);
+
+    // The reason the verb has to exist: Length (Text) times a cell width is
+    // wrong the moment a string leaves plain ASCII.
+    AssertEqual (2 * V.TextWidth ('A'), V.TextWidth ('你'));
+    AssertEqual (V.TextWidth ('A') + V.TextWidth ('你'), V.TextWidth ('A你'));
+
+    CloseGraph ();
+end
+
+test 'TextWidth And TextHeight Scale With CharSize';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twsize', False);
+
+    var V := ViewPort (1, 1, 300, 200, 1);
+
+    var W1 := V.TextWidth ('Wide');
+    var H1 := V.TextHeight ('Wide');
+
+    V.SetTextStyle (0, 3);
+
+    AssertEqual (3 * W1, V.TextWidth ('Wide'));
+    AssertEqual (3 * H1, V.TextHeight ('Wide'));
+
+    CloseGraph ();
+end
+
+test 'A Turned String Swaps Its Width And Its Height';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twturn', False);
+
+    var V := ViewPort (1, 1, 300, 300, 1);
+
+    var Across := V.TextWidth ('Sideways');
+    var Down   := V.TextHeight ('Sideways');
+
+    for var D in [90, 270] do
+    begin
+        V.SetTextStyle (D, 1);
+
+        // Width and height are the surface's axes, not the string's: turned a
+        // quarter, a line of text is one glyph wide and a whole string tall.
+        AssertEqual (Down, V.TextWidth ('Sideways'));
+        AssertEqual (Across, V.TextHeight ('Sideways'));
+    end
+
+    // Half a turn runs the other way but occupies the same box.
+    V.SetTextStyle (180, 1);
+
+    AssertEqual (Across, V.TextWidth ('Sideways'));
+    AssertEqual (Down, V.TextHeight ('Sideways'));
+
+    CloseGraph ();
+end
+
+test 'A Turned String Advances By Its Height';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twturnadv', False);
+
+    var V := ViewPort (1, 1, 200, 300, 1);
+
+    V.SetTextStyle (270, 1);
+    V.PenTo (1, 1);
+    V.OutText ('Down');
+
+    AssertEqual (1 + V.TextHeight ('Down'), V.CurY);
+    AssertEqual (1, V.CurX);
+
+    CloseGraph ();
+end
+
+test 'An Empty String Has No Extent Either Way';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twempty', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    AssertEqual (0, V.TextWidth (''));
+    AssertEqual (0, V.TextHeight (''));
+
+    V.SetTextStyle (90, 4);
+
+    AssertEqual (0, V.TextWidth (''));
+    AssertEqual (0, V.TextHeight (''));
+
+    AssertEqual (0, TextWidth (''));
+    AssertEqual (0, TextHeight (''));
+
+    CloseGraph ();
+end
+
+test 'The Screen Measures Its Text Upright And At One To One';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twscreen', False);
+
+    // The background has no text style, so its measurement never turns and
+    // never magnifies -- and it agrees with a fresh viewport, which has not
+    // turned or magnified either.
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    AssertEqual (V.TextWidth ('measure me'), TextWidth ('measure me'));
+    AssertEqual (V.TextHeight ('measure me'), TextHeight ('measure me'));
+
+    // A viewport's style does not reach the background.
+    V.SetTextStyle (90, 3);
+
+    AssertEqual (TextWidth ('x') * 1, TextWidth ('x'));
+    AssertTrue (V.TextWidth ('measure me') <> TextWidth ('measure me'));
+
+    CloseGraph ();
+end
+
+test 'TextWidth Centers A Label In A Box';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twcenter', False);
+
+    var V := ViewPort (1, 1, 200, 60, 1);
+
+    // What the pair is for: the label lands with equal margins either side,
+    // which nothing a caller could compute would get right for wide glyphs.
+    var Label := 'A你B';
+    var Left  := (200 - V.TextWidth (Label)) div 2 + 1;
+
+    V.SetColor (White);
+    V.OutTextXY (Left, 10, Label);
+
+    AssertEqual (200 - V.TextWidth (Label) - Left + 1, Left - 1);
+
+    CloseGraph ();
+end
+
+test 'The Measurement Verbs Refuse A Closed Surface And A Shut Window';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twdead', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try V.TextWidth ('x'); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try V.TextHeight ('x'); except on e : String do Message := e; end
+    AssertEqual ('CloseGraph has closed this surface.', Message);
+
+    Message := '';
+    try TextWidth ('x'); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try TextHeight ('x'); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'The TextWidth And TextHeight Aliases Reach The Methods';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'twalias', False);
+
+    var V := ViewPort (1, 1, 200, 100, 1);
+
+    SetTextStyle (V, 0, 2);
+
+    AssertEqual (V.TextWidth ('abc'), TextWidth (V, 'abc'));
+    AssertEqual (V.TextHeight ('abc'), TextHeight (V, 'abc'));
 
     CloseGraph ();
 end
