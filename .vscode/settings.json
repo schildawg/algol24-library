@@ -1,0 +1,39 @@
+{
+    // Code Runner (formulahendry.code-runner) knows nothing about Algol-24, so
+    // right-click -> Run Code answers "Code language not supported or defined."
+    // until it is told how. These two entries are the whole of it.
+    //
+    // ⚠️ This repository USES the language rather than building it, so the
+    // compiler is 'algc' on PATH -- from 'brew install algol24' -- and not the
+    // 'bootstrap/algc' the compiler repository's own settings name.
+    //
+    // ⚠️ Interpreted only, deliberately. The compiled path is emit C, cc, run,
+    // and does not fit a one-line executor. The Algol-24 extension has "Run
+    // File (Compiled)" and "Run File Through Both Processors" on the editor
+    // title bar for that.
+    //
+    // ⚠️ cd to the workspace root first. 'uses' resolves beside the importing
+    // file and then the working directory, and 'external ... in
+    // "libgraphffi.dylib"' is found the same way -- so a program run from
+    // examples/ finds neither its units nor the library's own C unless the
+    // working directory is the root.
+    "code-runner.executorMap": {
+        "algol24": "cd \"$workspaceRoot\" && algc \"$fullFileName\""
+    },
+
+    // ⚠️ Also by extension, so Run Code still works on a .a24 file when the
+    // Algol-24 extension is not loaded -- without it there is no 'algol24'
+    // language id for the map above to match, and the error returns.
+    "code-runner.executorMapByFileExtension": {
+        ".a24": "cd \"$workspaceRoot\" && algc \"$fullFileName\""
+    },
+
+    // ⚠️ A terminal, not the Output panel. Algol-24 writes color
+    // unconditionally -- the runtime emits the escapes without asking whether
+    // anything is listening, because the language has no way to ask -- and the
+    // Output panel renders them as gibberish rather than color.
+    "code-runner.runInTerminal": true,
+
+    // The file is what runs, so save it first.
+    "code-runner.saveFileBeforeRun": true
+}

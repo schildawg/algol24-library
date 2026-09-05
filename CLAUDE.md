@@ -242,11 +242,23 @@ The VS Code extension is symlinked from the compiler repository:
 ln -s ~/workspace-copilot/algol24/vscode ~/.vscode/extensions/algol24-0.1.0
 ```
 
-⚠️ **`bootstrap/algc` here is a shim, not a build product.** The extension
-hardcodes `<workspaceRoot>/bootstrap/algc` with no setting to override it, so
-without the symlink its Test Explorer refuses to run. Only the **Interpreted**
-profile works; the Compiled one also wants `bootstrap/algol.c` and `algol.h`,
-which this repository has no reason to carry.
+Since 0.1.4 it finds a compiler rather than assuming one — the
+`algol24.compilerPath` setting, then `bootstrap/algc` in the workspace, then
+`algc` on **PATH**, which is this repository's case — so both its Interpreted
+and Compiled test profiles work here with nothing to arrange. The
+`bootstrap/algc` shim this repository used to carry is gone.
+
+⚠️ **Code Runner is told separately, in `.vscode/settings.json`.** It knows
+nothing about `.a24` and answers `Code language not supported or defined.`
+until mapped, which is what that file does — for the language id *and* the
+file extension, since the second is what works when the Algol-24 extension
+is not loaded. It runs `cd "$workspaceRoot" && algc …`, and the `cd` is not
+decoration: `uses` and `external … in 'lib….dylib'` both resolve against the
+working directory, so a demo run from `examples/` finds neither its units nor
+the library's own C without it.
+
+Run Code is interpreted only, deliberately; the extension's own **Run File
+(Compiled)** and **Run File Through Both Processors** cover the rest.
 
 ## Status
 
