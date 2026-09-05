@@ -62,6 +62,12 @@ finding here was written up as one and turned out to be specified behaviour —
 [FUN-014] says a mismatched foreign signature is undefined behaviour and outside
 the specification. It is now hazard H-1.
 
+⚠️ **Verify a fix before closing it, and check what it did NOT change.**
+0.1.4 closed L-2 and L-3; confirming it meant re-running the reproductions,
+checking the narrow fix was narrow (an ambiguous overload must still warn),
+and running the whole suite against the new compiler. One half of L-2 was
+untouched and continues as L-4.
+
 ⚠️ **Never fix a defect, never work around one silently, and never open the
 compiler to diagnose one.** The user creates the defect in the compiler project
 and fixes it there. `DEFECTS.md` is the list.

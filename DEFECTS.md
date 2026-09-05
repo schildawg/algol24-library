@@ -14,80 +14,89 @@ Three kinds of thing, and the distinction matters:
 
 ## Defects
 
-### L-2 — overload selection warns even when arity makes it unambiguous
+*None open.*
 
-**Status:** open, reported 2026-09-03. Blocks the Pascal-style aliases below.
+### L-4 — a warning goes to stdout, where it mixes with the program's output
 
-A call to an overloaded name warns at *every* call site, whatever the
-arities involved, and the warning goes to **stdout** where it mixes with the
-program's own output:
+**Status:** open, reported 2026-09-04. The narrow remainder of L-2, and much
+less pressing now that the common case does not warn at all.
+
+An overload the compiler cannot settle statically still warns — correctly,
+since [ERR-010]'s dynamic selection really does happen when argument *types*
+decide — but the warning is written to **stdout**:
+
+```console
+$ algc q.a24 2>/dev/null
+[WARN] q.a24:2: 'Same' selects among 2 overloads at run time.
+[WARN] q.a24:3: 'Same' selects among 2 overloads at run time.
+int
+str
+```
+
+Nothing at all arrives on stderr. A diagnostic conventionally goes there, and
+here it matters concretely: this repository's `check-reference.py` and
+`examples/check.sh` compare a program's output byte for byte, so a single
+legitimately ambiguous overload anywhere in a unit would break them — and
+would corrupt the output of any program that pipes or diffs its own.
+
+No longer blocks anything the library wants, since the Pascal-style aliases
+are arity-distinct and now silent.
+
+---
+
+## Closed
+
+### L-2 — overload selection warned even when arity made it unambiguous
+
+**Fixed in 0.1.4**, verified 2026-09-04.
+
+Arity now settles the choice statically and silently:
 
 ```algol24
-procedure Bump (By : Integer);              begin … end
-procedure Bump (T : Thing, By : Integer);   begin … end
+procedure Bump (By : Integer);              // global
+procedure Bump (T : Thing, By : Integer);   // object first
 ```
 ```console
-[WARN] p.a24:5: 'Bump' selects among 2 overloads at run time.
-[WARN] p.a24:6: 'Bump' selects among 2 overloads at run time.
 global bump 5
+7
 ```
 
-[ERR-010] is right that selection is dynamic when argument *types* decide it
-— the type system is gradual, so a declared `Any` may hold anything at run
-time. But **arity is not a type**: a call written with one argument cannot
-reach a two-argument overload, and the compiler knows both counts before the
-program runs. Where the arities differ and only one candidate can match, the
-selection is static and the warning has nothing to warn about.
+Not a warning anywhere, where 0.1.3 warned at every call site. And the fix is
+the narrow one that was wanted rather than a blanket silencing — an overload
+whose arities match, so that argument types really do decide at run time,
+still warns exactly as [ERR-010] requires:
 
-Two consequences for a library:
-
-- **The warning is on stdout.** Even one unavoidable overload would corrupt
-  every program's output, and would break this repository's
-  `check-reference.py` and `examples/check.sh`, which compare a program's
-  output byte for byte. Warnings on stderr would leave that harness intact.
-- **Named arguments suppress it** — `Bump (T, By: 7)` is silent — which is a
-  workaround only where the call site can afford the extra word.
-
-What it costs here: `graph`'s methods cannot have the Pascal-style free
-function aliases `Print (W, 'text')` beside the screen-wide `Print ('text')`,
-which is the spelling a Turbo Pascal program would use. The aliases work
-perfectly; they are just too loud to ship.
-
-### L-3 — two methods of one name and arity are accepted, and the first silently wins
-
-**Status:** open, reported 2026-09-03.
-
-A class may declare the same method twice with the same signature. Nothing
-is reported at any stage, and calls go to the **first** declaration:
-
-```algol24
-class C;
-begin
-    procedure Twin (A : Integer, B : Integer); begin N := 1; end
-    procedure Twin (X : Integer, Y : Integer); begin N := 2; end
-end
-```
 ```console
-1
+[WARN] q.a24:2: 'Same' selects among 2 overloads at run time.
 ```
 
-The second body is unreachable and unmentioned. A program that grows a
-method and does not notice an older one of the same name will call the old
-one forever, which is the failure this library nearly shipped: `ViewPort`
-wanted `MoveTo` for Turbo Pascal's pen while already having `MoveTo` for
-placing the surface, and had the collision not been noticed by hand the
-result would have been a pen that silently moved the viewport.
+What it unblocks: the Pascal-style free-function aliases, `Print (W, 'text')`
+beside the screen-wide `Print ('text')`, which work perfectly and were merely
+too loud to ship.
 
-Compare [ERR-010]'s treatment of top-level overloads, which at least *warn*.
-A duplicate signature is not an overload at all — nothing could ever select
-the second — so refusing it outright seems the right answer, and it can be
-decided entirely at check time.
+The half of the entry about warnings reaching stdout is not fixed and
+continues as L-4.
 
-⚠️ Not to be confused with the harmless case: a method and a **top-level
-function** of the same name coexist correctly, `O.Ping` reaching the method
-and a bare `Ping` the function. Inside a class an unqualified call reaches
-the *top-level* one, and `this.Ping` is how the method is named — worth
-knowing, because it is easy to write the bare name and mean the method.
+### L-3 — two methods of one name and arity were accepted, and the first silently won
+
+**Fixed in 0.1.4**, verified 2026-09-04.
+
+Refused now, at check time, with the message the situation deserves:
+
+```console
+Uncaught: 'Twin' is already defined.
+```
+
+Both halves are covered — a duplicated method and a duplicated top-level
+function each answer it — where 0.1.3 accepted either in silence and called
+the first declaration forever. This is the defect that would have made the
+`MoveTo` collision invisible: a pen that quietly moved the viewport instead
+of drawing from it.
+
+The harmless case is untouched, as it should be: a method and a top-level
+function of one name still coexist, `O.Ping` reaching the method and a bare
+`Ping` the function. Inside a class the bare name reaches the *top-level*
+one, and `this.Ping` names the method.
 
 ---
 
@@ -95,8 +104,10 @@ knowing, because it is easy to write the bare name and mean the method.
 
 ### H-1 — a foreign declaration's signature is never checked, and a mismatch is silent
 
-**Status:** specified behaviour, not a defect. Recorded 2026-09-02, reclassified
-the same day on reading [FUN-014].
+**Status:** specified behaviour, not a defect. Recorded 2026-09-02,
+reclassified the same day on reading [FUN-014], and deliberately left alone
+in 0.1.4 — there is nothing here for the compiler to fix, and the library's
+defences below are the answer.
 
 This was first written up here as a defect. It is not one, and the specification
 says so in terms:
