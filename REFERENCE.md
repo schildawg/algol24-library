@@ -29,6 +29,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ClrScr`](#clrscr) | procedure | `graph` |
 | [`Black` … `White`](#colors) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
+| [`Ellipse`](#ellipse) | procedure, alias of `ViewPort.Ellipse` | `graph` |
 | [`Exp`](#exp) | function | `math` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`Frac`](#frac) | function | `math` |
@@ -792,7 +793,7 @@ this surface.`
 
 **See also**
 
-[`Arc`](#arc), [`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
+[`Arc`](#arc), [`Ellipse`](#ellipse), [`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -1035,6 +1036,87 @@ for var Deg := 0; Deg <= 180; Deg := Deg + 90 do
 0 deg -> 1.0
 90 deg -> 6.123233995736766E-17
 180 deg -> -1.0
+```
+
+---
+
+## Ellipse
+
+*procedure, alias of `ViewPort.Ellipse`* — unit `graph`
+
+**Function**
+
+Draws an elliptical arc on a viewport.
+
+**Declaration**
+
+```algol24
+procedure Ellipse (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                   EndAngle : Integer, XRadius : Integer, YRadius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Ellipse (V, …)` is `V.Ellipse (…)`.
+
+⚠️ **Turbo Pascal's `Ellipse` takes angles**, so it is an elliptical *arc*: a
+whole ellipse is the sweep `0, 360`, and anything less is a piece of one. The
+angles mean what [`Arc`](#arc)'s mean — degrees, zero at three o'clock,
+counterclockwise, which on a screen puts ninety degrees *above* the centre.
+
+With equal radii it is exactly [`Circle`](#circle): there is a test asserting
+the two paint the same pixels, which is the strongest statement available that
+they compute one curve.
+
+⚠️ **The angle is the parametric one, not a bearing.** On a wide ellipse the
+point at forty-five degrees is not forty-five degrees from the centre as a
+protractor would have it — it is where the circle's forty-five lands once the
+circle is stretched. That is what Turbo Pascal drew, and it is what makes
+`Ellipse (V, X, Y, 0, 90, A, B)` the quadrant a reader expects; but it is
+worth knowing before computing an angle from a slope.
+
+Drawn in the pen's [color](#setcolor), patterned by the
+[line style](#setlinestyle), and thickened by drawing the neighbouring
+ellipses — which keeps a thick ellipse an ellipse rather than a ring of
+uneven width. The pen is not moved.
+
+The outline only; a filled one waits on `FillEllipse`.
+
+Raises `Ellipse needs radii of zero or more.` and `CloseGraph has closed this
+surface.`
+
+**See also**
+
+[`Arc`](#arc), [`Circle`](#circle), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'ellipse', False);
+
+var V := ViewPort (60, 60, 400, 300, 1);
+
+// A whole ellipse, and a quarter of a wider one drawn thick over it.
+SetColor (V, LightCyan);
+Ellipse (V, 200, 150, 0, 360, 160, 90);
+
+SetColor (V, Yellow);
+SetLineStyle (V, SolidLn, 0, ThickWidth);
+Ellipse (V, 200, 150, 0, 90, 120, 60);
+Show (V);
+
+// Each radius governs its own axis: 160 across, 90 down.
+System.WriteLn (V.Buf.GetInt ((149 * 400 + 359) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((59 * 400 + 199) * 4) <> 0);
+
+CloseGraph ();
+```
+
+```console
+true
+true
 ```
 
 ---
@@ -4230,7 +4312,7 @@ and `ViewPort needs a positive size.`
 
 Its methods each have a free-function [alias](#aliases) with an entry of its
 own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
-[`Line`](#line),
+[`Ellipse`](#ellipse), [`Line`](#line),
 [`LineTo`](#lineto), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),

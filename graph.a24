@@ -2049,6 +2049,72 @@ begin
 
 
 
+
+    /// Draws an elliptical arc centred on X, Y.
+    ///
+    /// Turbo Pascal's Ellipse takes angles, so a whole ellipse is the sweep
+    /// `0, 360` and anything less is an arc of one. Everything the angles
+    /// mean is `Arc`'s: degrees, zero at three o'clock, counterclockwise,
+    /// which on a screen puts ninety degrees ABOVE the centre.
+    ///
+    /// The angle is the **parametric** one, not a bearing. On a wide ellipse
+    /// the point at forty-five degrees is not forty-five degrees from the
+    /// centre as a protractor would have it -- it is where the circle's
+    /// forty-five lands once the circle is stretched. That is what Turbo
+    /// Pascal drew and what makes `Ellipse (X, Y, 0, 90, A, B)` the quadrant
+    /// a reader expects, but it is worth knowing before computing an angle
+    /// from a slope.
+    ///
+    /// Drawn in the pen's color, patterned by the line style, and thickened
+    /// by drawing the neighbouring ellipses -- which keeps a thick ellipse an
+    /// ellipse. The pen is not moved.
+    ///
+    /// # Raises
+    /// `Ellipse needs radii of zero or more.`, and `CloseGraph has closed
+    /// this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `An Ellipse Of Equal Radii Is A Circle`
+    procedure Ellipse (X : Integer, Y : Integer, StartAngle : Integer,
+                       EndAngle : Integer, XRadius : Integer, YRadius : Integer);
+    begin
+        Check ();
+
+        if XRadius < 0 or YRadius < 0 then
+            raise 'Ellipse needs radii of zero or more.';
+
+        var Sweep := EndAngle - StartAngle;
+
+        if Sweep < 0 then Sweep := Sweep + 360;
+
+        // The longer radius governs how finely to step: at the ends of the
+        // major axis the curve moves fastest, and too few steps break it
+        // into dots there while the minor ends stay solid.
+        var Longest := XRadius;
+
+        if YRadius > Longest then Longest := YRadius;
+
+        var Steps := Round (Longest * Sweep * Pi / 180.0) + 1;
+        var Half  := Thick div 2;
+
+        for var I := 0; I <= Steps; I := I + 1 do
+        begin
+            var A := (StartAngle + Sweep * I / Steps) * Pi / 180.0;
+
+            var Place := 1;
+
+            for var K := 0; K < 15 - I mod 16; K := K + 1 do
+                Place := Place * 2;
+
+            if Bits div Place mod 2 = 1 then
+                for var K := 0 - Half; K <= Thick - 1 - Half; K := K + 1 do
+                    this.PutPixel (X + Round ((XRadius + K) * Cos (A)),
+                                   Y - Round ((YRadius + K) * Sin (A)), Pen);
+        end
+
+        Present ();
+    end
+
     /// Fills a bar and draws it in three dimensions.
     ///
     /// The front face is filled with the current fill pattern and outlined
@@ -2997,6 +3063,13 @@ procedure Bar (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer,
                Y2 : Integer);
 begin
     V.Bar (X1, Y1, X2, Y2);
+end
+
+/// Draws an elliptical arc on a viewport. See `Ellipse`.
+procedure Ellipse (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
+                   EndAngle : Integer, XRadius : Integer, YRadius : Integer);
+begin
+    V.Ellipse (X, Y, StartAngle, EndAngle, XRadius, YRadius);
 end
 
 /// Fills a bar and draws it in three dimensions. See `Bar3D`.
@@ -5994,6 +6067,135 @@ begin
     Bar3D (V, 20, 40, 60, 70, 15, True);
 
     AssertEqual (LightMagenta - 16777216, V.Buf.GetInt ((54 * 100 + 39) * 4));
+
+    CloseGraph ();
+end
+
+// ---------------------------------------------------------- ellipse tests --
+
+/// The strongest check there is: with equal radii an ellipse must be the
+/// circle, pixel for pixel, or the two are computing different curves.
+test 'An Ellipse Of Equal Radii Is A Circle';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ell', False);
+
+    var E := ViewPort (1, 1, 200, 200, 1);
+    var C := ViewPort (1, 1, 200, 200, 2);
+
+    E.SetColor (White);
+    E.Ellipse (100, 100, 0, 360, 60, 60);
+
+    C.SetColor (White);
+    C.Circle (100, 100, 60);
+
+    var Same := True;
+
+    for var I := 0; I < 200 * 200; I := I + 1 do
+        if E.Buf.GetInt (I * 4) <> C.Buf.GetInt (I * 4) then Same := False;
+
+    AssertTrue (Same);
+
+    CloseGraph ();
+end
+
+/// Two radii, and each governs its own axis: wide reaches further across
+/// than down.
+test 'An Ellipse Reaches Each Radius On Its Own Axis';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'radii', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Ellipse (100, 100, 0, 360, 80, 30);
+
+    // Three o'clock at X + 80, twelve o'clock at Y - 30.
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 179) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((69 * 200 + 99) * 4) <> 0);
+
+    // And nothing where a circle of the larger radius would have been.
+    AssertEqual (0, V.Buf.GetInt ((19 * 200 + 99) * 4));
+
+    CloseGraph ();
+end
+
+test 'An Ellipse Draws Only Its Own Sweep';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'esweep', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.Ellipse (100, 100, 0, 90, 70, 40);
+
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 169) * 4) <> 0);    // 0 degrees
+    AssertTrue (V.Buf.GetInt ((59 * 200 + 99) * 4) <> 0);     // 90 degrees
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 29) * 4));      // 180: absent
+    AssertEqual (0, V.Buf.GetInt ((139 * 200 + 99) * 4));     // 270: absent
+
+    CloseGraph ();
+end
+
+test 'A Thick Ellipse Spreads Along Both Radii';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ethick', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetLineStyle (SolidLn, 0, ThickWidth);
+    V.Ellipse (100, 100, 0, 360, 70, 40);
+
+    var Across := 0;
+
+    for var X := 160; X < 180; X := X + 1 do
+        if V.Buf.GetInt ((99 * 200 + X - 1) * 4) <> 0 then Across := Across + 1;
+
+    AssertEqual (3, Across);
+
+    CloseGraph ();
+end
+
+test 'An Ellipse Leaves The Pen And Refuses Negative Radii';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ebad', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.PenTo (11, 12);
+    V.Ellipse (100, 100, 0, 180, 50, 20);
+
+    AssertEqual (11, V.GetX ());
+    AssertEqual (12, V.GetY ());
+
+    var Message := '';
+
+    try V.Ellipse (50, 50, 0, 90, -1, 10); except on e : String do Message := e; end
+    AssertEqual ('Ellipse needs radii of zero or more.', Message);
+
+    Message := '';
+    try V.Ellipse (50, 50, 0, 90, 10, -1); except on e : String do Message := e; end
+    AssertEqual ('Ellipse needs radii of zero or more.', Message);
+
+    CloseGraph ();
+end
+
+test 'The Ellipse Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'ealias', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    SetColor (V, White);
+    Ellipse (V, 100, 100, 0, 360, 80, 30);
+
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 179) * 4) <> 0);
 
     CloseGraph ();
 end
