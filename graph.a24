@@ -15,6 +15,7 @@
 unit graph;
 
 uses math;
+uses testing;
 
 // ------------------------------------------------------------------ SDL --
 //
@@ -1037,6 +1038,48 @@ begin
         CurrentX := CurrentX + DrawGlyph (Ord (Text[I]), CurrentX, CurrentY, 16777215);
 
     Present ();
+end
+
+/// How much wider than tall a logical pixel appears on the screen.
+///
+/// The space Windows and ViewPorts are measured in is fixed by the grid and
+/// the font -- `TextCols () * CellWidth ()` by `TextRows () * CellHeight ()`,
+/// which is 1280 by 800 for the default 80 by 25 -- and it is scaled
+/// independently in X and Y to fill whatever window actually opened. When
+/// those two scales differ a logical pixel is not square, and a `Circle`
+/// drawn with equal radii appears as an oval.
+///
+/// 1.0 is square. Above 1.0 a logical pixel shows wider than tall; below,
+/// taller than wide. A circle that should LOOK round is therefore
+/// `Ellipse (X, Y, 0, 360, Round (R / GetAspectRatio ()), R)`.
+///
+/// Turbo Pascal answered two Words with the vertical one pegged at 10000,
+/// which was fixed point standing in for a fraction the machine could not
+/// afford. The language has Doubles, so this answers the fraction itself.
+///
+/// `Circle` does not correct itself, where Turbo Pascal's did. The logical
+/// space is the program's own coordinate system, and a radius meaning the
+/// same in both directions there is what keeps `Circle (X, Y, R)`,
+/// `PieSlice (X, Y, 0, 360, R)` and `FillEllipse (X, Y, R, R)` one shape.
+/// Correcting for the screen is the caller's to ask for, and this is the
+/// asking.
+///
+/// The background is not affected. Its pixels are the window's own, one to
+/// one, so they are square whatever this answers.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `GetAspectRatio Is One When The Window Matches The Logical Space`
+function GetAspectRatio () : Double;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    var LogW := GridCols * CellWidth ();
+    var LogH := GridRows * CellHeight ();
+
+    Exit (WindowWidth / LogW) / (WindowHeight / LogH);
 end
 
 /// The width in pixels the text would occupy on the background.
@@ -8738,4 +8781,103 @@ begin
     AssertEqual (V.TextHeight ('abc'), TextHeight (V, 'abc'));
 
     CloseGraph ();
+end
+
+test 'GetAspectRatio Is One When The Window Matches The Logical Space';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'asp1', False);
+
+    // The default grid is 80 by 25 on a 16 by 32 cell, so the logical space
+    // is 1280 by 800 and a window of that size scales by one in both
+    // directions.
+    AssertEqual (1280, TextCols () * CellWidth ());
+    AssertEqual (800, TextRows () * CellHeight ());
+    AssertEqual (1.0, GetAspectRatio ());
+
+    CloseGraph ();
+end
+
+test 'A Window Of Another Shape Makes The Logical Pixel Oblong';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'asp2', False);
+
+    // 1280 by 800 squeezed into 4 by 3: horizontally by a half, vertically by
+    // three fifths, so a logical pixel shows taller than it is wide.
+    AssertEqual (0.5 / 0.6, GetAspectRatio ());
+    AssertTrue (GetAspectRatio () < 1.0);
+
+    CloseGraph ();
+end
+
+test 'Every Window Of One Shape Gives One Aspect Ratio';
+begin
+    CloseGraph ();
+
+    // The ratio depends on the window's shape, not its size: three different
+    // 4 by 3 windows all squeeze the same 16 by 10 logical space the same way.
+    var First := 0.0;
+
+    for var Size in [[640, 480], [800, 600], [1024, 768]] do
+    begin
+        InitGraph (Size[0], Size[1], 'aspshape', False);
+
+        if First = 0.0 then First := GetAspectRatio ();
+
+        AssertNear (First, GetAspectRatio (), 0.0000001);
+
+        CloseGraph ();
+    end
+
+    AssertNear (5.0 / 6.0, First, 0.0000001);
+end
+
+test 'The Aspect Ratio Corrects A Circle To Look Round';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'aspround', False);
+
+    var V := ViewPort (1, 1, 400, 400, 1);
+    var A := GetAspectRatio ();
+    var R := 100;
+
+    // What the number is for: an ellipse whose two radii cancel the stretch
+    // covers the same distance across the screen either way.
+    var XR := Round (R / A);
+
+    AssertTrue (XR > R);
+    AssertNear (XR * (640.0 / 1280.0), R * (480.0 / 800.0), 0.5);
+
+    V.SetColor (White);
+    V.Ellipse (200, 200, 0, 360, XR, R);
+
+    CloseGraph ();
+end
+
+test 'A Different Text Mode Moves The Logical Space And The Ratio With It';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'aspmode', False);
+
+    AssertEqual (1.0, GetAspectRatio ());
+
+    // 40 columns halves the logical width, so the same window now stretches
+    // each logical pixel to twice the breadth.
+    TextMode (40, 25);
+
+    AssertEqual (640, TextCols () * CellWidth ());
+    AssertEqual (2.0, GetAspectRatio ());
+
+    CloseGraph ();
+end
+
+test 'GetAspectRatio Refuses Without A Window';
+begin
+    CloseGraph ();
+
+    var Message := '';
+
+    try GetAspectRatio (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
 end

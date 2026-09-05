@@ -41,6 +41,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`FloodFill`](#floodfill) | procedure, alias | `graph` |
 | [`Frac`](#frac) | function | `math` |
 | [`GetArcCoords`](#getarccoords) | function, alias | `graph` |
+| [`GetAspectRatio`](#getaspectratio) | function | `graph` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
@@ -808,7 +809,8 @@ this surface.`
 **See also**
 
 [`Arc`](#arc), [`Ellipse`](#ellipse), [`GetArcCoords`](#getarccoords),
-[`SetFillStyle`](#setfillstyle), [`SetLineStyle`](#setlinestyle)
+[`GetAspectRatio`](#getaspectratio), [`SetFillStyle`](#setfillstyle),
+[`SetLineStyle`](#setlinestyle)
 
 **Example**
 
@@ -1920,6 +1922,109 @@ center 150 150
 start  250 150
 end    100 63
 on the arc: true
+```
+
+---
+
+## GetAspectRatio
+
+*function* — unit `graph`
+
+**Function**
+
+How much wider than tall a logical pixel appears on the screen.
+
+**Declaration**
+
+```algol24
+function GetAspectRatio () : Double;
+```
+
+**Remarks**
+
+The space [`Window`](#window)s and [`ViewPort`](#viewport)s are measured in is
+fixed by the grid and the font — `TextCols () * CellWidth ()` by
+`TextRows () * CellHeight ()`, which is **1280 by 800** for the default 80 by
+25 — and it is scaled independently in X and Y to fill whatever window
+actually opened.
+
+⚠️ **When those two scales differ, a logical pixel is not square**, and a
+[`Circle`](#circle) drawn with equal radii shows as an oval. This is Turbo
+Pascal's problem arriving by a different road: there it was the display
+hardware, here it is the stretch.
+
+`1.0` is square. Above `1.0` a logical pixel shows wider than tall; below,
+taller than wide. A circle that should *look* round is:
+
+```algol24
+Ellipse (V, X, Y, 0, 360, Round (R / GetAspectRatio ()), R);
+```
+
+The ratio follows the window's **shape, not its size** — every 4:3 window
+answers `0.8333…`, because the logical space is 16:10 whatever the window.
+[`TextMode`](#textmode) changes it too, by changing the logical space: 40
+columns in the same window doubles it.
+
+⚠️ **`Circle` does not correct itself, where Turbo Pascal's did.** The logical
+space is the program's own coordinate system, and a radius meaning the same in
+both directions there is what keeps `Circle (X, Y, R)`,
+[`PieSlice`](#pieslice)` (X, Y, 0, 360, R)` and
+[`FillEllipse`](#fillellipse)` (X, Y, R, R)` one shape. Correcting for the
+screen is the caller's to ask for, and this is the asking.
+
+Turbo Pascal answered two `Word`s with the vertical one pegged at 10000 —
+fixed point standing in for a fraction the machine could not afford. The
+language has Doubles, so this answers the fraction itself.
+
+The background is not affected: its pixels are the window's own, one to one,
+so they are square whatever this answers.
+
+Raises `Graph is not open.` without a window.
+
+**See also**
+
+[`CellWidth`](#cellwidth), [`Circle`](#circle), [`Ellipse`](#ellipse),
+[`GetMaxX`](#getmaxx), [`TextMode`](#textmode)
+
+**Example**
+
+```algol24
+uses graph;
+uses math;
+
+InitGraph (640, 480, 'aspect', False);
+
+// The logical space is fixed by the grid and the font. The window it is
+// stretched into need not be the same shape, and here it is not.
+System.WriteLn ('logical  ', TextCols () * CellWidth (), ' by ',
+                TextRows () * CellHeight ());
+System.WriteLn ('window   ', GetMaxX (), ' by ', GetMaxY ());
+System.WriteLn ('aspect   ', GetAspectRatio ());
+
+var V := ViewPort (100, 100, 400, 400, 1);
+var R := 100;
+
+// Equal radii are equal in the logical space, so this shows as an oval.
+SetColor (V, DarkGray);
+Circle (V, 200, 200, R);
+
+// Cancelling the stretch makes it look round on the screen.
+var XR := Round (R / GetAspectRatio ());
+
+SetColor (V, Yellow);
+Ellipse (V, 200, 200, 0, 360, XR, R);
+Show (V);
+
+System.WriteLn ('corrected x radius ', XR);
+
+CloseGraph ();
+```
+
+```console
+logical  1280 by 800
+window   640 by 480
+aspect   0.8333333333333334
+corrected x radius 120
 ```
 
 ---
