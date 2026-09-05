@@ -15,20 +15,23 @@ Each example assumes the unit is reachable — run from the directory holding th
 | | | |
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
+| [`Aliases`](#aliases) | convention | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
-| [`Aliases`](#aliases) | procedures | `graph` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
-| [`Black` … `White`](#colors) | constants | `graph` |
 | [`Blink`](#blink) | constant | `graph` |
+| [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
 | [`ClrEol`](#clreol) | procedure | `graph` |
-| [`CellWidth`](#cellwidth) `CellHeight` | functions | `graph` |
 | [`ClrScr`](#clrscr) | procedure | `graph` |
+| [`Black` … `White`](#colors) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
 | [`Exp`](#exp) | function | `math` |
 | [`Frac`](#frac) | function | `math` |
+| [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
+| [`GetX`](#getx) | function, alias | `graph` |
+| [`GetY`](#gety) | function, alias | `graph` |
 | [`GotoXY`](#gotoxy) | procedure | `graph` |
 | [`HighVideo`](#highvideo) | procedure | `graph` |
 | [`Infinity`](#infinity) | constant | `math` |
@@ -37,47 +40,55 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Int`](#int) | function | `math` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
-| [`Line`](#line) and the pen | methods | `graph` |
-| [`LineStyles`](#linestyles) | constants | `graph` |
 | [`KeyPressed`](#keypressed) | function | `graph` |
 | [`KeyUp` … `KeyClose`](#keys) | constants | `graph` |
+| [`Line`](#line) | procedure, alias | `graph` |
+| [`LineRel`](#linerel) | procedure, alias | `graph` |
+| [`SolidLn` … `ThickWidth`](#linestyles) | constants | `graph` |
+| [`LineTo`](#lineto) | procedure, alias | `graph` |
 | [`Ln`](#ln) | function | `math` |
 | [`LowVideo`](#lowvideo) | procedure | `graph` |
 | [`Max`](#max) | function | `math` |
 | [`Min`](#min) | function | `math` |
+| [`MoveTo`](#moveto) | procedure, alias | `graph` |
 | [`NaN`](#nan) | constant | `math` |
 | [`NormVideo`](#normvideo) | procedure | `graph` |
 | [`Odd`](#odd) | function | `math` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
+| [`PenRel`](#penrel) | procedure, alias | `graph` |
+| [`PenTo`](#pento) | procedure, alias | `graph` |
 | [`Pi`](#pi) | constant | `math` |
-
+| [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
 | [`RandomReal`](#randomreal) | function | `random` |
 | [`ReadKey`](#readkey) | function | `graph` |
+| [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
+| [`SetColor`](#setcolor) | procedure, alias | `graph` |
+| [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
-| [`TextBackground`](#textbackground) | procedure | `graph` |
-| [`TextColor`](#textcolor) | procedure | `graph` |
-| [`TextMode`](#textmode) | procedure | `graph` |
-| [`TextCols`](#textcols) | function | `graph` |
-| [`TextRows`](#textrows) | function | `graph` |
-| [`Transparent`](#colors) | constant | `graph` |
+| [`Show`](#show) | procedure, alias | `graph` |
 | [`Sin`](#sin) | function | `math` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
+| [`TextBackground`](#textbackground) | procedure | `graph` |
+| [`TextColor`](#textcolor) | procedure | `graph` |
+| [`TextCols`](#textcols) | function | `graph` |
+| [`TextMode`](#textmode) | procedure | `graph` |
+| [`TextRows`](#textrows) | function | `graph` |
 | [`Trunc`](#trunc) | function | `math` |
 | [`ViewPort`](#viewport) | class | `graph` |
 | [`WhereX`](#wherex) | function | `graph` |
 | [`WhereY`](#wherey) | function | `graph` |
-| [`Write`](#write) `WriteLn` | procedures | `graph` |
 | [`Window`](#window) | class | `graph` |
+| [`Write` `WriteLn`](#write) | procedures | `graph` |
 
 ---
 
@@ -139,95 +150,54 @@ WriteLn (Abs (-170141183460469231731687303715884105728));
 
 ## Aliases
 
-*procedures* — unit `graph`
+*a convention* — unit `graph`
 
 **Function**
 
-Every surface method again as a free function, the surface first.
+Every surface method is also a free function taking the surface first.
 
 **Declaration**
 
 ```algol24
-MoveTo (Surface, X, Y)              // a Window in cells, a ViewPort in pixels
-
-GotoXY (W, Col, Row)                WhereX (W)          WhereY (W)
-TextColor (W, Color)                TextBackground (W, Color)
-HighVideo (W)   LowVideo (W)        NormVideo (W)
-Write (W, …)    WriteLn (W, …)      ClrEol (W)          ClrScr (W)
-
-PutPixel (V, X, Y, Color)           Show (V)
-OutText (V, Text)                   OutTextXY (V, X, Y, Text)
-SetTextStyle (V, Direction, CharSize)
-SetColor (V, Color)                 GetColor (V)
-SetLineStyle (V, Style, Pattern, Thickness)
-PenTo (V, X, Y)   PenRel (V, DX, DY)   GetX (V)   GetY (V)
-Line (V, X1, Y1, X2, Y2)            LineTo (V, X, Y)    LineRel (V, DX, DY)
-Rectangle (V, X1, Y1, X2, Y2)
+GotoXY (W, 3, 2)        is      W.GotoXY (3, 2)
+Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 ```
 
 **Remarks**
 
-`GotoXY (W, 3, 2)` and `W.GotoXY (3, 2)` are the same call. The aliases add
-no behaviour whatever — each is a one-line delegate — and exist because
-verb-first is how a Turbo Pascal program reads, and this library's vocabulary
-is Turbo Pascal's.
+Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
+is Turbo Pascal's — so each of the twenty-seven surface methods has a
+free-function twin. Each is a one-line delegate adding no behaviour whatever,
+and each has its own entry in this reference, marked *alias of* the method it
+reaches.
 
-They work because the screen-wide verb and the surface-first one differ in
-**arity**: `GotoXY (Col, Row)` is the screen and `GotoXY (W, Col, Row)` is
-that window. Before 0.1.4 every one of these calls warned; the compiler now
-settles a choice on arity when arity is enough, silently.
+They work on **arity**: `GotoXY (Col, Row)` is the screen and
+`GotoXY (W, Col, Row)` is that window. Before 0.1.4 every such call warned at
+its site; the compiler now settles a choice on arity when arity is enough,
+silently.
 
-Two exceptions, both forced:
+Two are shaped around the language rather than declared twice:
 
-⚠️ **`Write` and `WriteLn` are not overloads but one variadic each**, which
-inspects its first value: a leading [`Window`](#window) is the surface written
-*to*, not a value written. A variadic already matches every arity, so a second
-declaration could only be ambiguous against it.
+⚠️ **[`Write`](#write) and `WriteLn` are one variadic each**, inspecting their
+first value — a leading [`Window`](#window) is the surface written *to*, not a
+value written. A variadic already matches every arity, so a second declaration
+could only be ambiguous against it.
 
-⚠️ **`MoveTo` takes an untyped surface** and asks what it is, rather than
-being declared once per class. Two declarations of one arity would put the
-choice back on the argument's *type*, which is decided at run time and warns
-at every call site — correctly, since a gradual type system cannot know. It
-raises `MoveTo wants a Window or a ViewPort.` for anything else.
+⚠️ **[`MoveTo`](#moveto) takes an untyped surface** and asks what it is. Two
+declarations of one arity would put the choice back on the argument's *type*,
+which a gradual type system settles at run time and warns about — correctly.
 
 The screen-wide verbs are untouched: a bare `Write` still means the screen,
 and `System.Write` still means the console.
 
 **See also**
 
-[`ViewPort`](#viewport), [`Window`](#window), [`Write`](#write)
+[`ViewPort`](#viewport), [`Window`](#window)
 
 **Example**
 
-```algol24
-uses graph;
-
-InitGraph (640, 480, 'aliases', False);
-
-var Panel := Window (2, 2, 30, 10, 1);
-var Chart := ViewPort (100, 100, 80, 60, 2);
-
-TextBackground (Panel, Blue);
-ClrScr (Panel);
-GotoXY (Panel, 3, 2);
-TextColor (Panel, Yellow);
-Write (Panel, 'verb first');
-
-SetColor (Chart, LightGreen);
-PenTo (Chart, 4, 4);
-LineTo (Chart, 70, 50);
-Show (Chart);
-
-System.WriteLn (WhereX (Panel));
-System.WriteLn (GetX (Chart));
-
-CloseGraph ();
-```
-
-```console
-13
-70
-```
+See any alias entry — [`Line`](#line), [`GotoXY`](#gotoxy),
+[`SetColor`](#setcolor) — or `examples/ide.a24`, which uses both spellings.
 
 ---
 
@@ -404,54 +374,6 @@ CloseGraph ();
 
 ---
 
-## CloseGraph
-
-*procedure* — unit `graph`
-
-**Function**
-
-Closes the graphics window.
-
-**Declaration**
-
-```algol24
-procedure CloseGraph ();
-```
-
-**Remarks**
-
-Total: closing when nothing is open does nothing, so a handler or a test may
-call it unconditionally to reach a known state. The window may be reopened
-afterward with [`InitGraph`](#initgraph).
-
-Only the window and its renderer are released. SDL's video subsystem stays up
-for the life of the process, which is why [`ScreenWidth`](#screenwidth) still
-answers after a close.
-
-**See also**
-
-[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph)
-
-**Example**
-
-```algol24
-uses graph;
-
-CloseGraph ();                       // nothing open: does nothing
-
-InitGraph (320, 200, 'brief', False);
-CloseGraph ();
-CloseGraph ();                       // already closed: does nothing
-
-System.WriteLn ('closed without complaint');
-```
-
-```console
-closed without complaint
-```
-
----
-
 ## CellWidth
 
 *functions* — unit `graph`
@@ -522,6 +444,54 @@ CloseGraph ();
 
 ---
 
+## CloseGraph
+
+*procedure* — unit `graph`
+
+**Function**
+
+Closes the graphics window.
+
+**Declaration**
+
+```algol24
+procedure CloseGraph ();
+```
+
+**Remarks**
+
+Total: closing when nothing is open does nothing, so a handler or a test may
+call it unconditionally to reach a known state. The window may be reopened
+afterward with [`InitGraph`](#initgraph).
+
+Only the window and its renderer are released. SDL's video subsystem stays up
+for the life of the process, which is why [`ScreenWidth`](#screenwidth) still
+answers after a close.
+
+**See also**
+
+[`GetMaxX`](#getmaxx), [`InitGraph`](#initgraph)
+
+**Example**
+
+```algol24
+uses graph;
+
+CloseGraph ();                       // nothing open: does nothing
+
+InitGraph (320, 200, 'brief', False);
+CloseGraph ();
+CloseGraph ();                       // already closed: does nothing
+
+System.WriteLn ('closed without complaint');
+```
+
+```console
+closed without complaint
+```
+
+---
+
 ## ClrEol
 
 *procedure* — unit `graph`
@@ -533,10 +503,14 @@ Clears the grid from the cursor to the end of its row.
 **Declaration**
 
 ```algol24
-procedure ClrEol ();
+procedure ClrEol ();            // the screen
+procedure ClrEol (W : Window);  // that window
 ```
 
 **Remarks**
+
+`ClrEol (W)` is an [alias](#aliases) of `W.ClrEol`, clearing that window's
+row instead of the screen's.
 
 The cleared cells take the current [`TextBackground`](#textbackground), and
 the cursor does not move.
@@ -585,10 +559,14 @@ Clears the whole grid and homes the cursor.
 **Declaration**
 
 ```algol24
-procedure ClrScr ();
+procedure ClrScr ();            // the screen
+procedure ClrScr (W : Window);  // that window
 ```
 
 **Remarks**
+
+`ClrScr (W)` is an [alias](#aliases) of `W.ClrScr`, clearing that window
+alone.
 
 Every cell takes the current [`TextBackground`](#textbackground) —
 `TextBackground (Blue); ClrScr;` is how a classic screen paints its field in
@@ -829,6 +807,41 @@ WriteLn (Frac (3.7));
 
 ---
 
+## GetColor
+
+*function, alias of `ViewPort.GetColor`* — unit `graph`
+
+**Function**
+
+Returns the color a viewport's pen is drawing in.
+
+**Declaration**
+
+```algol24
+function GetColor (V : ViewPort) : Integer;
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `GetColor (V)` is `V.GetColor ()`.
+
+The pen's color governs everything the viewport draws — the
+[`Line`](#line) family and the [`OutText`](#outtext) pair alike. A fresh
+viewport draws in `White`.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`Line`](#line), [`SetColor`](#setcolor), [`ViewPort`](#viewport)
+
+**Example**
+
+See [`SetColor`](#setcolor), which sets it and reads it back.
+
+---
+
 ## GetMaxX
 
 *function* — unit `graph`
@@ -921,6 +934,74 @@ See [`GetMaxX`](#getmaxx) and [`InitGraph`](#initgraph), which show both.
 
 ---
 
+## GetX
+
+*function, alias of `ViewPort.GetX`* — unit `graph`
+
+**Function**
+
+Returns the X of a viewport's pen.
+
+**Declaration**
+
+```algol24
+function GetX (V : ViewPort) : Integer;
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `GetX (V)` is `V.GetX ()`.
+
+In the viewport's own coordinates, counting from 1. A [`Line`](#line) leaves
+the pen at its far end, so this is where the next [`LineTo`](#lineto) will
+draw from.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`GetY`](#gety), [`Line`](#line), [`PenTo`](#pento)
+
+**Example**
+
+See [`Line`](#line), which reads the pen back after drawing.
+
+---
+
+## GetY
+
+*function, alias of `ViewPort.GetY`* — unit `graph`
+
+**Function**
+
+Returns the Y of a viewport's pen.
+
+**Declaration**
+
+```algol24
+function GetY (V : ViewPort) : Integer;
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `GetY (V)` is `V.GetY ()`.
+
+Everything said of [`GetX`](#getx) holds here.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`GetX`](#getx), [`Line`](#line), [`PenTo`](#pento)
+
+**Example**
+
+See [`Line`](#line).
+
+---
+
 ## GotoXY
 
 *procedure* — unit `graph`
@@ -932,7 +1013,8 @@ Moves the cursor to a column and row of the grid.
 **Declaration**
 
 ```algol24
-procedure GotoXY (Col : Integer, Row : Integer);
+procedure GotoXY (Col : Integer, Row : Integer);           // the screen
+procedure GotoXY (W : Window, Col : Integer, Row : Integer);   // that window
 ```
 
 **Remarks**
@@ -943,6 +1025,8 @@ coordinate ever carries a minus one. The whole screen counts from 1, pixels
 included, as Turbo Pascal's text mode and every terminal since have had it;
 the one seam is that a cursor column meets the language's 0-based strings as
 `Text[Col - 1]`.
+
+A window has the same verb: `GotoXY (W, Col, Row)` is an [alias](#aliases) of `W.GotoXY`, moving that window's own cursor within its own cells.
 
 A position off the grid raises `GotoXY is off the grid.` rather than being
 clamped or ignored — the cursor is always somewhere real, and a wrong
@@ -988,10 +1072,14 @@ Brightens the ink celled text draws with.
 **Declaration**
 
 ```algol24
-procedure HighVideo ();
+procedure HighVideo ();            // the screen
+procedure HighVideo (W : Window);  // that window
 ```
 
 **Remarks**
+
+`HighVideo (W)` is an [alias](#aliases) of `W.HighVideo`, brightening that
+window's ink alone; `LowVideo` and `NormVideo` likewise.
 
 A dim palette color becomes its bright partner — `Blue` to `LightBlue`,
 `Red` to `LightRed` — and a bright one stays itself, which is the idempotence
@@ -1480,67 +1568,40 @@ See [`ReadKey`](#readkey).
 
 ## Line
 
-*methods of [`ViewPort`](#viewport)* — unit `graph`
+*procedure, alias of `ViewPort.Line`* — unit `graph`
 
 **Function**
 
-Draws straight lines, with a pen that has a position, a color, a pattern and
-a thickness.
+Draws a straight line on a viewport.
 
 **Declaration**
 
 ```algol24
-procedure Line (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
-procedure LineTo (PX : Integer, PY : Integer);
-procedure LineRel (DX : Integer, DY : Integer);
-procedure Rectangle (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
-
-procedure PenTo (PX : Integer, PY : Integer);
-procedure PenRel (DX : Integer, DY : Integer);
-function  GetX () : Integer;
-function  GetY () : Integer;
-
-procedure SetColor (Color : Integer);
-function  GetColor () : Integer;
-procedure SetLineStyle (Style : Integer, Pattern : Integer, Thickness : Integer);
+procedure Line (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
 ```
 
 **Remarks**
 
-`Line` draws between two points and leaves the pen at the far end, so a
-series is `PenTo` once and `LineTo` after — which is how the chart in
-`examples/ide.a24` is plotted.
+An [alias](#aliases) of the method: `Line (V, …)` is `V.Line (…)`.
 
-⚠️ **`PenTo` moves the pen; [`MoveTo`](#viewport) moves the viewport.** Turbo
-Pascal spelled the pen's move `MoveTo`, but a viewport is a thing that can
-itself be moved, and that reading wins the shorter name. `PenTo` and `PenRel`
-pair with `LineTo` and `LineRel` — the same two destinations, one drawing and
-one not — which is a clarity Turbo Pascal's naming did not have.
+Draws between two points **and leaves the pen at the far end**, so a series is
+[`PenTo`](#pento) once and [`LineTo`](#lineto) after — which is how the chart
+in `examples/ide.a24` is plotted.
 
 Coordinates are the viewport's own, counting from 1, and its edges are the
 clip: a line running far outside is drawn for the part that lands and
 discarded for the rest, never raising.
 
-`SetColor` governs **everything this surface draws** — the pen and the
-[`OutText`](#viewport) pair alike. A fresh viewport draws in `White`.
+The current [`SetLineStyle`](#setlinestyle) patterns it and thickens it, and
+[`SetColor`](#setcolor) colors it. Drawing does not appear until something
+presents; [`Show`](#show) is that.
 
-`SetLineStyle` takes a [style](#linestyles), a pattern, and a thickness. The
-pattern's sixteen bits are walked along the line, one bit to the pixel and
-repeating, so a `DottedLn` hundred-pixel line paints fifty. `Pattern` is
-consulted only for `UserBitLn`; the other styles carry their own bits.
-Thickness spreads across the axis the line runs **least** along, which is
-what keeps a thick diagonal from breaking into blobs — `NormWidth` is 1,
-`ThickWidth` is 3, and any positive count is allowed where Turbo Pascal
-permitted only those two.
-
-`Rectangle` is four lines in the current style, and returns the pen to the
-corner it began at.
-
-Drawing does not appear until something presents; `Show` is that.
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
 
 **See also**
 
-[`LineStyles`](#linestyles), [`SetTextStyle`](#settextstyle), [`ViewPort`](#viewport)
+[`LineRel`](#linerel), [`LineStyles`](#linestyles), [`LineTo`](#lineto), [`PenTo`](#pento), [`Rectangle`](#rectangle), [`SetColor`](#setcolor)
 
 **Example**
 
@@ -1552,25 +1613,25 @@ InitGraph (640, 480, 'lines', False);
 var V := ViewPort (100, 100, 400, 300, 1);
 
 // A solid axis, then a dashed thick series plotted point to point.
-V.SetColor (LightGray);
-V.Line (40, 20, 40, 260);
-V.Line (40, 260, 380, 260);
+SetColor (V, LightGray);
+Line (V, 40, 20, 40, 260);
+Line (V, 40, 260, 380, 260);
 
-V.SetColor (LightGreen);
-V.SetLineStyle (DashedLn, 0, ThickWidth);
-V.PenTo (40, 200);
-V.LineTo (140, 90);
-V.LineTo (240, 160);
-V.LineTo (380, 40);
+SetColor (V, LightGreen);
+SetLineStyle (V, DashedLn, 0, ThickWidth);
+PenTo (V, 40, 200);
+LineTo (V, 140, 90);
+LineTo (V, 240, 160);
+LineTo (V, 380, 40);
 
-V.SetColor (Yellow);
-V.SetLineStyle (SolidLn, 0, NormWidth);
-V.Rectangle (40, 20, 380, 260);
-V.Show ();
+SetColor (V, Yellow);
+SetLineStyle (V, SolidLn, 0, NormWidth);
+Rectangle (V, 40, 20, 380, 260);
+Show (V);
 
-System.WriteLn (V.GetX ());
-System.WriteLn (V.GetY ());
-System.WriteLn (V.GetColor () = Yellow);
+System.WriteLn (GetX (V));
+System.WriteLn (GetY (V));
+System.WriteLn (GetColor (V) = Yellow);
 
 CloseGraph ();
 ```
@@ -1580,6 +1641,40 @@ CloseGraph ();
 20
 true
 ```
+
+---
+
+## LineRel
+
+*procedure, alias of `ViewPort.LineRel`* — unit `graph`
+
+**Function**
+
+Draws from a viewport's pen by a displacement.
+
+**Declaration**
+
+```algol24
+procedure LineRel (V : ViewPort, DX : Integer, DY : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `LineRel (V, …)` is `V.LineRel (…)`.
+
+A displacement where [`LineTo`](#lineto) takes a destination; the pen ends at
+the far end either way. [`PenRel`](#penrel) is the same move without drawing.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`Line`](#line), [`LineTo`](#lineto), [`PenRel`](#penrel)
+
+**Example**
+
+See [`Line`](#line).
 
 ---
 
@@ -1621,6 +1716,41 @@ rule needs no constant.
 
 See [`Line`](#line); `examples/ide.a24` shows all five styles and three
 thicknesses side by side.
+
+---
+
+## LineTo
+
+*procedure, alias of `ViewPort.LineTo`* — unit `graph`
+
+**Function**
+
+Draws from a viewport's pen to a point.
+
+**Declaration**
+
+```algol24
+procedure LineTo (V : ViewPort, X : Integer, Y : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `LineTo (V, …)` is `V.LineTo (…)`.
+
+The pen ends where the line does, so successive calls plot a series — the
+idiom a chart is drawn with. [`PenTo`](#pento) is the same move without
+drawing.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`Line`](#line), [`LineRel`](#linerel), [`PenTo`](#pento)
+
+**Example**
+
+See [`Line`](#line), which plots four points this way.
 
 ---
 
@@ -1682,7 +1812,8 @@ Dims the ink celled text draws with.
 **Declaration**
 
 ```algol24
-procedure LowVideo ();
+procedure LowVideo ();            // the screen
+procedure LowVideo (W : Window);  // that window
 ```
 
 **Remarks**
@@ -1790,6 +1921,75 @@ See [`Max`](#max), which shows both.
 
 ---
 
+## MoveTo
+
+*procedure, alias of `Window.MoveTo` and `ViewPort.MoveTo`* — unit `graph`
+
+**Function**
+
+Moves a surface, keeping its size.
+
+**Declaration**
+
+```algol24
+procedure MoveTo (Surface, X : Integer, Y : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of both methods: `MoveTo (W, …)` is `W.MoveTo (…)`.
+
+A [`Window`](#window) moves in **cells** and a [`ViewPort`](#viewport) in the
+logical space's **pixels** — each surface in the coordinates it was placed in.
+Any position is allowed, off the grid included: a surface may be dragged
+partly or wholly out of view, and what falls outside is clipped at present
+time.
+
+⚠️ **This one takes an untyped surface** rather than being declared once per
+class. Two declarations of one arity would put the choice back on the
+argument's *type*, which a gradual type system settles at run time and warns
+about at every call site — correctly, since it cannot know. Asking `is Window`
+inside costs one branch and no noise.
+
+⚠️ **`MoveTo` moves the surface; [`PenTo`](#pento) moves a viewport's pen.**
+Turbo Pascal spelled the pen's move `MoveTo`, but a surface is a thing that
+can itself be moved, and that reading wins the shorter name.
+
+Raises `MoveTo wants a Window or a ViewPort.` for anything else, and
+`CloseGraph has closed this surface.` once the window has gone.
+
+**See also**
+
+[`PenTo`](#pento), [`ViewPort`](#viewport), [`Window`](#window)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'moveto', False);
+
+var Panel := Window (2, 2, 20, 8, 1);
+var Chart := ViewPort (100, 100, 60, 40, 2);
+
+MoveTo (Panel, 30, 5);
+MoveTo (Chart, 250, 180);
+
+System.WriteLn (Panel.X1);
+System.WriteLn (Panel.X2);
+System.WriteLn (Chart.X);
+
+CloseGraph ();
+```
+
+```console
+30
+48
+250
+```
+
+---
+
 ## NaN
 
 *constant* — unit `math`
@@ -1852,7 +2052,8 @@ Restores the ink and background a text mode wakes up in.
 **Declaration**
 
 ```algol24
-procedure NormVideo ();
+procedure NormVideo ();            // the screen
+procedure NormVideo (W : Window);  // that window
 ```
 
 **Remarks**
@@ -1931,7 +2132,8 @@ Draws text at the current position and advances it by the text's width.
 **Declaration**
 
 ```algol24
-procedure OutText (Text : String);
+procedure OutText (Text : String);                 // the background
+procedure OutText (V : ViewPort, Text : String);   // that viewport
 ```
 
 **Remarks**
@@ -1995,7 +2197,8 @@ Draws text with its top-left corner at X, Y.
 **Declaration**
 
 ```algol24
-procedure OutTextXY (X : Integer, Y : Integer, Text : String);
+procedure OutTextXY (X : Integer, Y : Integer, Text : String);              // the background
+procedure OutTextXY (V : ViewPort, X : Integer, Y : Integer, Text : String); // that viewport
 ```
 
 **Remarks**
@@ -2022,6 +2225,77 @@ Raises `Graph is not open.` without a window.
 
 See [`OutText`](#outtext) and [`InstallUserFont`](#installuserfont), which
 place text with it.
+
+---
+
+## PenRel
+
+*procedure, alias of `ViewPort.PenRel`* — unit `graph`
+
+**Function**
+
+Moves a viewport's pen by a displacement, without drawing.
+
+**Declaration**
+
+```algol24
+procedure PenRel (V : ViewPort, DX : Integer, DY : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `PenRel (V, …)` is `V.PenRel (…)`.
+
+`PenTo` and `PenRel` pair with [`LineTo`](#lineto) and
+[`LineRel`](#linerel) — the same two destinations, one drawing and one not.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`LineRel`](#linerel), [`PenTo`](#pento)
+
+**Example**
+
+See [`Line`](#line).
+
+---
+
+## PenTo
+
+*procedure, alias of `ViewPort.PenTo`* — unit `graph`
+
+**Function**
+
+Moves a viewport's pen to a point, without drawing.
+
+**Declaration**
+
+```algol24
+procedure PenTo (V : ViewPort, X : Integer, Y : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `PenTo (V, …)` is `V.PenTo (…)`.
+
+Where a series of [`LineTo`](#lineto) calls begins. Turbo Pascal spelled this
+`MoveTo`, which here moves the viewport itself — see [`MoveTo`](#moveto).
+`PenTo` and `PenRel` pair with `LineTo` and `LineRel`: the same two
+destinations, one drawing and one not, which is a clarity Turbo Pascal's
+naming did not have.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`GetX`](#getx), [`Line`](#line), [`LineTo`](#lineto), [`MoveTo`](#moveto), [`PenRel`](#penrel)
+
+**Example**
+
+See [`Line`](#line), which begins its series with it.
 
 ---
 
@@ -2069,6 +2343,70 @@ WriteLn ('area:          ' + Str (Pi * Sqr (Radius)));
 ```console
 circumference: 18.84955592153876
 area:          28.274333882308138
+```
+
+---
+
+## PutPixel
+
+*procedure, alias of `ViewPort.PutPixel`* — unit `graph`
+
+**Function**
+
+Paints one pixel of a viewport.
+
+**Declaration**
+
+```algol24
+procedure PutPixel (V : ViewPort, X : Integer, Y : Integer, Color : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `PutPixel (V, …)` is
+`V.PutPixel (…)`.
+
+Coordinates are the viewport's own, counting from 1 — `1, 1` is *its*
+top-left corner, not the screen's.
+
+⚠️ **A pixel outside the viewport is discarded silently**, never raising. The
+edge is the clip, which is what lets a drawing be written without bounds
+checks and a viewport be moved without its contents escaping.
+
+The color is written directly and does not use the pen, so
+[`SetColor`](#setcolor) does not affect it. Drawing does not appear until
+something presents; [`Show`](#show) is that.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`Line`](#line), [`Show`](#show), [`ViewPort`](#viewport)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'pixels', False);
+
+var V := ViewPort (50, 50, 40, 30, 1);
+
+PutPixel (V, 1, 1, White);
+PutPixel (V, 40, 30, Yellow);
+PutPixel (V, 41, 1, Red);          // past the edge: clipped, silently
+Show (V);
+
+System.WriteLn (V.Buf.GetInt (0) = White - 16777216);
+System.WriteLn (V.Buf.GetInt ((29 * 40 + 39) * 4) = Yellow - 16777216);
+
+CloseGraph ();
+```
+
+```console
+true
+true
 ```
 
 ---
@@ -2356,6 +2694,44 @@ no key was waiting
 
 ---
 
+## Rectangle
+
+*procedure, alias of `ViewPort.Rectangle`* — unit `graph`
+
+**Function**
+
+Draws a rectangle's outline on a viewport.
+
+**Declaration**
+
+```algol24
+procedure Rectangle (V : ViewPort, X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Rectangle (V, …)` is
+`V.Rectangle (…)`.
+
+Four [`Line`](#line) calls in the current style and thickness, returning the
+pen to the corner it began at — which is what makes the four sides one figure
+rather than four.
+
+The outline only; there is no filled form yet.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`Line`](#line), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+See [`Line`](#line), which frames its chart with one.
+
+---
+
 ## Round
 
 *function* — unit `math`
@@ -2564,6 +2940,107 @@ set
 
 ---
 
+## SetColor
+
+*procedure, alias of `ViewPort.SetColor`* — unit `graph`
+
+**Function**
+
+Sets the color a viewport's pen draws in.
+
+**Declaration**
+
+```algol24
+procedure SetColor (V : ViewPort, Color : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `SetColor (V, …)` is
+`V.SetColor (…)`.
+
+Turbo Pascal's `SetColor`, and it governs **everything the surface draws** —
+the [`Line`](#line) family and the [`OutText`](#outtext) pair alike. One pen
+for lines and letters both. A fresh viewport draws in `White`.
+
+[`PutPixel`](#putpixel) is the exception: it names its own color and ignores
+the pen.
+
+Raises `SetColor wants an RGB color.` for a negative, there being no
+transparent ink, and `CloseGraph has closed this surface.` once the window has
+gone.
+
+**See also**
+
+[`Colors`](#colors), [`GetColor`](#getcolor), [`Line`](#line), [`SetLineStyle`](#setlinestyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'color', False);
+
+var V := ViewPort (10, 10, 100, 60, 1);
+
+SetColor (V, LightCyan);
+Line (V, 1, 1, 99, 59);
+OutTextXY (V, 4, 4, 'the same pen');
+Show (V);
+
+System.WriteLn (GetColor (V) = LightCyan);
+
+CloseGraph ();
+```
+
+```console
+true
+```
+
+---
+
+## SetLineStyle
+
+*procedure, alias of `ViewPort.SetLineStyle`* — unit `graph`
+
+**Function**
+
+Sets the pattern and thickness a viewport draws lines with.
+
+**Declaration**
+
+```algol24
+procedure SetLineStyle (V : ViewPort, Style : Integer, Pattern : Integer, Thickness : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `SetLineStyle (V, …)` is
+`V.SetLineStyle (…)`.
+
+`Style` is one of the [line styles](#linestyles). The style's sixteen bits are
+walked along the line, one bit to the pixel and repeating, so a `DottedLn`
+hundred-pixel line paints fifty. `Pattern` is consulted **only** for
+`UserBitLn`; the other styles carry their own bits.
+
+⚠️ **Thickness spreads across the axis the line runs least along**, which is
+what keeps a thick diagonal from breaking into a staircase of blobs.
+`NormWidth` is 1 and `ThickWidth` is 3, and any positive count is allowed —
+Turbo Pascal permitted only those two.
+
+Raises `SetLineStyle wants a known style.`, `SetLineStyle needs a thickness of
+1 or more.`, and `CloseGraph has closed this surface.`
+
+**See also**
+
+[`Line`](#line), [`LineStyles`](#linestyles), [`SetColor`](#setcolor)
+
+**Example**
+
+See [`Line`](#line), which draws dashed and solid from one viewport.
+
+---
+
 ## SetSeed
 
 *procedure* — unit `random`
@@ -2627,7 +3104,7 @@ Sets the direction and size free text on a viewport is drawn in.
 **Declaration**
 
 ```algol24
-procedure SetTextStyle (Direction : Integer, CharSize : Integer);
+procedure SetTextStyle (V : ViewPort, Direction : Integer, CharSize : Integer);
 ```
 
 **Remarks**
@@ -2692,6 +3169,42 @@ CloseGraph ();
 0
 1
 ```
+
+---
+
+## Show
+
+*procedure, alias of `ViewPort.Show`* — unit `graph`
+
+**Function**
+
+Pushes a viewport's pixels to the screen.
+
+**Declaration**
+
+```algol24
+procedure Show (V : ViewPort);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `Show (V)` is `V.Show ()`.
+
+Drawing writes into the viewport's own buffer and is not visible until
+something presents the stack; this is that. So is any text verb, and so is
+[`ReadKey`](#readkey) while it waits — a program that ends on `ReadKey` need
+not call `Show` at all.
+
+Raises `CloseGraph has closed this surface.` once the window it belongs to
+has gone.
+
+**See also**
+
+[`Line`](#line), [`PutPixel`](#putpixel), [`ReadKey`](#readkey)
+
+**Example**
+
+See [`PutPixel`](#putpixel) and [`Line`](#line), which both end with one.
 
 ---
 
@@ -2845,10 +3358,14 @@ Sets the background cells are painted with.
 **Declaration**
 
 ```algol24
-procedure TextBackground (Color : Integer);
+procedure TextBackground (Color : Integer);              // the screen
+procedure TextBackground (W : Window, Color : Integer);  // that window
 ```
 
 **Remarks**
+
+`TextBackground (W, Color)` is an [alias](#aliases) of `W.TextBackground`,
+setting that window's background alone.
 
 `Transparent` — the default — leaves everything beneath the glyph visible,
 which is the merged world's natural state. Any RGB color makes the cell
@@ -2897,10 +3414,14 @@ Sets the ink celled text draws with.
 **Declaration**
 
 ```algol24
-procedure TextColor (Color : Integer);
+procedure TextColor (Color : Integer);              // the screen
+procedure TextColor (W : Window, Color : Integer);  // that window
 ```
 
 **Remarks**
+
+`TextColor (W, Color)` is an [alias](#aliases) of `W.TextColor`, setting
+that window's ink alone.
 
 Any RGB Integer; the sixteen [color constants](#colors) are the classic
 vocabulary, and adding [`Blink`](#blink) makes the ink blink. The default is
@@ -3229,7 +3750,15 @@ and `ViewPort needs a positive size.`
 
 **See also**
 
-[`OutTextXY`](#outtextxy), [`ReadKey`](#readkey), [`Window`](#window)
+Its methods each have a free-function [alias](#aliases) with an entry of its
+own: [`Line`](#line), [`LineTo`](#lineto), [`LineRel`](#linerel),
+[`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
+[`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),
+[`GetColor`](#getcolor), [`SetLineStyle`](#setlinestyle),
+[`PutPixel`](#putpixel), [`OutText`](#outtext), [`OutTextXY`](#outtextxy),
+[`SetTextStyle`](#settextstyle), [`Show`](#show), [`MoveTo`](#moveto).
+
+[`CellWidth`](#cellwidth), [`ReadKey`](#readkey), [`Window`](#window)
 
 **Example**
 
@@ -3276,13 +3805,15 @@ Returns the cursor's column.
 **Declaration**
 
 ```algol24
-function WhereX () : Integer;
+function WhereX () : Integer;              // the screen
+function WhereX (W : Window) : Integer;    // that window
 ```
 
 **Remarks**
 
 One-based, like [`GotoXY`](#gotoxy), which shows it read back: 1 at the left
-edge, `TextCols ()` at the right.
+edge, `TextCols ()` at the right. `WhereX (W)` is an [alias](#aliases) of
+`W.WhereX`, answering that window's cursor instead.
 
 Raises `Graph is not open.` without a window.
 
@@ -3307,7 +3838,8 @@ Returns the cursor's row.
 **Declaration**
 
 ```algol24
-function WhereY () : Integer;
+function WhereY () : Integer;              // the screen
+function WhereY (W : Window) : Integer;    // that window
 ```
 
 **Remarks**
@@ -3402,7 +3934,14 @@ and `Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.`
 
 **See also**
 
-[`Write`](#write), [`TextColor`](#textcolor), [`ViewPort`](#viewport)
+Its methods each have a free-function [alias](#aliases) with an entry of its
+own: [`Write`](#write), `WriteLn`, [`GotoXY`](#gotoxy), [`WhereX`](#wherex),
+[`WhereY`](#wherey), [`TextColor`](#textcolor),
+[`TextBackground`](#textbackground), [`HighVideo`](#highvideo),
+[`LowVideo`](#lowvideo), [`NormVideo`](#normvideo), [`ClrEol`](#clreol),
+[`ClrScr`](#clrscr), [`MoveTo`](#moveto).
+
+[`CellWidth`](#cellwidth), [`ViewPort`](#viewport)
 
 **Example**
 
@@ -3452,7 +3991,7 @@ Writes to the screen's text grid, advancing its cursor.
 **Declaration**
 
 ```algol24
-procedure Write (Values : List of Any);
+procedure Write (Values : List of Any);     // the screen, or a leading Window
 procedure WriteLn (Values : List of Any);
 ```
 
