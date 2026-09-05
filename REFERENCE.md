@@ -32,6 +32,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`DrawPoly`](#drawpoly) | procedure, alias of `ViewPort.DrawPoly` | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias of `ViewPort.Ellipse` | `graph` |
 | [`Exp`](#exp) | function | `math` |
+| [`FillEllipse`](#fillellipse) | procedure, alias of `ViewPort.FillEllipse` | `graph` |
 | [`FillPoly`](#fillpoly) | procedure, alias of `ViewPort.FillPoly` | `graph` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`Frac`](#frac) | function | `math` |
@@ -1249,6 +1250,88 @@ WriteLn (Exp (1.0));
 ```console
 1.0
 2.718281828459045
+```
+
+---
+
+## FillEllipse
+
+*procedure, alias of `ViewPort.FillEllipse`* — unit `graph`
+
+**Function**
+
+Fills and outlines a whole ellipse on a viewport.
+
+**Declaration**
+
+```algol24
+procedure FillEllipse (V : ViewPort, X : Integer, Y : Integer,
+                       XRadius : Integer, YRadius : Integer);
+```
+
+**Remarks**
+
+An [alias](#aliases) of the method: `FillEllipse (V, …)` is
+`V.FillEllipse (…)`.
+
+[`Sector`](#sector) swept the whole way round, exactly as [`Circle`](#circle)
+is [`Arc`](#arc) — filled with the current fill pattern and color, then
+outlined with the pen and the current [line style](#setlinestyle). No radii are
+drawn: a whole turn's two coincide.
+
+It takes no angles, because Turbo Pascal's did not. A wedge is
+[`Sector`](#sector)'s business.
+
+⚠️ **A filled circle is this with equal radii.** Turbo Pascal has no
+`FillCircle`, and neither does this — `FillEllipse (V, X, Y, R, R)` is it, and
+so is `PieSlice (V, X, Y, 0, 360, R)`. There are tests asserting all three
+agree pixel for pixel, which is the same statement `Circle` and `Ellipse` make
+about their outlines.
+
+With `EmptyFill` it is outlined and hollow. The fill and the outline are
+separate pens, and the pen is not moved.
+
+Raises `FillEllipse needs radii of zero or more.` and `CloseGraph has closed
+this surface.`
+
+**See also**
+
+[`Ellipse`](#ellipse), [`PieSlice`](#pieslice), [`Sector`](#sector), [`SetFillStyle`](#setfillstyle)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (640, 480, 'fillellipse', False);
+
+var V := ViewPort (60, 60, 420, 320, 1);
+
+// Three ellipses, each filled in its own pattern and edged in white.
+SetColor (V, White);
+
+SetFillStyle (V, SolidFill, LightRed);
+FillEllipse (V, 110, 160, 90, 60);
+
+SetFillStyle (V, HatchFill, LightCyan);
+FillEllipse (V, 240, 160, 60, 110);
+
+// Equal radii: the filled circle Turbo Pascal never named.
+SetFillStyle (V, InterleaveFill, Yellow);
+FillEllipse (V, 350, 160, 55, 55);
+
+Show (V);
+
+// Wide reaches further across than down; the circle is as wide as it is tall.
+System.WriteLn (V.Buf.GetInt ((159 * 420 + 189) * 4) <> 0);
+System.WriteLn (V.Buf.GetInt ((59 * 420 + 109) * 4) = 0);
+
+CloseGraph ();
+```
+
+```console
+true
+true
 ```
 
 ---
@@ -3657,7 +3740,7 @@ surface.`
 
 **See also**
 
-[`Ellipse`](#ellipse), [`PieSlice`](#pieslice), [`SetFillStyle`](#setfillstyle)
+[`Ellipse`](#ellipse), [`FillEllipse`](#fillellipse), [`PieSlice`](#pieslice), [`SetFillStyle`](#setfillstyle)
 
 **Example**
 
@@ -4667,7 +4750,8 @@ and `ViewPort needs a positive size.`
 Its methods each have a free-function [alias](#aliases) with an entry of its
 own: [`Arc`](#arc), [`Bar`](#bar), [`Bar3D`](#bar3d), [`Circle`](#circle),
 [`DrawPoly`](#drawpoly),
-[`Ellipse`](#ellipse), [`FillPoly`](#fillpoly), [`Line`](#line),
+[`Ellipse`](#ellipse), [`FillEllipse`](#fillellipse),
+[`FillPoly`](#fillpoly), [`Line`](#line),
 [`LineTo`](#lineto), [`PieSlice`](#pieslice), [`Sector`](#sector), [`LineRel`](#linerel), [`SetFillStyle`](#setfillstyle),
 [`Rectangle`](#rectangle), [`PenTo`](#pento), [`PenRel`](#penrel),
 [`GetX`](#getx), [`GetY`](#gety), [`SetColor`](#setcolor),

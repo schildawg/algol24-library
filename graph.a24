@@ -2248,6 +2248,36 @@ begin
     end
 
 
+
+    /// Fills and outlines a whole ellipse centred on X, Y.
+    ///
+    /// `Sector` swept the whole way round, exactly as `Circle` is `Arc`:
+    /// filled with the current fill pattern and color, then outlined with
+    /// the pen and the current line style. No radii are drawn -- a whole
+    /// turn's two coincide.
+    ///
+    /// Turbo Pascal has no FillCircle; a filled circle is this with equal
+    /// radii, which is also what `PieSlice (X, Y, 0, 360, R)` draws.
+    ///
+    /// The pen is not moved.
+    ///
+    /// # Raises
+    /// `FillEllipse needs radii of zero or more.`, and `CloseGraph has
+    /// closed this surface.` once the window has gone.
+    ///
+    /// # Examples
+    /// `A Filled Ellipse Is A Sector Of The Whole Turn`
+    procedure FillEllipse (X : Integer, Y : Integer, XRadius : Integer,
+                           YRadius : Integer);
+    begin
+        Check ();
+
+        if XRadius < 0 or YRadius < 0 then
+            raise 'FillEllipse needs radii of zero or more.';
+
+        this.Sector (X, Y, 0, 360, XRadius, YRadius);
+    end
+
     /// Fills and outlines the polygon through a list of points.
     ///
     /// Points is a List of two-number Lists, as `DrawPoly` takes. Unlike
@@ -3391,6 +3421,13 @@ procedure Ellipse (V : ViewPort, X : Integer, Y : Integer, StartAngle : Integer,
                    EndAngle : Integer, XRadius : Integer, YRadius : Integer);
 begin
     V.Ellipse (X, Y, StartAngle, EndAngle, XRadius, YRadius);
+end
+
+/// Fills and outlines a whole ellipse on a viewport. See `FillEllipse`.
+procedure FillEllipse (V : ViewPort, X : Integer, Y : Integer,
+                       XRadius : Integer, YRadius : Integer);
+begin
+    V.FillEllipse (X, Y, XRadius, YRadius);
 end
 
 /// Fills and outlines a polygon on a viewport. See `FillPoly`.
@@ -7199,6 +7236,145 @@ begin
     FillPoly (V, [[50, 10], [85, 70], [15, 70]]);
 
     AssertEqual (LightMagenta - 16777216, V.Buf.GetInt ((49 * 100 + 49) * 4));
+
+    CloseGraph ();
+end
+
+// ----------------------------------------------------- fillellipse tests --
+
+/// The same statement Circle makes about Arc, one level up: a filled
+/// ellipse must be the sector of a whole turn, pixel for pixel.
+test 'A Filled Ellipse Is A Sector Of The Whole Turn';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fell', False);
+
+    var F := ViewPort (1, 1, 200, 200, 1);
+    var S := ViewPort (1, 1, 200, 200, 2);
+
+    for var V in [F, S] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (SolidFill, Red);
+    end
+
+    F.FillEllipse (100, 100, 70, 40);
+    S.Sector (100, 100, 0, 360, 70, 40);
+
+    var Diff := 0;
+
+    for var I := 0; I < 200 * 200; I := I + 1 do
+        if F.Buf.GetInt (I * 4) <> S.Buf.GetInt (I * 4) then Diff := Diff + 1;
+
+    AssertEqual (0, Diff);
+
+    CloseGraph ();
+end
+
+/// With equal radii it is the filled circle Turbo Pascal never named.
+test 'A Filled Ellipse Of Equal Radii Is A Filled Circle';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fdisc', False);
+
+    var F := ViewPort (1, 1, 200, 200, 1);
+    var P := ViewPort (1, 1, 200, 200, 2);
+
+    for var V in [F, P] do
+    begin
+        V.SetColor (White);
+        V.SetFillStyle (SolidFill, LightGreen);
+    end
+
+    F.FillEllipse (100, 100, 60, 60);
+    P.PieSlice (100, 100, 0, 360, 60);
+
+    var Diff := 0;
+
+    for var I := 0; I < 200 * 200; I := I + 1 do
+        if F.Buf.GetInt (I * 4) <> P.Buf.GetInt (I * 4) then Diff := Diff + 1;
+
+    AssertEqual (0, Diff);
+
+    CloseGraph ();
+end
+
+test 'A Filled Ellipse Fills To Each Radius And No Further';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'freach', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (SolidFill, Blue);
+    V.FillEllipse (100, 100, 70, 30);
+
+    // Filled across to nearly the long radius, and up to nearly the short.
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 159) * 4) <> 0);
+    AssertTrue (V.Buf.GetInt ((74 * 200 + 99) * 4) <> 0);
+
+    // Beyond the short radius, nothing -- even though the long one reaches.
+    AssertEqual (0, V.Buf.GetInt ((59 * 200 + 99) * 4));
+
+    CloseGraph ();
+end
+
+test 'A Filled Ellipse With An Empty Fill Is Only Its Outline';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fhollow', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.SetColor (White);
+    V.SetFillStyle (EmptyFill, Red);
+    V.FillEllipse (100, 100, 70, 40);
+
+    AssertEqual (0, V.Buf.GetInt ((99 * 200 + 99) * 4));       // hollow
+    AssertTrue (V.Buf.GetInt ((99 * 200 + 169) * 4) <> 0);     // the rim
+
+    CloseGraph ();
+end
+
+test 'A Filled Ellipse Leaves The Pen And Refuses Negative Radii';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fpen', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    V.PenTo (19, 20);
+    V.SetFillStyle (SolidFill, White);
+    V.FillEllipse (100, 100, 50, 25);
+
+    AssertEqual (19, V.GetX ());
+    AssertEqual (20, V.GetY ());
+
+    var Message := '';
+
+    try V.FillEllipse (50, 50, -1, 10); except on e : String do Message := e; end
+    AssertEqual ('FillEllipse needs radii of zero or more.', Message);
+
+    Message := '';
+    try V.FillEllipse (50, 50, 10, -1); except on e : String do Message := e; end
+    AssertEqual ('FillEllipse needs radii of zero or more.', Message);
+
+    CloseGraph ();
+end
+
+test 'The FillEllipse Alias Reaches The Method';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'fealias', False);
+
+    var V := ViewPort (1, 1, 200, 200, 1);
+
+    SetColor (V, White);
+    SetFillStyle (V, SolidFill, LightCyan);
+    FillEllipse (V, 100, 100, 70, 40);
+
+    AssertEqual (LightCyan - 16777216, V.Buf.GetInt ((99 * 200 + 99) * 4));
 
     CloseGraph ();
 end
