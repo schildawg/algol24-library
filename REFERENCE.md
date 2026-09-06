@@ -1349,7 +1349,7 @@ See [`InitCrt`](#initcrt).
 
 ## Delay
 
-*procedure* — unit `crt`, `graph` and `sound`
+*procedure* — unit `crt` and `graph`
 
 **Function**
 
@@ -1363,8 +1363,16 @@ procedure Delay (Millis : Integer);
 
 **Remarks**
 
-Turbo Pascal's `Delay`, and all three units export it so that a program needs
-no extra `uses` to give a note a length or to pace a frame.
+Turbo Pascal's `Delay`, in both display units so that a program needs no extra
+`uses` to pace a frame.
+
+⚠️ **`sound` deliberately has none.** A third copy made a bare `Delay`
+ambiguous in the two combinations worth writing — `graph` with `sound` is
+every game, `crt` with `sound` every console program that beeps — so the
+duplicate was dropped rather than taxing those with a qualifier.
+[`Play`](#play) times itself, and a program timing raw tones by hand can say
+`uses crt`, whose `Delay` wants neither a terminal nor
+[`InitCrt`](#initcrt).
 
 ⚠️ **It needs nothing open.** No window, no terminal, no sound device — a
 program that has called neither [`InitGraph`](#initgraph) nor
@@ -1389,10 +1397,10 @@ duration wrong by a thousand.
 **Example**
 
 ```algol24
-uses sound;
+uses crt;
 
-// Turbo Pascal's Delay, and it needs neither a window nor a terminal. crt and
-// graph export one of their own that does the same thing.
+// It needs neither a window nor a terminal: this never calls InitCrt, and the
+// wait is exactly the same.
 var Start := clock ();
 
 Delay (150);
@@ -6767,51 +6775,12 @@ Starts and stops a tone.
 **Declaration**
 
 ```algol24
-procedure Sound (Hz : Integer);
-procedure NoSound ();
-procedure SetVolume (Level : Integer);
-```
-
-**Remarks**
-
-Turbo Pascal's pair, which were the PC speaker: a **square wave** at a
-frequency, on until `NoSound` stops it. Nothing waits —
-[`Delay`](#delay) is how a note is given a length.
-
-⚠️ **This is a unit of its own, not part of `crt` or `graph`.** It reaches
-CoreAudio, which is a system framework on macOS but exists nowhere else, where
-`crt` calls only POSIX and would build on Linux tomorrow. Folding the noise
-into it would narrow that unit to one operating system for the sake of a beep.
-A program says `uses sound` and gets it wherever it is.
-
-It needs neither a window nor a terminal.
-
-`SetVolume` is neither Turbo Pascal's nor BASIC's — the speaker had one
-volume, which was all of it. 0 to 255, clamped rather than refused.
-
-⚠️ **`NoSound` does not stop sound effects.** A sample started by
-[`PlaySound`](#loadsound) carries on, a sound effect not being a note;
-`StopSounds` is what silences those.
-
-Setting `ALG_SOUND=dummy` computes everything and plays nothing, which is how
-the library's own tests run in silence — the same bargain
-`SDL_VIDEODRIVER=dummy` strikes for `graph`. See
-[`SoundAvailable`](#soundavailable).
-
-Raises `Sound wants a frequency above zero.`
-
-**See also**
-
-[`Delay`](#delay), [`LoadSound`](#loadsound), [`Play`](#play),
-[`SoundAvailable`](#soundavailable)
-
-**Example**
-
-```algol24
 uses sound;
+uses crt;       // for Delay -- sound has none, to keep a bare one unambiguous
 
 // Turbo Pascal's pair: a square wave on until told otherwise, and Delay is
-// what gives a note its length.
+// what gives a note its length. This is the case that wants crt's Delay; a
+// tune played with Play needs no such thing, timing itself.
 Sound (440);
 Delay (120);
 Sound (554);

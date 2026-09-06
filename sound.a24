@@ -11,6 +11,14 @@
 /// It needs neither a window nor a terminal. A program that says `uses sound`
 /// and nothing else can still make a noise.
 ///
+/// There is deliberately no `Delay` here, where `crt` and `graph` both have
+/// one. Three copies made a bare `Delay` ambiguous in exactly the two
+/// combinations worth writing -- `graph` with `sound` is every game, `crt`
+/// with `sound` every console program that beeps -- and taxing those with a
+/// qualifier to serve a rarer case was the wrong way round. `Play` does its
+/// own timing, so a tune needs none; a program timing raw tones by hand can
+/// say `uses crt`, whose `Delay` wants neither a terminal nor `InitCrt`.
+///
 /// `Sound` and `NoSound` are Turbo Pascal's, which were the PC speaker: a
 /// square wave at a frequency, on until told otherwise. `Play` is BASIC's,
 /// which Turbo Pascal never had -- an MML string that says notes rather than
@@ -181,20 +189,10 @@ begin
     SoundVolume (Level);
 end
 
-/// Waits for Millis milliseconds.
-///
-/// The same wait `crt` and `graph` export, here so a program that uses
-/// neither can still give a note a length.
-procedure Delay (Millis : Integer);
-begin
-    SoundNap (Millis);
-end
-
-
 /// The frequency of a MIDI note number, in hertz.
 ///
 /// Private to this unit. 69 is A above middle C, which is 440 by definition,
-/// and every other note is a twelfth root of two away from its neighbour.
+/// and every other note is a twelfth root of two away from its neighbor.
 /// Middle C is 60.
 function NoteHertz (Midi : Integer) : Double;
 begin
@@ -693,6 +691,18 @@ begin
 
     AssertTrue (Took >= 0.2);
     AssertTrue (Took < 1.5);
+end
+
+test 'Sound Exports No Delay Of Its Own';
+begin
+    // Three copies of Delay made a bare one ambiguous wherever a program
+    // used sound alongside a display unit, which is the combination worth
+    // writing. Play times itself, so nothing here needs one.
+    var Start := clock ();
+
+    Play ('T240 L2 C');          // a half note at 240 is 500ms
+
+    AssertTrue (clock () - Start >= 0.4);
 end
 
 test 'A Score Is The Notes An MML String Means';

@@ -1,0 +1,218 @@
+// A piano that plays Ode to Joy, lighting each key as it sounds.
+//
+//     algc examples/piano.a24
+//
+// Esc, or the close button, finishes. Any other key plays it again.
+//
+// One octave is all the tune needs -- Beethoven's melody never leaves C to G
+// -- so the keyboard is the twelve keys of a single octave, seven white and
+// five black, drawn where a real one puts them.
+//
+// The two units meet here. `sound`'s Score turns the tune's MML into the notes
+// it means, without sounding any of them; `graph` draws the keyboard; and the
+// loop below walks the score, lighting the key whose frequency matches and
+// sounding it for exactly as long as the score says. Nothing knows about
+// Beethoven but the string.
+
+uses graph;
+uses sound;
+uses math;      // Round, Exp and Ln -- `uses` is not transitive here
+
+// Ode to Joy, from the Ninth. Two phrases of four bars, in C, and the whole
+// thing sits inside one octave.
+const Tune := 'T112 O4 L4 EEFG GFED CCDE E.D8D2 '
+            + 'EEFG GFED CCDE D.C8C2';
+
+// The twelve keys of octave 4, by MIDI note. 60 is middle C.
+var KeyMidi  := [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71];
+var KeyBlack := [False, True, False, True, False, False,
+                 True, False, True, False, True, False];
+var KeyName  := ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+// Which white key each one is, or which white key a black one sits after.
+var KeyWhite := [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
+
+const WhiteW := 64;
+const WhiteH := 260;
+const BlackW := 38;
+const BlackH := 160;
+const Left   := 60;
+const Top    := 150;
+
+var Board := nil;
+
+/// The frequency of a MIDI note, rounded as Score rounds it.
+///
+/// The same arithmetic sound's own uses, so the two agree on what a note is
+/// without this having to know how that unit spells it.
+function HertzOf (Midi : Integer) : Integer;
+begin
+    Exit Round (440.0 * Exp ((Midi - 69) * Ln (2.0) / 12.0));
+end
+
+/// Where a key's rectangle sits on the board, as [X1, Y1, X2, Y2].
+function KeyBox (I : Integer) : List;
+begin
+    var W := KeyWhite[I];
+
+    if not KeyBlack[I] then
+        Exit [Left + W * WhiteW, Top,
+              Left + W * WhiteW + WhiteW - 1, Top + WhiteH - 1];
+
+    // A black key straddles the join between two white ones.
+    var Mid := Left + (W + 1) * WhiteW;
+
+    Exit [Mid - BlackW div 2, Top,
+          Mid + BlackW div 2 - 1, Top + BlackH - 1];
+end
+
+/// Draws the whole keyboard once: white keys, then black keys over them.
+procedure DrawBoard ();
+begin
+    for var I := 0; I < 12; I := I + 1 do
+        if not KeyBlack[I] then
+        begin
+            var B := KeyBox (I);
+
+            Board.SetFillStyle (SolidFill, White);
+            Board.Bar (B[0], B[1], B[2], B[3]);
+            Board.SetColor (Black);
+            Board.Rectangle (B[0], B[1], B[2], B[3]);
+        end
+
+    for var I := 0; I < 12; I := I + 1 do
+        if KeyBlack[I] then
+        begin
+            var B := KeyBox (I);
+
+            Board.SetFillStyle (SolidFill, Black);
+            Board.Bar (B[0], B[1], B[2], B[3]);
+            Board.SetColor (DarkGray);
+            Board.Rectangle (B[0], B[1], B[2], B[3]);
+        end
+
+    Board.Show ();
+end
+
+/// Lights a key, or puts it back to its own color.
+///
+/// Only the inside is painted, and on a white key only the part BELOW where
+/// the black keys end -- so lighting one never has to repair a border or a
+/// neighbor, and the whole thing is two filled rectangles rather than a
+/// redraw of the board.
+procedure LightKey (I : Integer, Lit : Boolean);
+begin
+    var B    := KeyBox (I);
+    var Tint := White;
+
+    if KeyBlack[I] then Tint := Black;
+    if Lit then Tint := LightRed;
+    if Lit then if KeyBlack[I] then Tint := Red;
+
+    var Y1 := B[1] + 1;
+
+    // A white key is lit only below the black keys, which is the part of it
+    // nothing else overlaps.
+    if not KeyBlack[I] then Y1 := Top + BlackH + 1;
+
+    Board.SetFillStyle (SolidFill, Tint);
+    Board.Bar (B[0] + 1, Y1, B[2] - 1, B[3] - 1);
+    Board.Show ();
+end
+
+/// The key whose note is nearest this frequency, or -1 for none.
+function KeyAt (Hz : Integer) : Integer;
+begin
+    for var I := 0; I < 12; I := I + 1 do
+        if HertzOf (KeyMidi[I]) = Hz then Exit I;
+
+    Exit 0 - 1;
+end
+
+/// Writes the name of the note now sounding, or clears it.
+procedure ShowNote (Text : String);
+begin
+    TextBackground (Blue);
+    TextColor (Yellow);
+    GotoXY (4, 4);
+    Write ('        ');
+    GotoXY (4, 4);
+    Write (Text);
+end
+
+/// Plays the tune once, lighting each key as it sounds.
+procedure PerformOnce ();
+begin
+    // Score answers what the MML means without sounding any of it: the
+    // frequency, how long the note sounds, and how long it rests afterward.
+    // Everything below is a walk over that list.
+    for var N in Score (Tune) do
+    begin
+        var Key := KeyAt (N[0]);
+
+        if Key >= 0 then
+        begin
+            LightKey (Key, True);
+            ShowNote (KeyName[Key]);
+            Sound (N[0]);
+        end
+
+        Delay (N[1]);
+
+        NoSound ();
+
+        if Key >= 0 then LightKey (Key, False);
+
+        // The rest between notes is what makes a repeated note audible as
+        // two notes rather than one long one -- and visible as two, since
+        // the key goes dark for it.
+        if N[2] > 0 then Delay (N[2]);
+    end
+
+    ShowNote ('');
+end
+
+begin
+    InitGraph (900, 560, 'Ode to Joy', False);
+
+    TextBackground (Blue);
+    ClrScr ();
+
+    TextColor (Yellow);
+    GotoXY (4, 2);
+    Write ('Ode to Joy');
+
+    TextColor (LightGray);
+    GotoXY (18, 2);
+    Write ('Beethoven, Ninth Symphony');
+
+    TextColor (DarkGray);
+    GotoXY (4, 25);
+    Write ('any key plays it again, Esc finishes');
+
+    if not SoundAvailable () then
+    begin
+        TextColor (LightRed);
+        GotoXY (30, 4);
+        Write ('(no audio device -- the keys still light)');
+    end
+
+    Board := ViewPort (1, 1, 900, 480, 1);
+
+    DrawBoard ();
+    PerformOnce ();
+
+    while True do
+    begin
+        var K := ReadKey ();
+
+        if K = #27 then break;
+        if K = KeyClose then break;
+
+        PerformOnce ();
+    end
+
+    NoSound ();
+    CloseSound ();
+    CloseGraph ();
+end

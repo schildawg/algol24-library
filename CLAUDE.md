@@ -313,7 +313,18 @@ the acceptance piece — the Turbo C++ screen rebuilt from the vocabulary.
 exists nowhere else. `crt` calls only POSIX -- termios, ioctl, nanosleep --
 and would build on Linux tomorrow but for the hardcoded `.dylib`; folding the
 noise into it would narrow that unit to one operating system for the sake of a
-beep. `Delay` is in all three units because it involves no audio at all.
+beep. `Delay` is in `crt` and `graph` and deliberately **not** in `sound`: a third
+copy made a bare `Delay` ambiguous in the two combinations worth writing --
+`graph` with `sound` is every game, `crt` with `sound` every console program
+that beeps -- and taxing those with `graph.Delay` to serve a rarer case was the
+wrong way round. `Play` times itself; a program timing raw tones by hand says
+`uses crt`, whose `Delay` wants neither a terminal nor `InitCrt`.
+
+⚠️ **Two units exporting one name is ambiguous at the call, not at the
+`uses`.** `uses graph; uses sound;` loads fine and then answers `'Delay' is
+ambiguous: graph or sound.` when the name is used. Qualifying works --
+`graph.Delay (10)` -- but a name worth having in two units is usually a name
+that should be in one.
 
 `sound` notes: `ALG_SOUND=dummy` computes everything and plays nothing, which
 `test.sh` and `check-reference.py` both set -- the same bargain
@@ -354,6 +365,16 @@ where a simple statement before `else` takes one; a one-character map key is a
 **Char**, so `Str (C) in Map` never matches a `'C' : 0` entry; and **Lists and
 Maps compare by identity, not by content** -- `AssertEqual` on two
 equal-looking Lists always fails, so a comparison has to walk them.
+
+`examples/piano.a24` is where `graph` and `sound` meet: one octave of keys,
+Ode to Joy, each key lit as it sounds. It is a walk over what `Score` answers
+and knows nothing about music itself, which is the point. Lighting a key is
+two filled rectangles rather than a redraw -- a white key lights only below
+where the black keys end, so it never has to repair a border or a neighbor.
+
+⚠️ **The examples keep catching what the tests cannot.** The interactive IDE
+found the escape-sequence race in `crt`'s key reader; the piano found the
+`Delay` ambiguity. Both were correct against every test and wrong in use.
 
 `examples/statistics.a24` is the worked application — built by
 `examples/build.sh`, verified by `examples/check.sh`, explained in
