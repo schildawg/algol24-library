@@ -1448,14 +1448,30 @@ begin
         // decoder knows, and give up on the first thing that cannot be one.
         var Seq   := '';
         var Found := False;
+        var Idle  := 0;
 
         while Length (Seq) < 5 do
         begin
             var C := CrtGetch ();
 
-            if C < 0 then break;
+            // The rest of a sequence is usually in the buffer already, the
+            // terminal having sent it in one write -- but not always, and
+            // giving up on the first empty read would turn a slow arrow key
+            // into a lone Escape. So wait a little before concluding there
+            // is nothing more coming.
+            if C < 0 then
+            begin
+                if Idle >= 3 then break;
 
-            Seq := Seq + Char (C);
+                Idle := Idle + 1;
+
+                CrtNap (1);
+
+                continue;
+            end
+
+            Idle := 0;
+            Seq  := Seq + Char (C);
 
             if Seq in KeySeqs then
             begin

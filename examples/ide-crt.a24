@@ -3,7 +3,15 @@
 //
 //     algc examples/ide-crt.a24
 //
-// Esc, or any key, finishes.
+//   arrows   drag the Watch window over the Notes window
+//   Tab      bring the other window to the front
+//   Home     put Watch back where it started
+//   Esc      finish
+//
+// The dragging is the part worth doing by hand. Each window holds its own
+// cells rather than a share of the screen's, so moving one carries its
+// contents with it and reveals whatever was behind -- and the two crossing
+// each other is a thing a single text plane cannot express at all.
 //
 // Put the two side by side and the point of the exercise shows: the code is
 // the same code. The menu bar, the double frame, the scrollbars, the status
@@ -223,17 +231,82 @@ begin
     Write (Fill (' ', Cols - 1));
     GotoXY (2, Rows);
 
-    for var Key in [['F1', 'Help'], ['F2', 'Save'], ['F3', 'Open'],
-                    ['Alt+F9', 'Compile'], ['F9', 'Make'], ['Alt+F10', 'Local']] do
+    for var Key in [['←→↑↓', 'Drag Watch'], ['Tab', 'Front'],
+                    ['Home', 'Reset'], ['Esc', 'Quit'],
+                    ['F1', 'Help'], ['F9', 'Make']] do
         if WhereY () = Rows then
           if WhereX () + Length (Key[0]) + Length (Key[1]) + 4 < Cols then
               StatusKey (Key[0], Key[1]);
 
     Show ();
 
+    // ------------------------------------------------------ the event loop --
+    //
     // A screen that is not a terminal has no keys to wait for, so a piped run
-    // finishes rather than hanging.
-    if IsTerminal () then ReadKey ();
+    // draws everything and finishes rather than hanging.
+    //
+    // Nothing here redraws anything. The surfaces already hold their cells, so
+    // moving one or reordering them and calling Show is the whole of it -- the
+    // compositor works out what the screen now looks like and the painter
+    // sends only the cells that actually changed.
+    var HomeX := 3 + WinW div 2;
+    var HomeY := 4 + WinH div 2;
+    var Front := Watch;
+
+    while IsTerminal () do
+    begin
+        var K := ReadKey ();
+
+        if K = #27 then break;
+        if K = KeyClose then break;
+        if K = 'q' then break;
+
+        var DX := 0;
+        var DY := 0;
+
+        if K = KeyLeft  then DX := 0 - 1;
+        if K = KeyRight then DX := 1;
+        if K = KeyUp    then DY := 0 - 1;
+        if K = KeyDown  then DY := 1;
+
+        if DX <> 0 or DY <> 0 then
+        begin
+            var NX := Watch.X1 + DX;
+            var NY := Watch.Y1 + DY;
+
+            // Clamped to the desktop, so the window cannot be walked off the
+            // screen and lost. A window hanging off the edge would be clipped
+            // rather than refused, but there would be no way back.
+            if NX < 1 then NX := 1;
+            if NY < 2 then NY := 2;
+            if NX + Watch.Cols - 1 > Cols then NX := Cols - Watch.Cols + 1;
+            if NY + Watch.Rows - 1 > Rows - 1 then NY := Rows - Watch.Rows;
+
+            MoveTo (Watch, NX, NY);
+        end
+
+        if K = KeyHome then MoveTo (Watch, HomeX, HomeY);
+
+        // Bring-to-front is an assignment: Order is what stacks a surface, and
+        // nothing else has to be told.
+        if K = #9 then
+        begin
+            if Front = Watch then
+            begin
+                Notes.Order := 2;
+                Watch.Order := 1;
+                Front := Notes;
+            end
+            else
+            begin
+                Notes.Order := 1;
+                Watch.Order := 2;
+                Front := Watch;
+            end
+
+            Show ();
+        end
+    end
 
     CloseCrt ();
 end
