@@ -15,6 +15,11 @@ set -eu
 # harmless and occasionally worth watching.
 export SDL_VIDEODRIVER=dummy
 
+# sound's tests compute every note and play none of them. Without this a test
+# run would fill the room, which is the same bargain the line above strikes
+# for graph's windows.
+export ALG_SOUND=dummy
+
 # The units reach the library's own C through a shared library, so a stale one
 # would be tested instead of the source beside it.
 ./build.sh > /dev/null

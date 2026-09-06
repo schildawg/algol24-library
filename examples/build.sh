@@ -73,9 +73,16 @@ if [ "$STATIC" = yes ]; then
     mkdir -p "$SRC/emitted"
     ( cd "$SRC" && algc --compile --out=emitted statistics.a24 ) > /dev/null
 
+    # soundffi.c reaches CoreAudio, so a self-contained binary that links the
+    # library's C has to name those frameworks too.
+    case "$(uname -s)" in
+        Darwin) AUDIO="-framework AudioToolbox -framework AudioUnit -framework CoreFoundation" ;;
+        *)      AUDIO="" ;;
+    esac
+
     # shellcheck disable=SC2086
     $CC $CFLAGS -DALG_FFI -o "$OUT/statistics" \
-        "$SRC"/emitted/*.c ./*ffi.c -lffi
+        "$SRC"/emitted/*.c ./*ffi.c -lffi $AUDIO
 
     echo "$OUT/statistics  (self-contained)"
 else

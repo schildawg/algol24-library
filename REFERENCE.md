@@ -33,6 +33,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Black` … `White`](#colors) | constants | `graph` and `crt` |
 | [`Cos`](#cos) | function | `math` |
 | [`Crt`](#crt) | unit | `crt` |
+| [`Delay`](#delay) | procedure | `crt`, `graph` and `sound` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
@@ -75,6 +76,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SolidLn` … `ThickWidth`](#linestyles) | constants | `graph` |
 | [`LineTo`](#lineto) | procedure, alias | `graph` |
 | [`Ln`](#ln) | function | `math` |
+| [`LoadSound`](#loadsound) | functions and procedures | `sound` |
 | [`LowVideo`](#lowvideo) | procedure | `graph` and `crt` |
 | [`Max`](#max) | function | `math` |
 | [`Min`](#min) | function | `math` |
@@ -88,6 +90,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`PenTo`](#pento) | procedure, alias | `graph` |
 | [`Pi`](#pi) | constant | `math` |
 | [`PieSlice`](#pieslice) | procedure, alias | `graph` |
+| [`Play`](#play) | procedure and function | `sound` |
 | [`CopyPut` … `TransparentPut`](#putmodes) | constants | `graph` |
 | [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
@@ -114,6 +117,8 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetWriteMode` `GetWriteMode`](#setwritemode) | procedures, aliases | `graph` |
 | [`Show`](#show) | procedure, alias | `graph` and `crt` |
 | [`Sin`](#sin) | function | `math` |
+| [`Sound`](#sound) | procedures | `sound` |
+| [`SoundAvailable`](#soundavailable) | function | `sound` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
 | [`TextBackground`](#textbackground) | procedure | `graph` and `crt` |
@@ -1338,6 +1343,80 @@ changes six cells sends six cells.
 **Example**
 
 See [`InitCrt`](#initcrt).
+
+
+---
+
+## Delay
+
+*procedure* — unit `crt`, `graph` and `sound`
+
+**Function**
+
+Waits for a number of milliseconds.
+
+**Declaration**
+
+```algol24
+procedure Delay (Millis : Integer);
+```
+
+**Remarks**
+
+Turbo Pascal's `Delay`, and all three units export it so that a program needs
+no extra `uses` to give a note a length or to pace a frame.
+
+⚠️ **It needs nothing open.** No window, no terminal, no sound device — a
+program that has called neither [`InitGraph`](#initgraph) nor
+[`InitCrt`](#initcrt) waits just the same.
+
+It **sleeps rather than spinning**, so waiting costs no processor time.
+
+⚠️ **Nothing happens while it waits.** No frame is presented and no key is
+collected, so a program that must stay responsive should wait in short steps
+and pump [`KeyPressed`](#keypressed) between them.
+
+Zero or less returns at once rather than waiting forever.
+
+⚠️ **The language's `clock ()` answers seconds, not milliseconds**, so a
+150-millisecond wait shows as `0.15`. Reading it the other way makes every
+duration wrong by a thousand.
+
+**See also**
+
+[`Play`](#play), [`ReadKey`](#readkey), [`Sound`](#sound)
+
+**Example**
+
+```algol24
+uses sound;
+
+// Turbo Pascal's Delay, and it needs neither a window nor a terminal. crt and
+// graph export one of their own that does the same thing.
+var Start := clock ();
+
+Delay (150);
+
+// The language's clock answers SECONDS, not milliseconds.
+var Waited := clock () - Start;
+
+System.WriteLn ('asked for 150 ms');
+System.WriteLn ('waited at least that: ', Waited >= 0.15);
+System.WriteLn ('and not much more:    ', Waited < 1.0);
+
+// A senseless wait returns at once rather than never.
+Delay (0);
+Delay (0 - 5);
+
+System.WriteLn ('zero and negative return at once');
+```
+
+```console
+asked for 150 ms
+waited at least that: true
+and not much more:    true
+zero and negative return at once
+```
 
 
 ---
@@ -4066,6 +4145,104 @@ WriteLn (Ln (0.0));
 
 ---
 
+## LoadSound
+
+*functions and procedures* — unit `sound`
+
+**Function**
+
+Plays a sound effect from an audio file.
+
+**Declaration**
+
+```algol24
+function  LoadSound    (Path : String) : Integer;
+function  PlaySound    (Clip : Integer, Volume : Integer) : Boolean;
+function  SoundLength  (Clip : Integer) : Integer;
+function  SoundPlaying (Clip : Integer) : Boolean;
+procedure StopSounds   ();
+procedure FreeSound    (Clip : Integer);
+procedure CloseSound   ();
+```
+
+**Remarks**
+
+Neither Turbo Pascal's nor BASIC's — a sound effect from a file, mixed under
+whatever else is sounding.
+
+CoreAudio decodes **WAV, AIFF, CAF, MP3 and M4A**, which is more than SDL2
+reads without SDL_mixer. The file is decoded **once, up front**, so playing it
+later costs only the mixing — which is what a sound effect needs and why this
+is not done per play.
+
+⚠️ **`PlaySound` returns at once.** The effect plays while the program carries
+on, which is the whole point of one; `SoundLength` says how long it will take
+if that matters. Sixteen may sound at a time, and a seventeenth is **dropped
+rather than cutting one short**, answering False.
+
+It also answers False when nothing can be heard at all — see
+[`SoundAvailable`](#soundavailable) — since there is no voice to start on a
+device that was never opened. `LoadSound` still decodes in that case, so
+`SoundLength` is real either way.
+
+`Volume` is 0 to 255 and is that sound's own, not the tone's.
+
+⚠️ **`NoSound` does not stop these**, a sound effect not being a note.
+`StopSounds` silences every effect and leaves the tone; `CloseSound` stops
+everything and closes the device.
+
+Sixty-four may be loaded at once. `FreeSound` gives one back and stops
+anything playing it; the handle is not a sound afterward, and using it raises.
+
+Raises `LoadSound could not read <path>.` for a file that is missing, is not
+audio, is longer than ten minutes, or when sixty-four are already loaded; and
+`<verb> wants a sound from LoadSound.` for a handle that is not one.
+
+**See also**
+
+[`Play`](#play), [`Sound`](#sound), [`SoundAvailable`](#soundavailable)
+
+**Example**
+
+```algol24
+uses sound;
+
+// Whatever CoreAudio can read: WAV, AIFF, CAF, MP3, M4A. Decoded once, up
+// front, so playing it later costs only the mixing.
+var Ping := LoadSound ('/System/Library/Sounds/Ping.aiff');
+
+System.WriteLn ('length:   ', SoundLength (Ping) > 200, ' (a real decode)');
+System.WriteLn ('sounding: ', SoundPlaying (Ping));
+
+// Returns at once -- a sound effect plays while the program carries on, which
+// is the whole point of one. It answers False here because this run is
+// silent; see SoundAvailable.
+var Started := PlaySound (Ping, 200);
+
+System.WriteLn ('started:  ', Started, ' (audible: ', SoundAvailable (), ')');
+
+FreeSound (Ping);
+
+// Freed, the handle is not a sound any more.
+var Message := '';
+
+try SoundLength (Ping); except on e : String do Message := e; end
+
+System.WriteLn ('freed:    ', Message);
+
+CloseSound ();
+```
+
+```console
+length:   true (a real decode)
+sounding: false
+started:  false (audible: false)
+freed:    SoundLength wants a sound from LoadSound.
+```
+
+
+---
+
 ## LowVideo
 
 *procedure* — unit `graph` and `crt`
@@ -4702,6 +4879,124 @@ CloseGraph ();
 true
 true
 ```
+
+---
+
+## Play
+
+*procedure and function* — unit `sound`
+
+**Function**
+
+Plays a tune written in BASIC's Music Macro Language.
+
+**Declaration**
+
+```algol24
+procedure Play  (MML : String);
+function  Score (MML : String) : List;
+```
+
+**Remarks**
+
+What Turbo Pascal never had and BASIC always did: a string that says **notes**
+rather than frequencies, and knows what a dotted quaver is worth at 120 beats
+a minute.
+
+```algol24
+Play ('T120 O4 L8 CDEFGAB O5 C2');
+```
+
+The dialect is GW-BASIC's:
+
+| | |
+| --- | --- |
+| `A`–`G` | a note; `#` or `+` sharpens it, `-` flattens it |
+| `O`*n* | octave, 0 to 6 — **octave 4 holds middle C** |
+| `>` `<` | one octave up or down, stopping at the ends |
+| `L`*n* | the default note length: 1, 2, 4, 8 … 64 |
+| *n* after a note | that note's length, overriding `L` |
+| `.` | dotted — adds half of what came before, and they stack |
+| `T`*n* | tempo, quarter notes to the minute, 32 to 255 |
+| `P`*n*, `R`*n* | a rest of that length |
+| `N`*n* | a note by number, 0 to 84; `N0` is a rest |
+| `ML` `MN` `MS` | legato, normal, staccato |
+| `MF` `MB` | foreground, background |
+
+Spaces are ignored, so a tune may be written in bars, and lower case means the
+same as upper.
+
+⚠️ **`Score` answers the notes without playing them** — a List of
+`[hertz, sounding ms, resting ms]`, where a hertz of 0 is a rest. That is what
+makes a tune checkable: it can be asserted note by note with nothing audible.
+`Play` performs exactly what `Score` answers.
+
+⚠️ **Articulation changes how much of a note sounds, never how long it takes.**
+`MN` sounds seven eighths and rests for the last — which is what makes a
+repeated note audible as two notes — and `MS` sounds three quarters. The note
+still occupies its whole length either way, so phrasing never changes the
+tempo.
+
+⚠️ **`Play` is foreground only.** The call takes as long as the tune does,
+which is what `MF` meant. `MB` is accepted and ignored rather than refused, so
+a listing that asks for background music still plays.
+
+⚠️ **A faulty tune plays nothing.** The whole string is parsed before a note
+sounds, so a fault at the end does not play the beginning and then raise.
+
+Octave 4 holding middle C lines the octave numbers up with MIDI and scientific
+pitch notation. Sources differ on whether GW-BASIC's own octave 4 or octave 3
+did; this picks the one a reader today expects.
+
+Raises `Play does not know '<c>'.`, `Play wants an octave from 0 to 6.`,
+`Play wants a length from 1 to 64.`, `Play wants a tempo from 32 to 255.`,
+`Play wants a note number from 0 to 84.`, `Play wants a letter after M.` and
+`Play wants L, N, S, F or B after M.`
+
+**See also**
+
+[`Delay`](#delay), [`Sound`](#sound), [`SoundAvailable`](#soundavailable)
+
+**Example**
+
+```algol24
+uses sound;
+
+// Every note of an MML string, without a sound being made: the frequency in
+// hertz, how long it sounds, and how long it rests afterward.
+for var Bit in ['C', 'C#', 'C-', 'O5C', 'L4C.', 'MS C', 'P4', 'N49'] do
+begin
+    var N := Score (Bit)[0];
+
+    System.WriteLn (Bit, '  ->  ', N[0], ' Hz, ', N[1], ' ms + ', N[2],
+                    ' ms rest');
+end
+
+// MN leaves an eighth of every note silent, which is what makes a repeated
+// note audible as two notes rather than one long one. The note still occupies
+// its whole length, so phrasing never changes the tempo.
+for var Mode in ['ML', 'MN', 'MS'] do
+begin
+    var N := Score (Mode + ' T120 L4 C')[0];
+
+    System.WriteLn (Mode, ' sounds ', N[1], ' of ', N[1] + N[2], ' ms');
+end
+```
+
+```console
+C  ->  262 Hz, 437 ms + 63 ms rest
+C#  ->  277 Hz, 437 ms + 63 ms rest
+C-  ->  247 Hz, 437 ms + 63 ms rest
+O5C  ->  523 Hz, 437 ms + 63 ms rest
+L4C.  ->  262 Hz, 656 ms + 94 ms rest
+MS C  ->  262 Hz, 375 ms + 125 ms rest
+P4  ->  0 Hz, 500 ms + 0 ms rest
+N49  ->  262 Hz, 437 ms + 63 ms rest
+ML sounds 500 of 500 ms
+MN sounds 437 of 500 ms
+MS sounds 375 of 500 ms
+```
+
 
 ---
 
@@ -6458,6 +6753,136 @@ WriteLn (Sin (Pi / 2));
 0.0
 1.0
 ```
+
+---
+
+## Sound
+
+*procedures* — unit `sound`
+
+**Function**
+
+Starts and stops a tone.
+
+**Declaration**
+
+```algol24
+procedure Sound (Hz : Integer);
+procedure NoSound ();
+procedure SetVolume (Level : Integer);
+```
+
+**Remarks**
+
+Turbo Pascal's pair, which were the PC speaker: a **square wave** at a
+frequency, on until `NoSound` stops it. Nothing waits —
+[`Delay`](#delay) is how a note is given a length.
+
+⚠️ **This is a unit of its own, not part of `crt` or `graph`.** It reaches
+CoreAudio, which is a system framework on macOS but exists nowhere else, where
+`crt` calls only POSIX and would build on Linux tomorrow. Folding the noise
+into it would narrow that unit to one operating system for the sake of a beep.
+A program says `uses sound` and gets it wherever it is.
+
+It needs neither a window nor a terminal.
+
+`SetVolume` is neither Turbo Pascal's nor BASIC's — the speaker had one
+volume, which was all of it. 0 to 255, clamped rather than refused.
+
+⚠️ **`NoSound` does not stop sound effects.** A sample started by
+[`PlaySound`](#loadsound) carries on, a sound effect not being a note;
+`StopSounds` is what silences those.
+
+Setting `ALG_SOUND=dummy` computes everything and plays nothing, which is how
+the library's own tests run in silence — the same bargain
+`SDL_VIDEODRIVER=dummy` strikes for `graph`. See
+[`SoundAvailable`](#soundavailable).
+
+Raises `Sound wants a frequency above zero.`
+
+**See also**
+
+[`Delay`](#delay), [`LoadSound`](#loadsound), [`Play`](#play),
+[`SoundAvailable`](#soundavailable)
+
+**Example**
+
+```algol24
+uses sound;
+
+// Turbo Pascal's pair: a square wave on until told otherwise, and Delay is
+// what gives a note its length.
+Sound (440);
+Delay (120);
+Sound (554);
+Delay (120);
+Sound (659);
+Delay (120);
+NoSound ();
+
+// BASIC's PLAY, which Turbo Pascal never had. Score answers what it would
+// sound without sounding it, so a tune can be checked.
+var Tune := Score ('T120 O4 L8 CDEFGAB O5 C2');
+
+System.WriteLn ('notes:    ', Tune.Length);
+System.WriteLn ('first:    ', Tune[0][0], ' Hz');
+System.WriteLn ('last:     ', Tune[7][0], ' Hz');
+System.WriteLn ('an eighth at 120 lasts ', Tune[0][1] + Tune[0][2], ' ms');
+
+Play ('T160 O4 L8 CDEFGAB O5 C4');
+
+System.WriteLn ('audible:  ', SoundAvailable ());
+
+CloseSound ();
+```
+
+```console
+notes:    8
+first:    262 Hz
+last:     523 Hz
+an eighth at 120 lasts 250 ms
+audible:  false
+```
+
+
+---
+
+## SoundAvailable
+
+*function* — unit `sound`
+
+**Function**
+
+Whether a real sound device could be opened.
+
+**Declaration**
+
+```algol24
+function SoundAvailable () : Boolean;
+```
+
+**Remarks**
+
+False under `ALG_SOUND=dummy`, and false where no output device exists.
+
+⚠️ **Nearly everything still works when it is False.** [`Play`](#play) takes
+exactly as long, `Score` answers the same notes, and
+[`LoadSound`](#loadsound) still decodes the file — which is what lets this
+unit's tests assert a tune's timing in silence, the same bargain
+`SDL_VIDEODRIVER=dummy` strikes for `graph`.
+
+The one exception is [`PlaySound`](#loadsound), which answers False because
+there is no voice for it to sound on. A program that checks that return should
+ask this first rather than treating it as a failure.
+
+**See also**
+
+[`LoadSound`](#loadsound), [`Play`](#play), [`Sound`](#sound)
+
+**Example**
+
+See [`Sound`](#sound).
+
 
 ---
 

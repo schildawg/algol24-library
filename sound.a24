@@ -1,0 +1,940 @@
+/// Tones, sound effects, and BASIC's PLAY.
+///
+/// A unit of its own rather than a part of `crt` or `graph`, and the reason is
+/// portability. It reaches CoreAudio, which is a system framework on macOS --
+/// present on every machine, nothing to install -- but which exists nowhere
+/// else. `crt` calls only POSIX and would build on Linux tomorrow; folding
+/// this into it would narrow that unit to one operating system for the sake
+/// of a beep. So the noise lives here, where a program asks for it
+/// deliberately and the one platform-bound unit is easy to see.
+///
+/// It needs neither a window nor a terminal. A program that says `uses sound`
+/// and nothing else can still make a noise.
+///
+/// `Sound` and `NoSound` are Turbo Pascal's, which were the PC speaker: a
+/// square wave at a frequency, on until told otherwise. `Play` is BASIC's,
+/// which Turbo Pascal never had -- an MML string that says notes rather than
+/// frequencies, and knows what a dotted quaver is worth at 120 beats a
+/// minute.
+///
+/// `LoadSound` and `PlaySound` are neither's: a sound effect from a file,
+/// mixed under whatever else is sounding. CoreAudio decodes WAV, AIFF, CAF,
+/// MP3 and M4A.
+///
+/// Setting `ALG_SOUND=dummy` computes everything and plays nothing, which is
+/// what lets this unit's own tests run in silence -- the same bargain
+/// `SDL_VIDEODRIVER=dummy` strikes for `graph`.
+unit sound;
+
+uses math;
+
+/// Whether anything will actually be heard.
+///
+/// Private to this unit; `SoundAvailable` is what a caller asks.
+function SoundAudible () : Integer;
+    external 'alg_sound_audible' in 'libsoundffi.dylib';
+
+/// Starts a square wave at Hz, or stops it when Hz is zero or less.
+///
+/// Private to this unit.
+procedure SoundTone (Hz : Integer);
+    external 'alg_sound_tone' in 'libsoundffi.dylib';
+
+/// Stops the tone, leaving sound effects sounding.
+///
+/// Private to this unit.
+procedure SoundOff ();
+    external 'alg_sound_off' in 'libsoundffi.dylib';
+
+/// Sets the tone's loudness, 0 to 255.
+///
+/// Private to this unit.
+procedure SoundVolume (Level : Integer);
+    external 'alg_sound_volume' in 'libsoundffi.dylib';
+
+/// Decodes an audio file into memory, answering a handle or -1.
+///
+/// Private to this unit.
+function SoundLoad (Path : String) : Integer;
+    external 'alg_sound_load' in 'libsoundffi.dylib';
+
+/// How many frames a loaded sound holds, or -1 for a handle that is not one.
+///
+/// Private to this unit.
+function SoundFrames (Clip : Integer) : Integer;
+    external 'alg_sound_frames' in 'libsoundffi.dylib';
+
+/// The mixer's sample rate, which turns frames into milliseconds.
+///
+/// Private to this unit.
+function SoundRate () : Integer;
+    external 'alg_sound_rate' in 'libsoundffi.dylib';
+
+/// Starts a loaded sound playing; answers 1 if a voice was free for it.
+///
+/// Private to this unit.
+function SoundStart (Clip : Integer, Volume : Integer) : Integer;
+    external 'alg_sound_play' in 'libsoundffi.dylib';
+
+/// Whether any voice is still playing a loaded sound.
+///
+/// Private to this unit.
+function SoundBusy (Clip : Integer) : Integer;
+    external 'alg_sound_playing' in 'libsoundffi.dylib';
+
+/// Silences every sound effect, leaving the tone alone.
+///
+/// Private to this unit.
+procedure SoundHush ();
+    external 'alg_sound_hush' in 'libsoundffi.dylib';
+
+/// Forgets a loaded sound and gives its memory back.
+///
+/// Private to this unit.
+procedure SoundForget (Clip : Integer);
+    external 'alg_sound_free' in 'libsoundffi.dylib';
+
+/// Stops everything and closes the device.
+///
+/// Private to this unit.
+procedure SoundShut ();
+    external 'alg_sound_close' in 'libsoundffi.dylib';
+
+/// Waits for Millis milliseconds.
+///
+/// Private to this unit; `crt` and `graph` export a `Delay` of their own, and
+/// this one is here so that `Play` does not need either of them.
+procedure SoundNap (Millis : Integer);
+    external 'alg_crt_nap' in 'libcrtffi.dylib';
+
+
+// The twelve semitones, by the letters MML names them with. C is 0, and the
+// numbering is the piano's rather than anything of this library's own.
+//
+// The keys are Chars, a one-character literal never being a String here, so
+// they are looked up with a Char and not with Str of one.
+var NoteStep := ['C' : 0, 'D' : 2, 'E' : 4, 'F' : 5,
+                 'G' : 7, 'A' : 9, 'B' : 11];
+
+// What each articulation leaves sounding, in eighths of the note's length.
+// Turbo Pascal never had these; BASIC's MN plays seven eighths and rests for
+// the last, which is what makes a repeated note audible as two notes.
+const Legato   := 8;
+const Normal   := 7;
+const Staccato := 6;
+
+
+/// Whether a real sound device could be opened.
+///
+/// False under `ALG_SOUND=dummy`, and false where no output device exists.
+///
+/// Nearly everything still works when it is False: `Play` takes exactly as
+/// long, `Score` answers the same notes, and `LoadSound` still decodes the
+/// file. The exception is `PlaySound`, which answers False because there is
+/// no voice for it to sound on -- so a program that checks that return should
+/// ask this first rather than treating it as a failure.
+///
+/// # Examples
+/// `A Silent Device Still Keeps Time`
+function SoundAvailable () : Boolean;
+begin
+    Exit SoundAudible () <> 0;
+end
+
+/// Starts a tone at Hz and leaves it sounding.
+///
+/// Turbo Pascal's `Sound`: a square wave, on until `NoSound` stops it, which
+/// is what the PC speaker did. Nothing waits -- `Delay` is how a note is
+/// given a length.
+///
+/// # Raises
+/// `Sound wants a frequency above zero.`
+///
+/// # Examples
+/// `Sound And NoSound Turn A Tone On And Off`
+procedure Sound (Hz : Integer);
+begin
+    if Hz <= 0 then raise 'Sound wants a frequency above zero.';
+
+    SoundTone (Hz);
+end
+
+/// Stops the tone.
+///
+/// Sound effects started by `PlaySound` carry on: a sound effect is not a
+/// note, and stopping the speaker never stopped a sample.
+///
+/// # Examples
+/// `Sound And NoSound Turn A Tone On And Off`
+procedure NoSound ();
+begin
+    SoundOff ();
+end
+
+/// Sets how loud the tone is, from 0 to 255.
+///
+/// Neither Turbo Pascal's nor BASIC's -- the PC speaker had one volume, which
+/// was all of it. A value outside the range is clamped rather than refused,
+/// there being no wrong answer to make louder than loudest.
+procedure SetVolume (Level : Integer);
+begin
+    SoundVolume (Level);
+end
+
+/// Waits for Millis milliseconds.
+///
+/// The same wait `crt` and `graph` export, here so a program that uses
+/// neither can still give a note a length.
+procedure Delay (Millis : Integer);
+begin
+    SoundNap (Millis);
+end
+
+
+/// The frequency of a MIDI note number, in hertz.
+///
+/// Private to this unit. 69 is A above middle C, which is 440 by definition,
+/// and every other note is a twelfth root of two away from its neighbour.
+/// Middle C is 60.
+function NoteHertz (Midi : Integer) : Double;
+begin
+    Exit 440.0 * Exp ((Midi - 69) * Ln (2.0) / 12.0);
+end
+
+/// How many semitones above C a note letter stands.
+///
+/// Private to this unit, and typed because a map read answers Any.
+function StepOf (Letter : Char) : Integer;
+begin
+    Exit NoteStep[Letter];
+end
+
+/// The MIDI note number of a letter in an octave, with its accidentals.
+///
+/// Private to this unit. Octave 4 holds middle C, so `O4 C` is 60 and `O4 A`
+/// is 440 -- which lines the octave numbers up with MIDI and with scientific
+/// pitch notation, so a tune written from a modern reference sounds where it
+/// looks. Sources differ on whether GW-BASIC's own octave 4 or octave 3 held
+/// middle C; this picks the one a reader today will expect, and moving it is
+/// a change to this line alone.
+function MidiOf (Letter : Char, Octave : Integer, Sharps : Integer) : Integer;
+begin
+    Exit (Octave + 1) * 12 + StepOf (Letter) + Sharps;
+end
+
+/// How long a note of this length lasts, in milliseconds.
+///
+/// Private to this unit. Tempo is quarter notes to the minute, so a quarter
+/// note is 60000 over the tempo and a note of length L is four over L of
+/// that. Each dot adds half of what came before it.
+function NoteMillis (Length : Integer, Dots : Integer, Tempo : Integer) : Integer;
+begin
+    var Whole := 240000.0 / (Length * Tempo);
+    var Total := Whole;
+    var Extra := Whole;
+
+    for var D := 0; D < Dots; D := D + 1 do
+    begin
+        Extra := Extra / 2.0;
+        Total := Total + Extra;
+    end
+
+    Exit Round (Total);
+end
+
+/// Reads the run of digits starting at I, or Fallback if there are none.
+///
+/// Private to this unit.
+function NumberAt (MML : String, I : Integer, Fallback : Integer) : Integer;
+begin
+    var N    := 0;
+    var Seen := False;
+
+    while I < Length (MML) do
+    begin
+        var C := MML[I];
+
+        if C < '0' or C > '9' then break;
+
+        N    := N * 10 + Ord (C) - Ord ('0');
+        Seen := True;
+        I    := I + 1;
+    end
+
+    if Seen then Exit N;
+
+    Exit Fallback;
+end
+
+/// How many characters the run of digits at I occupies.
+///
+/// Private to this unit, and separate from `NumberAt` because the language
+/// answers one value and the parser needs both.
+function DigitsAt (MML : String, I : Integer) : Integer;
+begin
+    var N := 0;
+
+    while I + N < Length (MML) do
+    begin
+        var C := MML[I + N];
+
+        if C < '0' or C > '9' then break;
+
+        N := N + 1;
+    end
+
+    Exit N;
+end
+
+/// Turns an MML string into the notes it means, without playing any of them.
+///
+/// Answers a List of three-element Lists: the frequency in hertz as a
+/// rounded Integer, how long the note sounds in milliseconds, and how long to
+/// rest after it. A frequency of 0 is a rest.
+///
+/// This is the whole of `Play` except the playing, which is what makes the
+/// dialect testable: a tune can be asserted note by note with nothing
+/// audible. `Play` performs what this answers.
+///
+/// The dialect is GW-BASIC's, and the reference entry lists it in full.
+///
+/// # Raises
+/// `Play does not know '<c>'.` for a character that is not in the dialect,
+/// and the range messages `Play` documents.
+///
+/// # Examples
+/// `A Score Is The Notes An MML String Means`
+function Score (MML : String) : List;
+begin
+    var Notes  := [];
+    var Octave := 4;
+    var Length4 := 4;              // L, the default note length
+    var Tempo  := 120;
+    var Sound8 := Normal;          // MN, in eighths
+    var I      := 0;
+
+    while I < Length (MML) do
+    begin
+        var C := MML[I];
+
+        // Spaces are ignored, which is what lets a tune be written in bars.
+        if C = ' ' then
+        begin
+            I := I + 1;
+
+            continue;
+        end
+
+        // Lower case means the same as upper, as it did in BASIC.
+        if C >= 'a' then if C <= 'z' then C := Char (Ord (C) - 32);
+
+        I := I + 1;
+
+        if C = 'O' then
+        begin
+            Octave := NumberAt (MML, I, 4);
+            I      := I + DigitsAt (MML, I);
+
+            if Octave < 0 or Octave > 6 then
+                raise 'Play wants an octave from 0 to 6.';
+
+            continue;
+        end
+
+        if C = '>' then
+        begin
+            if Octave < 6 then Octave := Octave + 1;
+
+            continue;
+        end
+
+        if C = '<' then
+        begin
+            if Octave > 0 then Octave := Octave - 1;
+
+            continue;
+        end
+
+        if C = 'L' then
+        begin
+            Length4 := NumberAt (MML, I, 4);
+            I       := I + DigitsAt (MML, I);
+
+            if Length4 < 1 or Length4 > 64 then
+                raise 'Play wants a length from 1 to 64.';
+
+            continue;
+        end
+
+        if C = 'T' then
+        begin
+            Tempo := NumberAt (MML, I, 120);
+            I     := I + DigitsAt (MML, I);
+
+            if Tempo < 32 or Tempo > 255 then
+                raise 'Play wants a tempo from 32 to 255.';
+
+            continue;
+        end
+
+        if C = 'M' then
+        begin
+            if I >= Length (MML) then raise 'Play wants a letter after M.';
+
+            var M := MML[I];
+
+            if M >= 'a' then if M <= 'z' then M := Char (Ord (M) - 32);
+
+            I := I + 1;
+
+            if M = 'L' then Sound8 := Legato;
+            else if M = 'N' then Sound8 := Normal;
+            else if M = 'S' then Sound8 := Staccato;
+            else if M = 'F' then Sound8 := Sound8;      // foreground: the only
+            else if M = 'B' then Sound8 := Sound8;      // way this unit plays
+            else raise 'Play wants L, N, S, F or B after M.';
+
+            continue;
+        end
+
+        if C = 'P' or C = 'R' then
+        begin
+            var PL := NumberAt (MML, I, Length4);
+
+            I := I + DigitsAt (MML, I);
+
+            if PL < 1 or PL > 64 then
+                raise 'Play wants a length from 1 to 64.';
+
+            var Dots := 0;
+
+            while I < Length (MML) do
+            begin
+                if MML[I] <> '.' then break;
+
+                Dots := Dots + 1;
+                I    := I + 1;
+            end
+
+            Notes.Add ([0, NoteMillis (PL, Dots, Tempo), 0]);
+
+            continue;
+        end
+
+        if C = 'N' then
+        begin
+            var Number := NumberAt (MML, I, 0);
+
+            I := I + DigitsAt (MML, I);
+
+            if Number < 0 or Number > 84 then
+                raise 'Play wants a note number from 0 to 84.';
+
+            var Span := NoteMillis (Length4, 0, Tempo);
+            var Held := Span * Sound8 div 8;
+
+            if Number = 0 then Notes.Add ([0, Span, 0]);
+            else Notes.Add ([Round (NoteHertz (11 + Number)), Held,
+                             Span - Held]);
+
+            continue;
+        end
+
+        if C in NoteStep then
+        begin
+            var Sharps := 0;
+
+            // Accidentals first, then the length, then the dots -- which is
+            // the order BASIC wrote them in: C#4. is a dotted sharp quarter.
+            while I < Length (MML) do
+            begin
+                if MML[I] = '#' or MML[I] = '+' then Sharps := Sharps + 1;
+                else if MML[I] = '-' then Sharps := Sharps - 1;
+                else break;
+
+                I := I + 1;
+            end
+
+            var NL := NumberAt (MML, I, Length4);
+
+            I := I + DigitsAt (MML, I);
+
+            if NL < 1 or NL > 64 then
+                raise 'Play wants a length from 1 to 64.';
+
+            var Dots := 0;
+
+            while I < Length (MML) do
+            begin
+                if MML[I] <> '.' then break;
+
+                Dots := Dots + 1;
+                I    := I + 1;
+            end
+
+            var Span := NoteMillis (NL, Dots, Tempo);
+            var Held := Span * Sound8 div 8;
+
+            Notes.Add ([Round (NoteHertz (MidiOf (C, Octave, Sharps))),
+                        Held, Span - Held]);
+
+            continue;
+        end
+
+        raise 'Play does not know ''' + Str (C) + '''.';
+    end
+
+    Exit Notes;
+end
+
+/// Whether two scores hold the same notes.
+///
+/// Private to this unit, and there for its tests: the language compares a
+/// List by identity rather than by content, so two scores built alike are
+/// never equal and have to be walked.
+function SameNotes (A : List, B : List) : Boolean;
+begin
+    if A.Length <> B.Length then Exit False;
+
+    for var I := 0; I < A.Length; I := I + 1 do
+        for var K := 0; K < 3; K := K + 1 do
+            if A[I][K] <> B[I][K] then Exit False;
+
+    Exit True;
+end
+
+/// Plays an MML string, in BASIC's Music Macro Language.
+///
+/// `Play ('T120 O4 L8 CDEFGAB O5 C2')` is a scale. The dialect is GW-BASIC's
+/// and the reference entry lists it in full; briefly, letters are notes, `O`
+/// sets the octave, `L` the default length, `T` the tempo, `P` rests, `>` and
+/// `<` step an octave, and `M` chooses how much of each note actually sounds.
+///
+/// It plays in the foreground: the call takes as long as the tune does, which
+/// is what `MF` meant and is all this unit offers. `MB` is accepted and
+/// ignored rather than refused, so a listing that asks for background music
+/// still plays.
+///
+/// `Score` answers the same notes without playing them, which is how a tune
+/// can be checked.
+///
+/// # Raises
+/// `Score`'s messages, before a note is sounded -- a tune with a fault in it
+/// plays nothing rather than stopping halfway.
+///
+/// # Examples
+/// `A Score Is The Notes An MML String Means`
+procedure Play (MML : String);
+begin
+    // Parsed in full first: a string with a fault at the end should not play
+    // the beginning and then raise.
+    var Notes := Score (MML);
+
+    for var N in Notes do
+    begin
+        if N[0] > 0 then SoundTone (N[0]);
+        else SoundOff ();
+
+        SoundNap (N[1]);
+
+        if N[2] > 0 then
+        begin
+            SoundOff ();
+            SoundNap (N[2]);
+        end
+    end
+
+    SoundOff ();
+end
+
+
+/// Loads an audio file and answers a handle for playing it.
+///
+/// Whatever CoreAudio reads: WAV, AIFF, CAF, MP3 and M4A. The file is decoded
+/// once, up front, so playing it later costs only the mixing -- which is what
+/// a sound effect needs and why this is not done on each play.
+///
+/// The handle is an Integer to pass to `PlaySound`. Sixty-four may be loaded
+/// at once; `FreeSound` gives one back.
+///
+/// # Raises
+/// `LoadSound could not read <path>.` for a file that is missing, is not
+/// audio, is longer than ten minutes, or when sixty-four are already loaded.
+///
+/// # Examples
+/// `A Loaded Sound Reports Its Own Length`
+function LoadSound (Path : String) : Integer;
+begin
+    var Clip := SoundLoad (Path);
+
+    if Clip < 0 then raise 'LoadSound could not read ' + Path + '.';
+
+    Exit Clip;
+end
+
+/// Starts a loaded sound playing, under whatever else is sounding.
+///
+/// Returns at once: a sound effect plays while the program carries on, which
+/// is the whole point of one. Sixteen may sound at a time; a seventeenth is
+/// dropped rather than cutting one short, and answers False.
+///
+/// It also answers False when nothing can be heard at all -- see
+/// `SoundAvailable` -- since there is no voice to start on a device that was
+/// never opened.
+///
+/// Volume is 0 to 255 and is this sound's own, not the tone's.
+///
+/// # Raises
+/// `PlaySound wants a sound from LoadSound.`
+///
+/// # Examples
+/// `A Loaded Sound Reports Its Own Length`
+function PlaySound (Clip : Integer, Volume : Integer) : Boolean;
+begin
+    if SoundFrames (Clip) < 0 then
+        raise 'PlaySound wants a sound from LoadSound.';
+
+    Exit SoundStart (Clip, Volume) <> 0;
+end
+
+/// How long a loaded sound lasts, in milliseconds.
+///
+/// # Raises
+/// `SoundLength wants a sound from LoadSound.`
+///
+/// # Examples
+/// `A Loaded Sound Reports Its Own Length`
+function SoundLength (Clip : Integer) : Integer;
+begin
+    var Frames := SoundFrames (Clip);
+
+    if Frames < 0 then raise 'SoundLength wants a sound from LoadSound.';
+
+    Exit Frames * 1000 div SoundRate ();
+end
+
+/// Whether a loaded sound is still playing.
+///
+/// # Raises
+/// `SoundPlaying wants a sound from LoadSound.`
+function SoundPlaying (Clip : Integer) : Boolean;
+begin
+    if SoundFrames (Clip) < 0 then
+        raise 'SoundPlaying wants a sound from LoadSound.';
+
+    Exit SoundBusy (Clip) <> 0;
+end
+
+/// Stops every sound effect at once, leaving the tone sounding.
+procedure StopSounds ();
+begin
+    SoundHush ();
+end
+
+/// Forgets a loaded sound and gives its memory back.
+///
+/// Anything playing it stops. The handle is not a sound afterward, and using
+/// it raises.
+///
+/// # Raises
+/// `FreeSound wants a sound from LoadSound.`
+procedure FreeSound (Clip : Integer);
+begin
+    if SoundFrames (Clip) < 0 then
+        raise 'FreeSound wants a sound from LoadSound.';
+
+    SoundForget (Clip);
+end
+
+/// Stops everything, forgets every loaded sound, and closes the device.
+///
+/// Worth calling at the end of a program, and harmless when nothing is open.
+procedure CloseSound ();
+begin
+    SoundShut ();
+end
+
+
+test 'Sound And NoSound Turn A Tone On And Off';
+begin
+    // Under ALG_SOUND=dummy nothing is heard, but everything else happens --
+    // which is what lets this run in a test suite without filling the room.
+    Sound (440);
+    NoSound ();
+
+    SetVolume (128);
+    SetVolume (0 - 20);          // clamped rather than refused
+    SetVolume (900);
+
+    var Message := '';
+
+    try Sound (0); except on e : String do Message := e; end
+    AssertEqual ('Sound wants a frequency above zero.', Message);
+
+    Message := '';
+    try Sound (0 - 440); except on e : String do Message := e; end
+    AssertEqual ('Sound wants a frequency above zero.', Message);
+
+    NoSound ();
+end
+
+test 'A Silent Device Still Keeps Time';
+begin
+    // The suite runs with ALG_SOUND=dummy, so nothing can be heard -- and
+    // everything still takes exactly as long, which is what makes a tune's
+    // timing testable at all.
+    AssertTrue (not SoundAvailable ());
+
+    var Start := clock ();
+
+    Play ('T240 L4 C');          // a quarter note at 240 is 250ms
+
+    var Took := clock () - Start;
+
+    AssertTrue (Took >= 0.2);
+    AssertTrue (Took < 1.5);
+end
+
+test 'A Score Is The Notes An MML String Means';
+begin
+    // Middle C, and A above it, which are the two frequencies everything
+    // else is measured against.
+    AssertEqual (262, Score ('C')[0][0]);
+    AssertEqual (440, Score ('A')[0][0]);
+    AssertEqual (262, Score ('O4C')[0][0]);
+    AssertEqual (523, Score ('O5C')[0][0]);
+    AssertEqual (131, Score ('O3C')[0][0]);
+
+    // A quarter note at 120 to the minute is half a second, of which MN
+    // sounds seven eighths and rests for the last.
+    var Q := Score ('T120 L4 C')[0];
+
+    AssertEqual (437, Q[1]);
+    AssertEqual (63, Q[2]);
+    AssertEqual (500, Q[1] + Q[2]);
+
+    // Halve the tempo and everything takes twice as long.
+    var H := Score ('T60 L4 C')[0];
+
+    AssertEqual (1000, H[1] + H[2]);
+
+    // And the length divides it: an eighth is half a quarter.
+    AssertEqual (250, Score ('T120 L8 C')[0][1] + Score ('T120 L8 C')[0][2]);
+    AssertEqual (2000, Score ('T120 L1 C')[0][1] + Score ('T120 L1 C')[0][2]);
+end
+
+test 'Accidentals Move A Note By A Semitone';
+begin
+    // C sharp is one semitone up and C flat is one down, which lands on the
+    // B below -- the same note D flat and B natural would give.
+    AssertEqual (277, Score ('C#')[0][0]);
+    AssertEqual (277, Score ('C+')[0][0]);
+    AssertEqual (247, Score ('C-')[0][0]);
+    AssertEqual (Score ('C#')[0][0], Score ('D-')[0][0]);
+    AssertEqual (Score ('C-')[0][0], Score ('O3B')[0][0]);
+
+    // Doubled accidentals stack, as they did.
+    AssertEqual (Score ('D')[0][0], Score ('C##')[0][0]);
+end
+
+test 'Dots Add Half Of What Came Before';
+begin
+    var Plain  := Score ('T120 L4 C')[0];
+    var Dotted := Score ('T120 L4 C.')[0];
+    var Double := Score ('T120 L4 C..')[0];
+
+    AssertEqual (500, Plain[1] + Plain[2]);
+    AssertEqual (750, Dotted[1] + Dotted[2]);
+    AssertEqual (875, Double[1] + Double[2]);
+
+    // A length written on the note overrides L for that note only.
+    var Two := Score ('T120 L4 C8 D');
+
+    AssertEqual (250, Two[0][1] + Two[0][2]);
+    AssertEqual (500, Two[1][1] + Two[1][2]);
+end
+
+test 'Articulation Says How Much Of A Note Sounds';
+begin
+    // Legato fills the whole length, normal leaves an eighth of silence, and
+    // staccato leaves a quarter -- which is what makes a repeated note
+    // audible as two notes rather than one long one.
+    AssertEqual (500, Score ('ML T120 L4 C')[0][1]);
+    AssertEqual (0, Score ('ML T120 L4 C')[0][2]);
+
+    AssertEqual (437, Score ('MN T120 L4 C')[0][1]);
+    AssertEqual (375, Score ('MS T120 L4 C')[0][1]);
+
+    // Whatever the articulation, the note occupies its full length: the
+    // tempo of a tune must not depend on how it is phrased.
+    for var Mode in ['ML', 'MN', 'MS'] do
+    begin
+        var N := Score (Mode + ' T120 L4 C')[0];
+
+        AssertEqual (500, N[1] + N[2]);
+    end
+
+    // MF and MB are accepted and change nothing: this unit plays in the
+    // foreground, and a listing that asks for background music should still
+    // play rather than being refused.
+    AssertTrue (SameNotes (Score ('T120 L4 C'), Score ('MF T120 L4 C')));
+    AssertTrue (SameNotes (Score ('T120 L4 C'), Score ('MB T120 L4 C')));
+end
+
+test 'Octaves Step Up And Down And Stop At The Ends';
+begin
+    AssertEqual (Score ('O5C')[0][0], Score ('O4 >C')[0][0]);
+    AssertEqual (Score ('O3C')[0][0], Score ('O4 <C')[0][0]);
+
+    // Clamped rather than wrapped: stepping past the top should stay at the
+    // top, not drop six octaves.
+    AssertEqual (Score ('O6C')[0][0], Score ('O6 >C')[0][0]);
+    AssertEqual (Score ('O0C')[0][0], Score ('O0 <C')[0][0]);
+end
+
+test 'A Rest Occupies Time And Sounds Nothing';
+begin
+    var R := Score ('T120 P4')[0];
+
+    AssertEqual (0, R[0]);
+    AssertEqual (500, R[1]);
+
+    // R is P's other spelling, and a rest takes L when given no length.
+    AssertTrue (SameNotes (Score ('T120 P4'), Score ('T120 R4')));
+    AssertEqual (500, Score ('T120 L4 P')[0][1]);
+    AssertEqual (750, Score ('T120 P4.')[0][1]);
+end
+
+test 'A Note Number Names The Same Note Its Letter Does';
+begin
+    // N counts semitones from the bottom of octave 0, so the two spellings
+    // have to agree or one of them is wrong.
+    AssertEqual (Score ('O0C')[0][0], Score ('N1')[0][0]);
+    AssertEqual (Score ('O4C')[0][0], Score ('N49')[0][0]);
+    AssertEqual (Score ('O4A')[0][0], Score ('N58')[0][0]);
+
+    // N0 is a rest.
+    AssertEqual (0, Score ('N0')[0][0]);
+end
+
+test 'A Tune Reads The Way It Is Written';
+begin
+    var Scale := Score ('T120 O4 L8 CDEFGAB O5 C2');
+
+    AssertEqual (8, Scale.Length);
+
+    // Rising throughout, and the last note an octave above the first.
+    for var I := 1; I < Scale.Length; I := I + 1 do
+        AssertTrue (Scale[I][0] > Scale[I - 1][0]);
+
+    // An octave up is twice the frequency, but 261.63 doubled and then
+    // rounded is 523, where 262 doubled is 524 -- rounding once is not
+    // rounding twice, so this asserts the note rather than the arithmetic.
+    AssertEqual (523, Scale[7][0]);
+    AssertTrue (Scale[7][0] * 2 > Scale[0][0] * 3);
+
+    // Spaces are ignored, so a tune may be written in bars.
+    AssertTrue (SameNotes (Score ('T120L8CDEFGAB'),
+                           Score ('T120 L8 CD EF GAB')));
+
+    // And lower case means the same as upper, as it did in BASIC.
+    AssertTrue (SameNotes (Score ('T120 O4 L8 CDE'),
+                           Score ('t120 o4 l8 cde')));
+end
+
+test 'Play Refuses A Faulty Tune Before Sounding Any Of It';
+begin
+    var Message := '';
+
+    try Score ('CDE$'); except on e : String do Message := e; end
+    AssertEqual ('Play does not know ''$''.', Message);
+
+    Message := '';
+    try Score ('O9C'); except on e : String do Message := e; end
+    AssertEqual ('Play wants an octave from 0 to 6.', Message);
+
+    Message := '';
+    try Score ('L99C'); except on e : String do Message := e; end
+    AssertEqual ('Play wants a length from 1 to 64.', Message);
+
+    Message := '';
+    try Score ('T20C'); except on e : String do Message := e; end
+    AssertEqual ('Play wants a tempo from 32 to 255.', Message);
+
+    Message := '';
+    try Score ('N99'); except on e : String do Message := e; end
+    AssertEqual ('Play wants a note number from 0 to 84.', Message);
+
+    Message := '';
+    try Score ('MX C'); except on e : String do Message := e; end
+    AssertEqual ('Play wants L, N, S, F or B after M.', Message);
+
+    // The whole string is parsed before a note is sounded, so a tune with a
+    // fault at the end plays nothing rather than stopping halfway.
+    var Start := clock ();
+
+    Message := '';
+    try Play ('T240 L1 CDEFGAB$'); except on e : String do Message := e; end
+
+    AssertEqual ('Play does not know ''$''.', Message);
+    AssertTrue (clock () - Start < 0.5);
+end
+
+test 'A Loaded Sound Reports Its Own Length';
+begin
+    // A file every Mac has, this unit being macOS-bound anyway. Decoding is
+    // the one thing ALG_SOUND=dummy does not skip, so the length is real
+    // even in a silent run.
+    var Ping := LoadSound ('/System/Library/Sounds/Ping.aiff');
+
+    AssertTrue (Ping >= 0);
+
+    var Millis := SoundLength (Ping);
+
+    // Not asserted to the millisecond, which would break on a macOS that
+    // ships a different recording -- but a real decode of a real chime, and
+    // not a zero or a wild number.
+    AssertTrue (Millis > 200);
+    AssertTrue (Millis < 10000);
+
+    // Nothing is sounding until something starts it, and nothing can start
+    // on a device that was never opened.
+    AssertTrue (not SoundPlaying (Ping));
+    AssertTrue (not PlaySound (Ping, 200));
+
+    FreeSound (Ping);
+
+    // Freed, the handle is not a sound any more.
+    var Message := '';
+
+    try SoundLength (Ping); except on e : String do Message := e; end
+    AssertEqual ('SoundLength wants a sound from LoadSound.', Message);
+end
+
+test 'The Loaded Sound Verbs Refuse A Handle That Is Not One';
+begin
+    var Message := '';
+
+    try PlaySound (99, 200); except on e : String do Message := e; end
+    AssertEqual ('PlaySound wants a sound from LoadSound.', Message);
+
+    Message := '';
+    try SoundLength (99); except on e : String do Message := e; end
+    AssertEqual ('SoundLength wants a sound from LoadSound.', Message);
+
+    Message := '';
+    try SoundPlaying (0 - 1); except on e : String do Message := e; end
+    AssertEqual ('SoundPlaying wants a sound from LoadSound.', Message);
+
+    Message := '';
+    try FreeSound (99); except on e : String do Message := e; end
+    AssertEqual ('FreeSound wants a sound from LoadSound.', Message);
+
+    Message := '';
+    try LoadSound ('no-such-file.wav'); except on e : String do Message := e; end
+    AssertEqual ('LoadSound could not read no-such-file.wav.', Message);
+
+    // Stopping and closing are harmless when nothing is loaded or open.
+    StopSounds ();
+    CloseSound ();
+end

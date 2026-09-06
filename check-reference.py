@@ -76,7 +76,7 @@ def main():
             argv = ['algc', '--test', path] if in_test_mode else ['algc', path]
 
             # graph examples open windows; the dummy driver opens them nowhere.
-            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy', ALG_SOUND='dummy')
             result = subprocess.run(argv, capture_output=True, text=True,
                                     cwd=work, env=env)
 

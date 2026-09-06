@@ -306,6 +306,23 @@ alike — `(1, 1)` is home, `GotoXY (TextCols (), TextRows ())` the far corner,
 `GetMaxX ()` the width itself — while the language's strings stay 0-based;
 the seam is `Text[Col - 1]`, at the memory boundary. `examples/ide.a24` is
 the acceptance piece — the Turbo C++ screen rebuilt from the vocabulary.
+| `sound` | `Sound`, `NoSound`, `SetVolume`, `Delay`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 13 | complete |
+
+⚠️ **Sound is its own unit for a portability reason, and must stay there.**
+`soundffi.c` reaches CoreAudio, which is a system framework on macOS and
+exists nowhere else. `crt` calls only POSIX -- termios, ioctl, nanosleep --
+and would build on Linux tomorrow but for the hardcoded `.dylib`; folding the
+noise into it would narrow that unit to one operating system for the sake of a
+beep. `Delay` is in all three units because it involves no audio at all.
+
+`sound` notes: `ALG_SOUND=dummy` computes everything and plays nothing, which
+`test.sh` and `check-reference.py` both set -- the same bargain
+`SDL_VIDEODRIVER=dummy` strikes for `graph`. Under it `Play` still takes
+exactly as long and `LoadSound` still decodes, but `PlaySound` answers False,
+there being no voice to start on a device that was never opened. `Score`
+answers an MML string's notes without sounding them, which is what makes the
+dialect testable. `build.sh` links CoreAudio frameworks for `soundffi.c` only,
+and `examples/build.sh --static` does the same.
 
 ⚠️ **`crt` duplicates `graph`'s constants deliberately, and must not be
 refactored to share them.** `uses` is **not transitive**: a program saying
@@ -329,11 +346,14 @@ cube otherwise. `Blink` is the terminal's own cadence, so there is no
 `examples/ide-crt.a24` is the acceptance piece — `examples/ide.a24` with three
 lines changed.
 
-⚠️ **Language points `crt` learned the hard way**: it is `Char (65)`, not
-`Chr`; `#0` is **not a Char**, so NUL cannot be a sentinel; `List` has no
-`Remove`, so a queue keeps a head index; `Buffer` addresses **words only**,
-with no `GetByte`; and `end` before `else` takes **no** semicolon, where a
-simple statement before `else` takes one.
+⚠️ **Language points `crt` and `sound` learned the hard way**: it is
+`Char (65)`, not `Chr`; `#0` is **not a Char**, so NUL cannot be a sentinel;
+`List` has no `Remove`, so a queue keeps a head index; `Buffer` addresses
+**words only**, with no `GetByte`; `end` before `else` takes **no** semicolon,
+where a simple statement before `else` takes one; a one-character map key is a
+**Char**, so `Str (C) in Map` never matches a `'C' : 0` entry; and **Lists and
+Maps compare by identity, not by content** -- `AssertEqual` on two
+equal-looking Lists always fails, so a comparison has to walk them.
 
 `examples/statistics.a24` is the worked application — built by
 `examples/build.sh`, verified by `examples/check.sh`, explained in

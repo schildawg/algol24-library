@@ -1128,6 +1128,21 @@ begin
     Exit ScreenRows;
 end
 
+/// Waits for Millis milliseconds.
+///
+/// Turbo Pascal's `Delay`, and it needs no terminal: a program with its output
+/// piped waits just the same. Zero or less returns at once rather than
+/// waiting forever, and this does not need `InitCrt`.
+///
+/// It sleeps rather than spinning, so waiting costs nothing.
+///
+/// # Examples
+/// `Delay Waits About As Long As It Is Asked To`
+procedure Delay (Millis : Integer);
+begin
+    CrtNap (Millis);
+end
+
 /// Whether this screen is painting a real terminal.
 ///
 /// False when standard output is a file or a pipe, in which case everything
@@ -2262,6 +2277,30 @@ begin
 
     CrtNap (0);
     CrtNap (0 - 5);
+
+    AssertTrue (clock () - Before < 0.05);
+end
+
+test 'Delay Waits About As Long As It Is Asked To';
+begin
+    // The language's clock answers SECONDS, so sixty milliseconds is six
+    // hundredths -- reading it as milliseconds makes every duration here
+    // wrong by a thousand.
+    var Start := clock ();
+
+    Delay (60);
+
+    var Slept := clock () - Start;
+
+    AssertTrue (Slept >= 0.05);
+    AssertTrue (Slept < 2.0);
+
+    // It needs no terminal and no InitCrt, and a senseless wait returns at
+    // once rather than never.
+    var Before := clock ();
+
+    Delay (0);
+    Delay (0 - 5);
 
     AssertTrue (clock () - Before < 0.05);
 end

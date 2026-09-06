@@ -1090,6 +1090,26 @@ begin
     AspectSet    := 0.0;
 end
 
+/// Waits for Millis milliseconds.
+///
+/// Turbo Pascal's `Delay`, and it needs no window: a program that has not
+/// called `InitGraph` waits just the same. Zero or less returns at once
+/// rather than waiting forever.
+///
+/// It sleeps rather than spinning, so waiting costs nothing. Nothing is
+/// presented while it waits, and no key is collected -- a program that wants
+/// to stay responsive should wait in short steps and pump `KeyPressed`
+/// between them.
+///
+/// # Examples
+/// `Delay Waits About As Long As It Is Asked To`
+procedure Delay (Millis : Integer);
+begin
+    if Millis <= 0 then Exit;
+
+    SDL_Delay (Millis);
+end
+
 /// The highest X a program can draw to, which is the window's width.
 ///
 /// The screen counts from 1, pixels and cells alike, so the count is the last
@@ -11396,6 +11416,29 @@ begin
     AssertEqual (100, ImageSize (1, 1, 5, 5));
 
     CloseGraph ();
+end
+
+test 'Delay Waits About As Long As It Is Asked To';
+begin
+    // The language's clock answers SECONDS, so sixty milliseconds is six
+    // hundredths of one.
+    var Start := clock ();
+
+    Delay (60);
+
+    var Slept := clock () - Start;
+
+    AssertTrue (Slept >= 0.05);
+    AssertTrue (Slept < 2.0);
+
+    // A senseless wait returns at once rather than never, and none of this
+    // needs a window.
+    var Before := clock ();
+
+    Delay (0);
+    Delay (0 - 5);
+
+    AssertTrue (clock () - Before < 0.05);
 end
 
 test 'The Exclusive Or Primitive Answers Known Values';
