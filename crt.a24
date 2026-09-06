@@ -1,0 +1,2360 @@
+/// Text mode on a terminal: the same screen `graph` draws, without pixels.
+///
+/// `graph` is one world -- celled text on a grid with graphics stacked around
+/// it -- and this is that world with the graphics half removed and a terminal
+/// underneath instead of a window. The vocabulary is the same: `Write`,
+/// `GotoXY`, `TextColor`, the `Window` class stacked by `Order`, palettes,
+/// `ReadKey`. A program written against one reads as a program written
+/// against the other, which is the point.
+///
+/// The differences are the ones a terminal forces. The screen is the size the
+/// terminal actually is, asked afresh rather than fixed, so `TextCols` and
+/// `TextRows` answer whatever window the program was run in and follow a
+/// resize. There is no `Alpha` blending, a cell being one character; `Alpha`
+/// survives as visible or invisible. `Blink` is the terminal's own, so there
+/// is no `SetBlinkRate` to set a cadence this unit does not own.
+///
+/// The screen is composited in memory and painted by difference, so a frame
+/// that changes six cells sends six cells. Nothing reaches the terminal at
+/// all unless standard output is one, which is what lets a program's own
+/// output stay clean when it is piped, and what lets this unit's tests read a
+/// finished screen back without a byte escaping.
+///
+/// `System.Write` and `System.WriteLn` reach the same terminal this unit is
+/// painting, so a program that calls them while the screen is up will see
+/// them land in the middle of it. Close the screen first, or write to a file.
+unit crt;
+
+/// Whether standard output is a terminal.
+///
+/// Private to this unit. Nothing is emitted when it is not, so a piped run
+/// produces its own output and nothing else.
+function CrtIsTty () : Integer;
+    external 'alg_crt_istty' in 'libcrtffi.dylib';
+
+/// The terminal's width in cells, right now.
+///
+/// Private to this unit, and asked afresh each time rather than cached, which
+/// is how a resize is noticed without a signal handler.
+function CrtCols () : Integer;
+    external 'alg_crt_cols' in 'libcrtffi.dylib';
+
+/// The terminal's height in cells, right now.
+///
+/// Private to this unit.
+function CrtRows () : Integer;
+    external 'alg_crt_rows' in 'libcrtffi.dylib';
+
+/// Whether the terminal has said it can do 24-bit color.
+///
+/// Private to this unit. COLORTERM is the only thing that says so reliably;
+/// answering no is never wrong, only duller.
+function CrtTrueColor () : Integer;
+    external 'alg_crt_truecolor' in 'libcrtffi.dylib';
+
+/// Puts the terminal into or out of character-at-a-time mode.
+///
+/// Private to this unit. The old settings are kept in the C so that leaving
+/// restores exactly what was found.
+function CrtRaw (On : Integer) : Integer;
+    external 'alg_crt_raw' in 'libcrtffi.dylib';
+
+/// One byte of input, or -1 when none is waiting.
+///
+/// Private to this unit, and never blocking -- a blocking read here would
+/// make `KeyPressed` a lie.
+function CrtGetch () : Integer;
+    external 'alg_crt_getch' in 'libcrtffi.dylib';
+
+/// Sleeps for a few milliseconds.
+///
+/// Private to this unit. `ReadKey` may wait a long time for a key, and the
+/// language has no sleep of its own -- `graph` delays through SDL, and this
+/// unit has no SDL to delay through.
+procedure CrtNap (Millis : Integer);
+    external 'alg_crt_nap' in 'libcrtffi.dylib';
+
+/// Writes bytes to the terminal exactly, with no newline and no buffering.
+///
+/// Private to this unit. The language's own `Write` cannot do either, and a
+/// screen painter needs both.
+procedure CrtWrite (Text : Pointer);
+    external 'alg_crt_write' in 'libcrtffi.dylib';
+
+/// Writes a String to the terminal exactly, with no newline.
+///
+/// Private to this unit, and the same C function as `CrtWrite` under a second
+/// declaration: a String arrives as the bytes it holds, where the painter's
+/// scratch buffer arrives as an address. Two spellings of one primitive is
+/// cheaper than making the unit convert between them.
+procedure CrtSend (Text : String);
+    external 'alg_crt_write' in 'libcrtffi.dylib';
+
+/// Empties every cell of a screen before the surfaces are laid over it.
+///
+/// Private to this unit.
+procedure ClearCells (Screen : Pointer, Cells : Integer, Ink : Integer);
+    external 'alg_crt_clear' in 'libcrtffi.dylib';
+
+/// Lays one surface's cells into the screen.
+///
+/// Private to this unit. Called for each surface lowest first, so the topmost
+/// writer of a cell wins; an opaque background clears the glyph under it.
+procedure BlitCells (Screen : Pointer, SCols : Integer, SRows : Integer,
+                     Src : Pointer, WCols : Integer, WRows : Integer,
+                     X1 : Integer, Y1 : Integer);
+    external 'alg_crt_blit' in 'libcrtffi.dylib';
+
+/// Turns the cells that differ from the last painted screen into escapes.
+///
+/// Private to this unit. Answers how many cells were repainted, and fills the
+/// scratch buffer rather than writing it -- this unit decides whether
+/// anything reaches the terminal.
+function PaintCells (Cells : Pointer, Prev : Pointer, Out : Pointer,
+                     Cols : Integer, Rows : Integer,
+                     TrueColor : Integer) : Integer;
+    external 'alg_crt_paint' in 'libcrtffi.dylib';
+
+
+/// The sixteen colors of a CGA text screen, by their Turbo Pascal names.
+///
+/// The same sixteen values `graph` declares, and deliberately a second copy
+/// rather than a shared unit: `uses` is not transitive here, so a program
+/// saying `uses crt` would otherwise have to say `uses` of the shared unit as
+/// well merely to write `LightCyan`. One import for the thing you actually
+/// want is worth more than one definition.
+const Black        := 0;
+const Blue         := 170;
+const Green        := 43520;
+const Cyan         := 43690;
+const Red          := 11141120;
+const Magenta      := 11141290;
+const Brown        := 11162880;
+const LightGray    := 11184810;
+const DarkGray     := 5592405;
+const LightBlue    := 5592575;
+const LightGreen   := 5635925;
+const LightCyan    := 5636095;
+const LightRed     := 16733525;
+const LightMagenta := 16733695;
+const Yellow       := 16777045;
+const White        := 16777215;
+
+/// The background of a cell that has none: what is beneath it shows.
+///
+/// A named value rather than a color, because 0 is a legitimate black. At the
+/// bottom of the stack it is the terminal's own background, whatever the user
+/// has set that to.
+const Transparent := -1;
+
+/// The blink flag, added onto a TextColor.
+///
+/// `TextColor (LightRed + Blink)` asks the terminal to blink the ink. Bit 24,
+/// as in `graph`, so the spelling carries between the two units.
+///
+/// The terminal owns the cadence here, where `graph` owns its own -- which is
+/// why there is no `SetBlinkRate`. Some terminals ignore blinking entirely,
+/// and this unit cannot make them do otherwise.
+const Blink := 16777216;
+
+/// The keys that are not characters, each as one Char of its own.
+///
+/// The same values `graph` uses, in Unicode's private use area, so a key
+/// comparison written for one unit holds in the other.
+const KeyUp     := #57344;
+const KeyDown   := #57345;
+const KeyLeft   := #57346;
+const KeyRight  := #57347;
+const KeyHome   := #57348;
+const KeyEnd    := #57349;
+const KeyPgUp   := #57350;
+const KeyPgDn   := #57351;
+const KeyIns    := #57352;
+const KeyDel    := #57353;
+const KeyF1     := #57360;
+const KeyF2     := #57361;
+const KeyF3     := #57362;
+const KeyF4     := #57363;
+const KeyF5     := #57364;
+const KeyF6     := #57365;
+const KeyF7     := #57366;
+const KeyF8     := #57367;
+const KeyF9     := #57368;
+const KeyF10    := #57369;
+const KeyF11    := #57370;
+const KeyF12    := #57371;
+const KeyClose  := #57384;
+
+
+// The four words of a cell: the codepoint, the ink, the background and the
+// flags. A codepoint of 0 is an empty cell, which is not the same as a space
+// -- a space paints its background over what is beneath, an empty cell lets
+// it through.
+const CellWords := 4;
+
+// The intensity pairs of the CGA palette, both ways. Brown's partner is
+// Yellow rather than a brighter brown, because the original adapter's brown
+// was a special circuit and the bright version of that slot came out yellow.
+var BrightPartner := [Black : DarkGray,   Blue    : LightBlue,
+                      Green : LightGreen, Cyan    : LightCyan,
+                      Red   : LightRed,   Magenta : LightMagenta,
+                      Brown : Yellow,     LightGray : White];
+var DimPartner    := [DarkGray  : Black,  LightBlue    : Blue,
+                      LightGreen : Green, LightCyan    : Cyan,
+                      LightRed  : Red,    LightMagenta : Magenta,
+                      Yellow    : Brown,  White        : LightGray];
+
+/// The sixteen color names, as the values they are.
+///
+/// Private to this unit, and what `SetPalette` checks a map's keys against.
+var PaletteNames := [Black, Blue, Green, Cyan, Red, Magenta, Brown, LightGray,
+                     DarkGray, LightBlue, LightGreen, LightCyan, LightRed,
+                     LightMagenta, Yellow, White];
+
+// The surfaces, the screen they composite onto, and what was last painted.
+var Surfaces   := [];
+var Root       := nil;
+var NextSerial := 1;
+var Started    := False;
+var Emitting   := False;
+var TrueColor  := False;
+var ScreenCols := 0;
+var ScreenRows := 0;
+var Screen     := nil;
+var Painted    := nil;
+var Escapes    := nil;
+
+// What ReadKey has decoded and not yet handed out, and how far into it the
+// reader has got. A head index rather than a removal, the language's List
+// having no Remove -- and the queue is emptied once it is spent.
+var KeyQueue := [];
+var KeyHead  := 0;
+
+
+/// The bright partner of a palette color, or the color itself.
+///
+/// Private to this unit, typed because a map read answers Any and a written
+/// type refuses it.
+function BrightOf (C : Integer) : Integer;
+begin
+    if C in BrightPartner then Exit BrightPartner[C];
+
+    Exit C;
+end
+
+/// The dim partner of a palette color, or the color itself.
+///
+/// Private to this unit, on BrightOf's reasoning.
+function DimOf (C : Integer) : Integer;
+begin
+    if C in DimPartner then Exit DimPartner[C];
+
+    Exit C;
+end
+
+/// What one palette entry says, typed.
+///
+/// Private to this unit, and separate only because a map read answers Any.
+function ThemedTo (Palette : Map, Name : Integer) : Integer;
+begin
+    Exit Palette[Name];
+end
+
+/// What a color means under a palette, which for most colors is itself.
+///
+/// Private to this unit, and the whole of the palette mechanism. A color
+/// equal to one of the sixteen is a name and is rebound; anything else is a
+/// literal and passes through. Transparent is not a color and has no entry.
+/// Blink is bit 24 added to an ink, so it is set aside and put back.
+function Themed (Palette : Map, Color : Integer) : Integer;
+begin
+    if Color < 0 then Exit Color;
+
+    var Flag := 0;
+    var Bare := Color;
+
+    if Bare >= Blink then
+    begin
+        Flag := Blink;
+        Bare := Bare - Blink;
+    end
+
+    if Bare in Palette then Exit ThemedTo (Palette, Bare) + Flag;
+
+    Exit Color;
+end
+
+/// A palette checked over, or a raise saying what is wrong with it.
+///
+/// Private to this unit.
+procedure CheckPalette (Palette : Map);
+begin
+    for var Name in Palette do
+    begin
+        if not (Name in PaletteNames) then
+            raise 'SetPalette wants one of the sixteen color names as a key.';
+
+        if ThemedTo (Palette, Name) < 0 then raise 'SetPalette wants RGB colors.';
+        if ThemedTo (Palette, Name) > 16777215 then
+            raise 'SetPalette wants RGB colors.';
+    end
+end
+
+/// A palette copied, so what a caller holds cannot change what a surface
+/// draws.
+///
+/// Private to this unit.
+function CopyPalette (Palette : Map) : Map;
+begin
+    var Copy := [:];
+
+    for var Name in Palette do
+        Copy[Name] := ThemedTo (Palette, Name);
+
+    Exit Copy;
+end
+
+
+/// A rectangle of text cells with a place in the stack.
+///
+/// `graph`'s Window, on a terminal. It owns its own cells, its own cursor and
+/// its own colors, wraps and scrolls within its own walls, and stacks by
+/// `Order` -- negative under the screen, positive over it.
+///
+/// `Alpha` is 0 for invisible and anything else for visible. A terminal cell
+/// holds one character and cannot be blended, so the field survives with the
+/// only meaning a terminal can give it.
+class Window;
+var
+    X1     : Integer;
+    Y1     : Integer;
+    X2     : Integer;
+    Y2     : Integer;
+    Cols   : Integer;
+    Rows   : Integer;
+    Cells  : Any;
+    CurCol : Integer;
+    CurRow : Integer;
+    Pending : Boolean;
+    Ink    : Integer;
+    Back   : Integer;
+    InkAsked  : Integer;
+    BackAsked : Integer;
+    Palette : Map;
+    Blinking : Boolean;
+    Order  : Integer;
+    Alpha  : Integer;
+    Serial : Integer;
+    Dead   : Boolean;
+
+begin
+    constructor Init (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
+                      Order : Integer);
+    begin
+        if not Started then raise 'Crt is not open.';
+        if Order = 0 then raise 'Order 0 is the screen''s.';
+        if X1 < 1 or Y1 < 1 or X2 < X1 or Y2 < Y1 then
+            raise 'Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.';
+
+        // A parameter shadows the field of the same name, so the fields are
+        // reached through `this` -- which lets a caller write
+        // `Window (X1: 1, ...)` from the reference.
+        this.X1 := X1;
+        this.Y1 := Y1;
+        this.X2 := X2;
+        this.Y2 := Y2;
+        Cols := X2 - X1 + 1;
+        Rows := Y2 - Y1 + 1;
+
+        this.Order := Order;
+        Alpha     := 255;
+        Ink       := LightGray;
+        Back      := Transparent;
+        InkAsked  := LightGray;
+        BackAsked := Transparent;
+        Palette   := [:];
+        Blinking  := False;
+        CurCol    := 1;
+        CurRow    := 1;
+        Pending   := False;
+        Dead      := False;
+        Serial    := NextSerial;
+
+        NextSerial := NextSerial + 1;
+
+        Cells := Buffer (Cols * Rows * CellWords * 4);
+
+        ClearCells (Cells.Address, Cols * Rows, Ink);
+
+        Surfaces.Add (this);
+    end
+
+    /// Raises when CloseCrt has taken the screen away.
+    procedure Check ();
+    begin
+        if Dead then raise 'CloseCrt has closed this surface.';
+    end
+
+    /// Marks the surface dead; it is unusable thereafter.
+    procedure Discard ();
+    begin
+        Dead := True;
+    end
+
+    /// Moves the window so its top-left cell is at Col, Row.
+    ///
+    /// The window, not the cursor: `GotoXY` moves that.
+    procedure MoveTo (Col : Integer, Row : Integer);
+    begin
+        Check ();
+
+        X2 := Col + Cols - 1;
+        Y2 := Row + Rows - 1;
+        X1 := Col;
+        Y1 := Row;
+    end
+
+    /// The flag word a cell of this window carries.
+    ///
+    /// Private to this unit.
+    function Flags () : Integer;
+    begin
+        if Blinking then Exit 1;
+
+        Exit 0;
+    end
+
+    /// Writes one cell of this window, in its own coordinates from 1.
+    ///
+    /// Private to this unit. A cell off the window is dropped silently, the
+    /// edge being the clip as it is for every surface here.
+    procedure PutCell (Col : Integer, Row : Integer, Code : Integer);
+    begin
+        if Col < 1 or Row < 1 or Col > Cols or Row > Rows then Exit;
+
+        var At := ((Row - 1) * Cols + (Col - 1)) * CellWords * 4;
+
+        Cells.PutInt (At, Code);
+        Cells.PutInt (At + 4, Ink);
+        Cells.PutInt (At + 8, Back);
+        Cells.PutInt (At + 12, Flags ());
+    end
+
+    /// The codepoint in one cell of this window, or 0 where it has none.
+    function CellAt (Col : Integer, Row : Integer) : Integer;
+    begin
+        Check ();
+
+        if Col < 1 or Row < 1 or Col > Cols or Row > Rows then Exit 0;
+
+        Exit Cells.GetInt (((Row - 1) * Cols + (Col - 1)) * CellWords * 4);
+    end
+
+    /// The ink one cell of this window was written in.
+    function InkAt (Col : Integer, Row : Integer) : Integer;
+    begin
+        Check ();
+
+        if Col < 1 or Row < 1 or Col > Cols or Row > Rows then Exit Transparent;
+
+        Exit Cells.GetInt (((Row - 1) * Cols + (Col - 1)) * CellWords * 4 + 4);
+    end
+
+    /// The background one cell of this window was written on.
+    function BackAt (Col : Integer, Row : Integer) : Integer;
+    begin
+        Check ();
+
+        if Col < 1 or Row < 1 or Col > Cols or Row > Rows then Exit Transparent;
+
+        Exit Cells.GetInt (((Row - 1) * Cols + (Col - 1)) * CellWords * 4 + 8);
+    end
+
+    /// Puts the cursor at Col, Row of this window.
+    procedure GotoXY (Col : Integer, Row : Integer);
+    begin
+        Check ();
+
+        if Col < 1 or Row < 1 or Col > Cols or Row > Rows then
+            raise 'GotoXY is off the grid.';
+
+        CurCol  := Col;
+        CurRow  := Row;
+        Pending := False;
+    end
+
+    /// The cursor's column within this window, counting from 1.
+    function WhereX () : Integer;
+    begin
+        Check ();
+
+        Exit CurCol;
+    end
+
+    /// The cursor's row within this window, counting from 1.
+    function WhereY () : Integer;
+    begin
+        Check ();
+
+        Exit CurRow;
+    end
+
+    /// Sets this window's ink; `+ Blink` asks the terminal to blink it.
+    procedure TextColor (Color : Integer);
+    begin
+        Check ();
+
+        if Color < 0 then raise 'TextColor cannot be transparent.';
+
+        Blinking := Color >= Blink;
+
+        if Blinking then Color := Color - Blink;
+
+        if Color > 16777215 then
+            raise 'TextColor wants an RGB color, plus Blink at most.';
+
+        InkAsked := Color;
+        Ink      := Themed (Palette, Color);
+    end
+
+    /// Sets this window's cell background; Transparent shows what is below.
+    procedure TextBackground (Color : Integer);
+    begin
+        Check ();
+
+        if Color < Transparent then
+            raise 'TextBackground wants a color or Transparent.';
+
+        BackAsked := Color;
+        Back      := Themed (Palette, Color);
+    end
+
+    /// Brightens this window's ink to its bright partner.
+    ///
+    /// Brightening acts on the name, which is then themed afresh, so `Blue`
+    /// becomes `LightBlue` and the palette says what that means.
+    procedure HighVideo ();
+    begin
+        Check ();
+
+        if InkAsked in BrightPartner then InkAsked := BrightOf (InkAsked);
+        else if InkAsked in DimPartner then Exit;
+        else InkAsked := (InkAsked div 65536 + (255 - InkAsked div 65536) div 2) * 65536
+                  + (InkAsked div 256 mod 256 + (255 - InkAsked div 256 mod 256) div 2) * 256
+                  + (InkAsked mod 256 + (255 - InkAsked mod 256) div 2);
+
+        Ink := Themed (Palette, InkAsked);
+    end
+
+    /// Dims this window's ink to its dim partner.
+    procedure LowVideo ();
+    begin
+        Check ();
+
+        if InkAsked in DimPartner then InkAsked := DimOf (InkAsked);
+        else if InkAsked in BrightPartner then Exit;
+        else InkAsked := (InkAsked div 65536 div 2) * 65536
+                  + (InkAsked div 256 mod 256 div 2) * 256
+                  + (InkAsked mod 256 div 2);
+
+        Ink := Themed (Palette, InkAsked);
+    end
+
+    /// Restores this window's startup colors: LightGray on Transparent.
+    procedure NormVideo ();
+    begin
+        Check ();
+
+        InkAsked  := LightGray;
+        BackAsked := Transparent;
+        Ink       := Themed (Palette, LightGray);
+        Back      := Transparent;
+        Blinking  := False;
+    end
+
+    /// Rebinds what the sixteen color names mean on this window.
+    ///
+    /// A palette is a Map from one of the sixteen names to the RGB it should
+    /// mean here, and a name the map does not list means itself. It governs
+    /// what is written next rather than what is already written: setting one
+    /// re-themes the ink and background in force, and the cells already
+    /// stamped keep the colors they were stamped in.
+    ///
+    /// A color equal to one of the sixteen is a name; anything else is a
+    /// literal. That is `graph`'s settled rule and it holds here for the same
+    /// reason: the constants are their RGB values.
+    ///
+    /// # Raises
+    /// `SetPalette wants one of the sixteen color names as a key.`,
+    /// `SetPalette wants RGB colors.`, and `CloseCrt has closed this
+    /// surface.`
+    ///
+    /// # Examples
+    /// `A Palette Rebinds The Names A Window Writes In`
+    procedure SetPalette (Palette : Map);
+    begin
+        Check ();
+
+        CheckPalette (Palette);
+
+        this.Palette := CopyPalette (Palette);
+
+        Ink  := Themed (this.Palette, InkAsked);
+        Back := Themed (this.Palette, BackAsked);
+    end
+
+    /// What the sixteen names mean on this window.
+    function GetPalette () : Map;
+    begin
+        Check ();
+
+        Exit CopyPalette (Palette);
+    end
+
+    /// Clears every cell of this window and homes its cursor.
+    ///
+    /// The cells take the current `TextBackground`, and a Transparent one
+    /// leaves what is beneath showing. Turbo Pascal spells it `ClrScr`, which
+    /// is the alias.
+    ///
+    /// # Raises
+    /// `CloseCrt has closed this surface.`
+    ///
+    /// # Examples
+    /// `Clear Fills A Window With Its Background And Homes The Cursor`
+    procedure Clear ();
+    begin
+        Check ();
+
+        for var Row := 1; Row <= Rows; Row := Row + 1 do
+            for var Col := 1; Col <= Cols; Col := Col + 1 do
+                PutCell (Col, Row, 0);
+
+        CurCol  := 1;
+        CurRow  := 1;
+        Pending := False;
+    end
+
+    /// Clears from the cursor to the end of its row.
+    ///
+    /// The cursor does not move, and the cleared cells take the current
+    /// background.
+    procedure ClrEol ();
+    begin
+        Check ();
+
+        for var Col := CurCol; Col <= Cols; Col := Col + 1 do
+            PutCell (Col, CurRow, 0);
+    end
+
+    /// Moves a band of this window's rows, filling what it vacates.
+    ///
+    /// Private to this unit, and what the scroll, `DelLine` and `InsLine` are
+    /// each a case of. A positive Step moves the band's contents up.
+    procedure MoveRows (Top : Integer, Bottom : Integer, Step : Integer);
+    begin
+        // Forward when the band moves up and backward when it moves down,
+        // the source and destination overlapping either way.
+        if Step > 0 then
+        begin
+            for var Row := Top; Row <= Bottom; Row := Row + 1 do
+                for var Col := 1; Col <= Cols; Col := Col + 1 do
+                    if Row + Step <= Bottom then
+                        CopyCell (Col, Row + Step, Col, Row);
+                    else PutCell (Col, Row, 0);
+        end
+        else
+        begin
+            for var Row := Bottom; Row >= Top; Row := Row - 1 do
+                for var Col := 1; Col <= Cols; Col := Col + 1 do
+                    if Row + Step >= Top then
+                        CopyCell (Col, Row + Step, Col, Row);
+                    else PutCell (Col, Row, 0);
+        end
+    end
+
+    /// Copies one cell of this window over another, whole.
+    ///
+    /// Private to this unit. All four words move, so a scrolled row keeps the
+    /// colors it was written in rather than taking the current ones.
+    procedure CopyCell (FromCol : Integer, FromRow : Integer,
+                        ToCol : Integer, ToRow : Integer);
+    begin
+        var A := ((FromRow - 1) * Cols + (FromCol - 1)) * CellWords * 4;
+        var B := ((ToRow - 1) * Cols + (ToCol - 1)) * CellWords * 4;
+
+        for var K := 0; K < CellWords; K := K + 1 do
+            Cells.PutInt (B + K * 4, Cells.GetInt (A + K * 4));
+    end
+
+    /// Deletes the cursor's row; the rows below move up and the last blanks.
+    ///
+    /// It acts within this window's walls, from the cursor's row to this
+    /// window's last. The cursor does not move, which is what makes `DelLine`
+    /// twice delete two rows.
+    ///
+    /// # Raises
+    /// `CloseCrt has closed this surface.`
+    ///
+    /// # Examples
+    /// `DelLine Pulls The Rows Below It Up`
+    procedure DelLine ();
+    begin
+        Check ();
+
+        MoveRows (CurRow, Rows, 1);
+    end
+
+    /// Inserts a blank row at the cursor; the rows below move down, last lost.
+    ///
+    /// The inverse of `DelLine` but for one thing: what falls off the bottom
+    /// is gone. A window holds its rows and no more.
+    ///
+    /// # Raises
+    /// `CloseCrt has closed this surface.`
+    ///
+    /// # Examples
+    /// `InsLine Pushes The Rows Below It Down`
+    procedure InsLine ();
+    begin
+        Check ();
+
+        MoveRows (CurRow, Rows, 0 - 1);
+    end
+
+    /// The newline both WriteLn and a #10 spell: column 1, next row,
+    /// scrolling this window's cells at its bottom.
+    procedure NewLine ();
+    begin
+        CurCol  := 1;
+        Pending := False;
+
+        if CurRow < Rows then
+        begin
+            CurRow := CurRow + 1;
+
+            Exit;
+        end
+
+        MoveRows (1, Rows, 1);
+    end
+
+    /// Stamps one codepoint at this window's cursor and advances it.
+    ///
+    /// Private to this unit. A wrap left pending by the previous character
+    /// happens now rather than when that character filled the last cell --
+    /// text mode always deferred it, and a line that exactly fills the bottom
+    /// row would otherwise scroll the window the instant it was drawn.
+    procedure StampAt (Code : Integer);
+    begin
+        if Pending then NewLine ();
+
+        PutCell (CurCol, CurRow, Code);
+
+        if CurCol < Cols then CurCol := CurCol + 1;
+        else Pending := True;
+    end
+
+    /// Writes text into this window's cells, obeying newlines.
+    ///
+    /// Private to this unit; `Write` and `WriteLn` are what a caller says.
+    procedure Emit (Text : String);
+    begin
+        Check ();
+
+        for var I := 0; I < Length (Text); I := I + 1 do
+            if Text[I] = #10 then NewLine ();
+            else StampAt (Ord (Text[I]));
+    end
+
+    /// Writes values into this window's cells, obeying newlines.
+    ///
+    /// Variadic, as the screen-wide `Write` is: every value is written in
+    /// turn, in this window's colors, wrapping and scrolling within its
+    /// walls.
+    ///
+    /// # Raises
+    /// `CloseCrt has closed this surface.`
+    ///
+    /// # Examples
+    /// `Write Stamps Cells And Advances The Cursor`
+    procedure Write (Values : List of Any);
+    begin
+        Check ();
+
+        for var V in Values do Emit (Str (V));
+
+        Present ();
+    end
+
+    /// Writes values and moves to the start of this window's next row.
+    ///
+    /// # Raises
+    /// `CloseCrt has closed this surface.`
+    ///
+    /// # Examples
+    /// `WriteLn Moves To The Start Of The Next Row`
+    procedure WriteLn (Values : List of Any);
+    begin
+        Check ();
+
+        for var V in Values do Emit (Str (V));
+
+        NewLine ();
+        Present ();
+    end
+
+    /// Lays this window's cells into the screen.
+    ///
+    /// Private to this unit, and called by `Present` for each surface in
+    /// Order. An Alpha of 0 is invisible and lays nothing.
+    procedure Blit ();
+    begin
+        if Dead then Exit;
+        if Alpha = 0 then Exit;
+
+        BlitCells (Screen.Address, ScreenCols, ScreenRows,
+                   Cells.Address, Cols, Rows, X1, Y1);
+    end
+end
+
+
+/// Whether the screen has been opened.
+///
+/// Private to this unit.
+procedure NeedOpen ();
+begin
+    if not Started then raise 'Crt is not open.';
+end
+
+/// Makes the root grid if it is not there yet.
+///
+/// Private to this unit. The screen-wide verbs all go through it, so a
+/// program that never mentions a Window still has one.
+procedure EnsureRoot ();
+begin
+    if Root = nil then
+    begin
+        Root := Window (1, 1, ScreenCols, ScreenRows, 1);
+
+        // The root grid is the desktop: Order 0, which the constructor
+        // refuses to anyone else.
+        Root.Order := 0;
+    end
+end
+
+/// Whether one surface composes below another.
+///
+/// Private to this unit. Order decides it, and a tie goes to whichever was
+/// made first -- so a surface created later sits over one created earlier at
+/// the same Order, which is what makes bring-to-front work by assignment.
+function Below (A, B) : Boolean;
+begin
+    if A.Order <> B.Order then Exit A.Order < B.Order;
+
+    Exit A.Serial < B.Serial;
+end
+
+/// The surfaces in the order they compose, lowest first.
+///
+/// Private to this unit. Ties are broken by the order of creation, so a
+/// surface made later sits over one made earlier at the same Order.
+function Ordered () : List;
+begin
+    var Live := [];
+
+    for var S in Surfaces do
+        if not S.Dead then Live.Add (S);
+
+    // A selection sort: the stacks here are a handful of surfaces, and this
+    // says what it does in one comparison that reads.
+    for var I := 0; I < Live.Length; I := I + 1 do
+    begin
+        var Least := I;
+
+        for var J := I + 1; J < Live.Length; J := J + 1 do
+            if Below (Live[J], Live[Least]) then Least := J;
+
+        var Held := Live[I];
+
+        Live[I] := Live[Least];
+        Live[Least] := Held;
+    end
+
+    Exit Live;
+end
+
+/// Notices a terminal that has been resized since the last frame.
+///
+/// Private to this unit. The screen buffers are remade at the new size and
+/// everything is repainted, the old contents being the wrong shape.
+procedure Resize ();
+begin
+    var C := CrtCols ();
+    var R := CrtRows ();
+
+    if C = ScreenCols then if R = ScreenRows then Exit;
+
+    ScreenCols := C;
+    ScreenRows := R;
+    Screen     := Buffer (C * R * CellWords * 4);
+    Painted    := Buffer (C * R * CellWords * 4);
+
+    // Room for every cell to be repainted at once, each with its own cursor
+    // move and its own colors, plus a margin for the longest escape run.
+    Escapes := Buffer (C * R * 48 + 64);
+
+    // A screen of a different shape shares nothing with the last one, so
+    // Painted is filled with a value no cell can hold and everything repaints.
+    for var I := 0; I < C * R * CellWords; I := I + 1 do
+        Painted.PutInt (I * 4, 0 - 999);
+end
+
+/// Composites every surface and paints what changed.
+///
+/// Private to this unit, and called by every verb that writes. Nothing
+/// reaches the terminal unless standard output is one -- which is what lets a
+/// piped run keep its own output clean, and this unit's tests read a finished
+/// screen back without a byte escaping.
+procedure Present ();
+begin
+    if not Started then Exit;
+
+    Resize ();
+    ClearCells (Screen.Address, ScreenCols * ScreenRows, LightGray);
+
+    for var S in Ordered () do S.Blit ();
+
+    if not Emitting then Exit;
+
+    var Changed := PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                               ScreenCols, ScreenRows, Take (TrueColor));
+
+    if Changed > 0 then CrtWrite (Escapes.Address);
+
+    // The terminal's own cursor is parked where the screen's is, so a program
+    // that wants one visible gets it in the right place.
+    if Root <> nil then PlaceCursor (Root.X1 + Root.CurCol - 1,
+                                     Root.Y1 + Root.CurRow - 1);
+end
+
+/// Answers 1 for True and 0 for False, for a foreign call.
+///
+/// Private to this unit: the C wants an Integer flag and a Boolean is not one.
+function Take (Flag : Boolean) : Integer;
+begin
+    if Flag then Exit 1;
+
+    Exit 0;
+end
+
+/// Moves the terminal's own cursor to Col, Row.
+///
+/// Private to this unit.
+procedure PlaceCursor (Col : Integer, Row : Integer);
+begin
+    if not Emitting then Exit;
+
+    CrtSend (#27 + '[' + Str (Row) + ';' + Str (Col) + 'H');
+end
+
+/// One byte of a Buffer, which the language's Buffer cannot address directly.
+///
+/// Private to this unit. A Buffer reads four bytes at a time and answers them
+/// signed, so the word is brought back into range before the byte is picked
+/// out of it.
+function ByteAt (B : Any, N : Integer) : Integer;
+begin
+    var Word := B.GetInt ((N div 4) * 4);
+
+    if Word < 0 then Word := Word + 4294967296;
+
+    var Shift := 1;
+
+    for var K := 0; K < N mod 4; K := K + 1 do Shift := Shift * 256;
+
+    Exit (Word div Shift) mod 256;
+end
+
+/// The escapes the last paint produced, as text.
+///
+/// Private to this unit, and there for its tests: a screen that is not a
+/// terminal emits nothing, so this is the only way to see what would have
+/// been sent. Escape itself is spelled `<ESC>` so a failure reads.
+function EscapeText () : String;
+begin
+    if Escapes = nil then Exit '';
+
+    var Out := '';
+
+    for var I := 0; I < 4000; I := I + 1 do
+    begin
+        var B := ByteAt (Escapes, I);
+
+        if B = 0 then Exit Out;
+        if B = 27 then Out := Out + '<ESC>';
+        else Out := Out + Char (B);
+    end
+
+    Exit Out;
+end
+
+/// One word of one cell of the composited screen.
+///
+/// Private to this unit, and what its tests read a finished screen back
+/// through. Word 0 is the codepoint, 1 the ink, 2 the background, 3 the flags.
+function ScreenWord (Col : Integer, Row : Integer, Word : Integer) : Integer;
+begin
+    if Screen = nil then Exit 0;
+    if Col < 1 or Row < 1 or Col > ScreenCols or Row > ScreenRows then Exit 0;
+
+    Exit Screen.GetInt ((((Row - 1) * ScreenCols) + (Col - 1)) * CellWords * 4
+                        + Word * 4);
+end
+
+/// Sends one escape sequence to the terminal.
+///
+/// Private to this unit.
+procedure Send (Seq : String);
+begin
+    if not Emitting then Exit;
+
+    CrtSend (Seq);
+end
+
+
+/// Opens the screen: the terminal's own size, cleared, ready to write.
+///
+/// Takes nothing, where `graph`'s `InitGraph` takes a size and a title: a
+/// terminal already has a size and a title, and neither is this program's to
+/// choose. `TextCols` and `TextRows` answer what it actually is, and follow a
+/// resize between one frame and the next.
+///
+/// The terminal is put into character-at-a-time mode so `ReadKey` can work,
+/// and onto its alternate screen so that what was on it before comes back
+/// when the program finishes. Both are undone by `CloseCrt`, which is worth
+/// calling from an exception handler as well as at the end.
+///
+/// Opening twice is harmless and changes nothing.
+///
+/// # Examples
+/// `InitCrt Opens A Screen The Size Of The Terminal`
+procedure InitCrt ();
+begin
+    if Started then Exit;
+
+    Started    := True;
+    Emitting   := CrtIsTty () <> 0;
+    TrueColor  := CrtTrueColor () <> 0;
+    ScreenCols := 0;
+    ScreenRows := 0;
+
+    Resize ();
+
+    if Emitting then
+    begin
+        CrtRaw (1);
+
+        // The alternate screen, so the shell's scrollback survives.
+        Send (#27 + '[?1049h');
+        Send (#27 + '[2J');
+    end
+
+    EnsureRoot ();
+    Present ();
+end
+
+/// Closes the screen and gives the terminal back as it was found.
+///
+/// Every surface is invalidated: a method called on one afterward raises.
+/// Closing when nothing is open is harmless.
+///
+/// # Examples
+/// `InitCrt Opens A Screen The Size Of The Terminal`
+procedure CloseCrt ();
+begin
+    if not Started then Exit;
+
+    for var S in Surfaces do S.Discard ();
+
+    Surfaces := [];
+    Root     := nil;
+    KeyQueue := [];
+    KeyHead  := 0;
+
+    if Emitting then
+    begin
+        Send (#27 + '[0m');
+        Send (#27 + '[?1049l');
+        CrtRaw (0);
+    end
+
+    Started    := False;
+    Emitting   := False;
+    ScreenCols := 0;
+    ScreenRows := 0;
+    Screen     := nil;
+    Painted    := nil;
+    Escapes    := nil;
+end
+
+/// The screen's width in cells, which is the terminal's.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `InitCrt Opens A Screen The Size Of The Terminal`
+function TextCols () : Integer;
+begin
+    NeedOpen ();
+    Resize ();
+
+    Exit ScreenCols;
+end
+
+/// The screen's height in cells, which is the terminal's.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `InitCrt Opens A Screen The Size Of The Terminal`
+function TextRows () : Integer;
+begin
+    NeedOpen ();
+    Resize ();
+
+    Exit ScreenRows;
+end
+
+/// Whether this screen is painting a real terminal.
+///
+/// False when standard output is a file or a pipe, in which case everything
+/// works and nothing is emitted. Worth asking before deciding to wait for a
+/// key that can never come.
+///
+/// # Raises
+/// `Crt is not open.`
+function IsTerminal () : Boolean;
+begin
+    NeedOpen ();
+
+    Exit Emitting;
+end
+
+/// Pushes the screen to the terminal.
+///
+/// Every verb that writes presents already, so this is for after changing a
+/// surface's `Order` or `Alpha`, which nothing else notices.
+///
+/// # Raises
+/// `Crt is not open.`
+procedure Show ();
+begin
+    NeedOpen ();
+    Present ();
+end
+
+
+/// Writes to the screen, or to a Window given as the first value.
+///
+/// Variadic, as the built-in is: every value is written in turn, in the
+/// surface's current colors, wrapping and scrolling within its walls. A
+/// leading Window is the surface written to rather than a value written,
+/// which is how a Turbo Pascal program spells it.
+///
+/// This shadows the built-in `Write` for any program that says `uses crt`,
+/// which is the intent. `System.Write` still reaches the terminal directly --
+/// and on this unit that is the same terminal being painted, so it will land
+/// in the middle of the screen.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `Write Stamps Cells And Advances The Cursor`
+procedure Write (Values : List of Any);
+begin
+    NeedOpen ();
+
+    if Values.Length > 0 then
+      if Values[0] is Window then
+      begin
+          var Target := Values[0];
+
+          for var I := 1; I < Values.Length; I := I + 1 do
+              Target.Emit (Str (Values[I]));
+
+          Present ();
+
+          Exit;
+      end
+
+    EnsureRoot ();
+
+    for var V in Values do
+        Root.Emit (Str (V));
+
+    Present ();
+end
+
+/// Writes to the screen and moves to the start of the next row.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `WriteLn Moves To The Start Of The Next Row`
+procedure WriteLn (Values : List of Any);
+begin
+    NeedOpen ();
+
+    if Values.Length > 0 then
+      if Values[0] is Window then
+      begin
+          var Target := Values[0];
+
+          for var I := 1; I < Values.Length; I := I + 1 do
+              Target.Emit (Str (Values[I]));
+
+          Target.NewLine ();
+          Present ();
+
+          Exit;
+      end
+
+    EnsureRoot ();
+
+    for var V in Values do
+        Root.Emit (Str (V));
+
+    Root.NewLine ();
+    Present ();
+end
+
+/// Puts the screen's cursor at Col, Row.
+///
+/// # Raises
+/// `Crt is not open.` and `GotoXY is off the grid.`
+///
+/// # Examples
+/// `GotoXY Puts The Cursor Where It Is Told`
+procedure GotoXY (Col : Integer, Row : Integer);
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.GotoXY (Col, Row);
+end
+
+/// The screen cursor's column, counting from 1.
+///
+/// # Examples
+/// `GotoXY Puts The Cursor Where It Is Told`
+function WhereX () : Integer;
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Exit Root.WhereX ();
+end
+
+/// The screen cursor's row, counting from 1.
+///
+/// # Examples
+/// `GotoXY Puts The Cursor Where It Is Told`
+function WhereY () : Integer;
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Exit Root.WhereY ();
+end
+
+/// Sets the screen's ink; `+ Blink` asks the terminal to blink it.
+///
+/// # Examples
+/// `TextColor And TextBackground Color The Cells Written After Them`
+procedure TextColor (Color : Integer);
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.TextColor (Color);
+end
+
+/// Sets the screen's cell background; Transparent is the terminal's own.
+///
+/// # Examples
+/// `TextColor And TextBackground Color The Cells Written After Them`
+procedure TextBackground (Color : Integer);
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.TextBackground (Color);
+end
+
+/// Brightens the screen's ink to its bright partner.
+procedure HighVideo ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.HighVideo ();
+end
+
+/// Dims the screen's ink to its dim partner.
+procedure LowVideo ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.LowVideo ();
+end
+
+/// Restores the screen's startup colors: LightGray on Transparent.
+procedure NormVideo ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.NormVideo ();
+end
+
+/// Clears the whole screen and homes its cursor.
+///
+/// # Examples
+/// `Clear Fills A Window With Its Background And Homes The Cursor`
+procedure ClrScr ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.Clear ();
+    Present ();
+end
+
+/// Clears from the screen's cursor to the end of its row.
+procedure ClrEol ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.ClrEol ();
+    Present ();
+end
+
+/// Deletes the screen cursor's row; the rows below move up.
+///
+/// # Examples
+/// `DelLine Pulls The Rows Below It Up`
+procedure DelLine ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.DelLine ();
+    Present ();
+end
+
+/// Inserts a blank row at the screen cursor's row; the last row is lost.
+///
+/// # Examples
+/// `InsLine Pushes The Rows Below It Down`
+procedure InsLine ();
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.InsLine ();
+    Present ();
+end
+
+/// Rebinds what the sixteen color names mean on the screen.
+///
+/// # Examples
+/// `A Palette Rebinds The Names A Window Writes In`
+procedure SetPalette (Palette : Map);
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Root.SetPalette (Palette);
+end
+
+/// What the sixteen names mean on the screen.
+///
+/// # Examples
+/// `A Palette Rebinds The Names A Window Writes In`
+function GetPalette () : Map;
+begin
+    NeedOpen ();
+    EnsureRoot ();
+
+    Exit Root.GetPalette ();
+end
+
+
+// --------------------------------------------------------------- input --
+//
+// A terminal reports the keys that are not characters as escape sequences,
+// and there is no marker saying where one ends -- only that a well-formed one
+// is short. So the decoder reads what is there, matches the longest sequence
+// it knows, and hands back the rest as ordinary characters. A lone Escape is
+// a lone Escape, which is why it is only decided once nothing follows it.
+
+/// The escape sequences this decoder knows, by the key each one means.
+///
+/// Private to this unit, and a table rather than a chain of comparisons
+/// because that is what it is. Several sequences mean the same key: terminals
+/// disagree about Home and End in particular, and about whether the function
+/// keys come as SS3 or CSI, so the ones in use are all listed rather than one
+/// being declared correct.
+var KeySeqs := ['[A' : KeyUp,    '[B' : KeyDown,  '[C' : KeyRight,
+                '[D' : KeyLeft,  '[H' : KeyHome,  '[F' : KeyEnd,
+                'OH' : KeyHome,  'OF' : KeyEnd,
+                '[1~' : KeyHome, '[7~' : KeyHome,
+                '[4~' : KeyEnd,  '[8~' : KeyEnd,
+                '[2~' : KeyIns,  '[3~' : KeyDel,
+                '[5~' : KeyPgUp, '[6~' : KeyPgDn,
+                'OP' : KeyF1,    'OQ' : KeyF2,    'OR' : KeyF3,
+                'OS' : KeyF4,
+                '[11~' : KeyF1,  '[12~' : KeyF2,  '[13~' : KeyF3,
+                '[14~' : KeyF4,  '[15~' : KeyF5,  '[17~' : KeyF6,
+                '[18~' : KeyF7,  '[19~' : KeyF8,  '[20~' : KeyF9,
+                '[21~' : KeyF10, '[23~' : KeyF11, '[24~' : KeyF12];
+
+/// Decodes the bytes waiting at the terminal into the key queue.
+///
+/// Private to this unit. Reads what is there and stops; nothing here blocks.
+procedure PumpKeys ();
+begin
+    while True do
+    begin
+        var B := CrtGetch ();
+
+        if B < 0 then Exit;
+
+        if B <> 27 then
+        begin
+            KeyQueue.Add (Char (B));
+
+            continue;
+        end
+
+        // An Escape: gather what follows it, up to the longest sequence this
+        // decoder knows, and give up on the first thing that cannot be one.
+        var Seq   := '';
+        var Found := False;
+
+        while Length (Seq) < 5 do
+        begin
+            var C := CrtGetch ();
+
+            if C < 0 then break;
+
+            Seq := Seq + Char (C);
+
+            if Seq in KeySeqs then
+            begin
+                KeyQueue.Add (KeySeqs[Seq]);
+
+                Found := True;
+
+                break;
+            end
+        end
+
+        // Nothing matched: a lone Escape, and whatever followed it as itself.
+        // A terminal sends Escape alone when the user presses it, so this is
+        // the ordinary case rather than an error.
+        if not Found then
+        begin
+            KeyQueue.Add (Char (27));
+
+            for var I := 0; I < Length (Seq); I := I + 1 do
+                KeyQueue.Add (Seq[I]);
+        end
+    end
+end
+
+/// Whether a key is waiting to be read.
+///
+/// Never blocks and never waits. On a screen that is not a terminal there can
+/// be no keys, so this is always False.
+///
+/// # Raises
+/// `Crt is not open.`
+function KeyPressed () : Boolean;
+begin
+    NeedOpen ();
+
+    if not Emitting then Exit False;
+
+    PumpKeys ();
+
+    Exit KeyHead < KeyQueue.Length;
+end
+
+/// The next key, waiting for one if none is ready.
+///
+/// The keys that are not characters arrive as the `Key` constants, decoded
+/// from the terminal's escape sequences. On a screen that is not a terminal
+/// no key can ever arrive, so this answers `KeyClose` at once rather than
+/// waiting for something that cannot come.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `The Key Decoder Turns Escape Sequences Into Key Constants`
+function ReadKey () : Char;
+begin
+    NeedOpen ();
+
+    if not Emitting then Exit KeyClose;
+
+    // A wait for a key is a wait, not a spin: without the nap this loop
+    // would poll as fast as the interpreter can go and burn a core while a
+    // program sits at a menu.
+    while KeyHead >= KeyQueue.Length do
+    begin
+        PumpKeys ();
+
+        if KeyHead >= KeyQueue.Length then CrtNap (10);
+    end
+
+    var K := KeyQueue[KeyHead];
+
+    KeyHead := KeyHead + 1;
+
+    if KeyHead = KeyQueue.Length then
+    begin
+        KeyQueue := [];
+        KeyHead  := 0;
+    end
+
+    Exit K;
+end
+
+
+// ------------------------------------------------------------- aliases --
+//
+// The same verbs with the surface first, which is how a Turbo Pascal program
+// would spell them. Each is a one-line delegate adding no behavior whatever.
+
+/// Puts a window's cursor at Col, Row. See `Window`.
+procedure GotoXY (W : Window, Col : Integer, Row : Integer);
+begin
+    W.GotoXY (Col, Row);
+end
+
+/// A window cursor's column. See `Window`.
+function WhereX (W : Window) : Integer;
+begin
+    Exit W.WhereX ();
+end
+
+/// A window cursor's row. See `Window`.
+function WhereY (W : Window) : Integer;
+begin
+    Exit W.WhereY ();
+end
+
+/// Sets a window's ink. See `Window`.
+procedure TextColor (W : Window, Color : Integer);
+begin
+    W.TextColor (Color);
+end
+
+/// Sets a window's cell background. See `Window`.
+procedure TextBackground (W : Window, Color : Integer);
+begin
+    W.TextBackground (Color);
+end
+
+/// Brightens a window's ink. See `Window`.
+procedure HighVideo (W : Window);
+begin
+    W.HighVideo ();
+end
+
+/// Dims a window's ink. See `Window`.
+procedure LowVideo (W : Window);
+begin
+    W.LowVideo ();
+end
+
+/// Restores a window's startup colors. See `Window`.
+procedure NormVideo (W : Window);
+begin
+    W.NormVideo ();
+end
+
+/// Clears a window and homes its cursor. See `Clear`.
+procedure ClrScr (W : Window);
+begin
+    W.Clear ();
+    Present ();
+end
+
+/// Clears from a window's cursor to the end of its row. See `Window`.
+procedure ClrEol (W : Window);
+begin
+    W.ClrEol ();
+    Present ();
+end
+
+/// Deletes a window's cursor row. See `DelLine`.
+procedure DelLine (W : Window);
+begin
+    W.DelLine ();
+    Present ();
+end
+
+/// Inserts a blank row at a window's cursor row. See `InsLine`.
+procedure InsLine (W : Window);
+begin
+    W.InsLine ();
+    Present ();
+end
+
+/// Moves a window so its top-left cell is at Col, Row. See `Window`.
+procedure MoveTo (W : Window, Col : Integer, Row : Integer);
+begin
+    W.MoveTo (Col, Row);
+    Present ();
+end
+
+/// Rebinds what the sixteen names mean on a window. See `SetPalette`.
+procedure SetPalette (W : Window, Palette : Map);
+begin
+    W.SetPalette (Palette);
+end
+
+/// What the sixteen names mean on a window. See `SetPalette`.
+function GetPalette (W : Window) : Map;
+begin
+    Exit W.GetPalette ();
+end
+
+
+test 'InitCrt Opens A Screen The Size Of The Terminal';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    // With no terminal the C answers the classic 80 by 25, so a redirected
+    // run still has a geometry to lay out against.
+    AssertTrue (TextCols () > 0);
+    AssertTrue (TextRows () > 0);
+    AssertEqual (1, WhereX ());
+    AssertEqual (1, WhereY ());
+
+    // Opening twice changes nothing, and closing twice is harmless.
+    var Cols := TextCols ();
+
+    InitCrt ();
+    AssertEqual (Cols, TextCols ());
+
+    CloseCrt ();
+    CloseCrt ();
+
+    var Message := '';
+
+    try TextCols (); except on e : String do Message := e; end
+    AssertEqual ('Crt is not open.', Message);
+end
+
+test 'Write Stamps Cells And Advances The Cursor';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    GotoXY (3, 2);
+    Write ('Hi');
+
+    AssertEqual (Ord ('H'), Root.CellAt (3, 2));
+    AssertEqual (Ord ('i'), Root.CellAt (4, 2));
+    AssertEqual (5, WhereX ());
+    AssertEqual (2, WhereY ());
+
+    // Any number of values of any type, as the built-in takes.
+    GotoXY (1, 4);
+    Write ('a', 42, ' ', True);
+
+    AssertEqual (Ord ('a'), Root.CellAt (1, 4));
+    AssertEqual (Ord ('4'), Root.CellAt (2, 4));
+
+    CloseCrt ();
+end
+
+test 'WriteLn Moves To The Start Of The Next Row';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    GotoXY (5, 2);
+    WriteLn ('one');
+
+    AssertEqual (1, WhereX ());
+    AssertEqual (3, WhereY ());
+
+    // A newline inside the text does the same thing.
+    GotoXY (5, 5);
+    Write ('a' + #10 + 'b');
+
+    AssertEqual (Ord ('a'), Root.CellAt (5, 5));
+    AssertEqual (Ord ('b'), Root.CellAt (1, 6));
+
+    CloseCrt ();
+end
+
+test 'GotoXY Puts The Cursor Where It Is Told';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    GotoXY (7, 3);
+
+    AssertEqual (7, WhereX ());
+    AssertEqual (3, WhereY ());
+
+    var Message := '';
+
+    try GotoXY (0, 1); except on e : String do Message := e; end
+    AssertEqual ('GotoXY is off the grid.', Message);
+
+    Message := '';
+    try GotoXY (1, TextRows () + 1); except on e : String do Message := e; end
+    AssertEqual ('GotoXY is off the grid.', Message);
+
+    CloseCrt ();
+end
+
+test 'TextColor And TextBackground Color The Cells Written After Them';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    TextColor (LightCyan);
+    TextBackground (Blue);
+    GotoXY (1, 1);
+    Write ('x');
+
+    AssertEqual (LightCyan, Root.InkAt (1, 1));
+    AssertEqual (Blue, Root.BackAt (1, 1));
+
+    // The colors govern what is written next, not what is already written.
+    TextColor (Red);
+    GotoXY (2, 1);
+    Write ('y');
+
+    AssertEqual (LightCyan, Root.InkAt (1, 1));
+    AssertEqual (Red, Root.InkAt (2, 1));
+
+    var Message := '';
+
+    try TextColor (Transparent); except on e : String do Message := e; end
+    AssertEqual ('TextColor cannot be transparent.', Message);
+
+    CloseCrt ();
+end
+
+test 'Clear Fills A Window With Its Background And Homes The Cursor';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (2, 2, 11, 5, 1);
+
+    W.TextBackground (Red);
+    W.GotoXY (4, 3);
+    W.Clear ();
+
+    AssertEqual (1, W.WhereX ());
+    AssertEqual (1, W.WhereY ());
+    AssertEqual (0, W.CellAt (1, 1));
+    AssertEqual (Red, W.BackAt (1, 1));
+    AssertEqual (Red, W.BackAt (10, 4));
+
+    CloseCrt ();
+end
+
+test 'ClrEol Clears To The End Of The Row And Leaves The Cursor';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 10, 3, 1);
+
+    W.Emit ('abcdefgh');
+    W.GotoXY (4, 1);
+    W.ClrEol ();
+
+    AssertEqual (Ord ('a'), W.CellAt (1, 1));
+    AssertEqual (Ord ('c'), W.CellAt (3, 1));
+    AssertEqual (0, W.CellAt (4, 1));
+    AssertEqual (0, W.CellAt (10, 1));
+    AssertEqual (4, W.WhereX ());
+
+    CloseCrt ();
+end
+
+test 'A Window Wraps And Scrolls Within Its Own Walls';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (3, 3, 6, 4, 1);
+
+    // Four columns, two rows. Five characters must wrap onto the second row.
+    W.Emit ('abcde');
+
+    AssertEqual (Ord ('a'), W.CellAt (1, 1));
+    AssertEqual (Ord ('d'), W.CellAt (4, 1));
+    AssertEqual (Ord ('e'), W.CellAt (1, 2));
+
+    // Nine fills both rows and scrolls once, so the first row is now what
+    // was the second.
+    W.Emit ('fghi');
+
+    AssertEqual (Ord ('e'), W.CellAt (1, 1));
+    AssertEqual (Ord ('i'), W.CellAt (1, 2));
+
+    CloseCrt ();
+end
+
+test 'The Wrap Is Deferred Until The Next Character';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 4, 2, 1);
+
+    W.GotoXY (1, 2);
+    W.Emit ('abcd');
+
+    // The bottom row is exactly full. Text mode always deferred the wrap, and
+    // the difference is not cosmetic: a window's lower border would otherwise
+    // scroll the window the instant it was drawn.
+    AssertEqual (Ord ('a'), W.CellAt (1, 2));
+    AssertEqual (Ord ('d'), W.CellAt (4, 2));
+    AssertTrue (W.Pending);
+
+    W.Emit ('e');
+
+    // Now it scrolls, and 'e' lands on the fresh bottom row.
+    AssertEqual (Ord ('e'), W.CellAt (1, 2));
+
+    CloseCrt ();
+end
+
+test 'DelLine Pulls The Rows Below It Up';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 6, 4, 1);
+
+    W.GotoXY (1, 1); W.Emit ('one');
+    W.GotoXY (1, 2); W.Emit ('two');
+    W.GotoXY (1, 3); W.Emit ('six');
+
+    W.GotoXY (1, 1);
+    W.DelLine ();
+
+    AssertEqual (Ord ('t'), W.CellAt (1, 1));
+    AssertEqual (Ord ('s'), W.CellAt (1, 2));
+    AssertEqual (0, W.CellAt (1, 3));
+
+    // The cursor does not move, which is what makes a second DelLine delete
+    // a second row rather than the same one twice.
+    AssertEqual (1, W.WhereX ());
+    AssertEqual (1, W.WhereY ());
+
+    W.DelLine ();
+    AssertEqual (Ord ('s'), W.CellAt (1, 1));
+
+    CloseCrt ();
+end
+
+test 'InsLine Pushes The Rows Below It Down';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 6, 3, 1);
+
+    W.GotoXY (1, 1); W.Emit ('one');
+    W.GotoXY (1, 2); W.Emit ('two');
+
+    W.GotoXY (1, 1);
+    W.InsLine ();
+
+    AssertEqual (0, W.CellAt (1, 1));
+    AssertEqual (Ord ('o'), W.CellAt (1, 2));
+    AssertEqual (Ord ('t'), W.CellAt (1, 3));
+
+    // What is pushed off the bottom is gone: a window holds its rows and no
+    // more, here as in Turbo Pascal.
+    W.InsLine ();
+
+    AssertEqual (0, W.CellAt (1, 1));
+    AssertEqual (0, W.CellAt (1, 2));
+    AssertEqual (Ord ('o'), W.CellAt (1, 3));
+
+    CloseCrt ();
+end
+
+test 'A Scrolled Row Keeps The Colors It Was Written In';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 6, 3, 1);
+
+    W.TextColor (LightGreen);
+    W.GotoXY (1, 2); W.Emit ('go');
+    W.TextColor (Red);
+
+    W.GotoXY (1, 1);
+    W.DelLine ();
+
+    // All four words of a cell move, so the row that came up is still green
+    // even though the ink is now red.
+    AssertEqual (Ord ('g'), W.CellAt (1, 1));
+    AssertEqual (LightGreen, W.InkAt (1, 1));
+
+    CloseCrt ();
+end
+
+test 'Surfaces Composite By Order With The Topmost Winning';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    TextBackground (Blue);
+    ClrScr ();
+    GotoXY (1, 1);
+    Write ('screen');
+
+    var A := Window (1, 1, 6, 2, 1);
+    var B := Window (3, 1, 8, 2, 2);
+
+    A.TextBackground (Red);
+    A.Clear ();
+    A.Emit ('AA');
+
+    B.TextBackground (Green);
+    B.Clear ();
+    B.Emit ('BB');
+
+    Show ();
+
+    // A is over the screen, B is over A.
+    AssertEqual (Ord ('A'), ScreenWord (1, 1, 0));
+    AssertEqual (Red, ScreenWord (1, 1, 2));
+    AssertEqual (Ord ('B'), ScreenWord (3, 1, 0));
+    AssertEqual (Green, ScreenWord (3, 1, 2));
+
+    // An opaque background hides what it covers even where it has no glyph
+    // of its own, or a window would show the text beneath through its gaps.
+    AssertEqual (0, ScreenWord (5, 1, 0));
+
+    // Reordering is bring-to-front, and needs only Show to take effect.
+    A.Order := 3;
+    Show ();
+
+    AssertEqual (Red, ScreenWord (3, 1, 2));
+
+    CloseCrt ();
+end
+
+test 'A Transparent Background Lets What Is Beneath Show Through';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    TextBackground (Blue);
+    ClrScr ();
+    GotoXY (1, 1);
+    Write ('under');
+
+    var W := Window (1, 1, 5, 1, 1);
+
+    // Transparent is the default, so this window contributes its glyph and
+    // nothing else.
+    W.GotoXY (3, 1);
+    W.Emit ('X');
+
+    Show ();
+
+    AssertEqual (Ord ('u'), ScreenWord (1, 1, 0));
+    AssertEqual (Ord ('X'), ScreenWord (3, 1, 0));
+    AssertEqual (Blue, ScreenWord (3, 1, 2));
+
+    CloseCrt ();
+end
+
+test 'An Alpha Of Zero Makes A Surface Invisible';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    TextBackground (Blue);
+    ClrScr ();
+
+    var W := Window (1, 1, 4, 1, 1);
+
+    W.TextBackground (Red);
+    W.Clear ();
+    Show ();
+
+    AssertEqual (Red, ScreenWord (1, 1, 2));
+
+    // A cell holds one character and cannot be blended, so Alpha survives as
+    // the only thing a terminal can give it.
+    W.Alpha := 0;
+    Show ();
+
+    AssertEqual (Blue, ScreenWord (1, 1, 2));
+
+    CloseCrt ();
+end
+
+test 'MoveTo Drags A Window Without Redrawing It';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 4, 2, 1);
+
+    W.TextBackground (Red);
+    W.Clear ();
+    W.Emit ('go');
+    Show ();
+
+    AssertEqual (Ord ('g'), ScreenWord (1, 1, 0));
+
+    MoveTo (W, 10, 5);
+
+    AssertEqual (Ord ('g'), ScreenWord (10, 5, 0));
+    AssertEqual (0, ScreenWord (1, 1, 0));
+
+    // The window's own coordinates never changed; only where it sits did.
+    AssertEqual (Ord ('g'), W.CellAt (1, 1));
+    AssertEqual (13, W.X2);
+
+    CloseCrt ();
+end
+
+test 'A Palette Rebinds The Names A Window Writes In';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 8, 2, 1);
+
+    W.SetPalette ([LightGray : 12550144, White : 16768256]);
+    W.TextColor (LightGray);
+    W.Emit ('a');
+
+    AssertEqual (12550144, W.InkAt (1, 1));
+
+    // A name the palette does not list means itself.
+    W.TextColor (LightCyan);
+    W.Emit ('b');
+
+    AssertEqual (LightCyan, W.InkAt (2, 1));
+
+    // Every surface carries its own, so the screen keeps the plain sixteen.
+    TextColor (LightGray);
+    GotoXY (1, 3);
+    Write ('c');
+
+    AssertEqual (LightGray, Root.InkAt (1, 3));
+
+    var Message := '';
+
+    try W.SetPalette ([12345 : Red]); except on e : String do Message := e; end
+    AssertEqual ('SetPalette wants one of the sixteen color names as a key.', Message);
+
+    CloseCrt ();
+end
+
+test 'HighVideo Brightens The Name And Then Themes It';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 8, 2, 1);
+
+    W.SetPalette ([LightBlue : Yellow]);
+    W.TextColor (Blue);
+    W.HighVideo ();
+
+    // Blue brightens to LightBlue, and the palette says what that means.
+    AssertEqual (Yellow, W.Ink);
+    AssertEqual (LightBlue, W.InkAsked);
+
+    W.LowVideo ();
+    AssertEqual (Blue, W.Ink);
+
+    W.NormVideo ();
+    AssertEqual (LightGray, W.InkAsked);
+
+    CloseCrt ();
+end
+
+test 'A Frame That Changes Nothing Paints Nothing';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    GotoXY (1, 1);
+    Write ('Hi');
+    Show ();
+
+    // The first paint is the whole screen, there being nothing to diff
+    // against; the second must be empty, or every frame would resend it.
+    var First := PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                             TextCols (), TextRows (), 0);
+
+    AssertEqual (TextCols () * TextRows (), First);
+
+    var Second := PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                              TextCols (), TextRows (), 0);
+
+    AssertEqual (0, Second);
+    AssertEqual ('', EscapeText ());
+
+    CloseCrt ();
+end
+
+test 'One Changed Cell Paints One Cell';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    Show ();
+    PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                TextCols (), TextRows (), 0);
+
+    TextColor (LightCyan);
+    GotoXY (5, 3);
+    Write ('x');
+    Show ();
+
+    var N := PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                         TextCols (), TextRows (), 0);
+
+    AssertEqual (1, N);
+
+    // The cursor is moved, the colors stated, and the character sent -- and
+    // nothing else, which is what keeps a repaint to a few hundred bytes.
+    AssertEqual ('<ESC>[3;5H<ESC>[25m<ESC>[38;5;87m<ESC>[49mx', EscapeText ());
+
+    CloseCrt ();
+end
+
+test 'Truecolor And The 256 Cube Are Both Spelled Correctly';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    Show ();
+    PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                TextCols (), TextRows (), 0);
+
+    TextColor (LightCyan);
+    GotoXY (1, 1);
+    Write ('q');
+    Show ();
+
+    PaintCells (Screen.Address, Painted.Address, Escapes.Address,
+                TextCols (), TextRows (), 1);
+
+    // LightCyan is 0x55FFFF, and truecolor says so exactly.
+    AssertEqual ('<ESC>[1;1H<ESC>[25m<ESC>[38;2;85;255;255m<ESC>[49mq',
+                 EscapeText ());
+
+    CloseCrt ();
+end
+
+test 'The Key Decoder Turns Escape Sequences Into Key Constants';
+begin
+    // The table is data, so it can be asserted without a terminal to type at.
+    AssertEqual (KeyUp, KeySeqs['[A']);
+    AssertEqual (KeyDown, KeySeqs['[B']);
+    AssertEqual (KeyRight, KeySeqs['[C']);
+    AssertEqual (KeyLeft, KeySeqs['[D']);
+    AssertEqual (KeyDel, KeySeqs['[3~']);
+    AssertEqual (KeyPgUp, KeySeqs['[5~']);
+    AssertEqual (KeyF1, KeySeqs['OP']);
+    AssertEqual (KeyF5, KeySeqs['[15~']);
+    AssertEqual (KeyF12, KeySeqs['[24~']);
+
+    // Terminals disagree about Home and End, so both spellings are listed
+    // rather than one being declared correct.
+    AssertEqual (KeyHome, KeySeqs['[H']);
+    AssertEqual (KeyHome, KeySeqs['OH']);
+    AssertEqual (KeyHome, KeySeqs['[1~']);
+    AssertEqual (KeyEnd, KeySeqs['[F']);
+    AssertEqual (KeyEnd, KeySeqs['OF']);
+
+    // A sequence nobody sends is not a key, and the decoder hands its bytes
+    // back as themselves.
+    AssertTrue (not ('[Z' in KeySeqs));
+end
+
+test 'A Screen That Is Not A Terminal Emits Nothing And Has No Keys';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    // The suite runs with output redirected, which is the whole reason this
+    // unit can be tested at all: everything composites and nothing escapes.
+    AssertTrue (not IsTerminal ());
+    AssertTrue (not KeyPressed ());
+    AssertEqual (KeyClose, ReadKey ());
+
+    CloseCrt ();
+end
+
+test 'The Nap Actually Sleeps';
+begin
+    // ReadKey waits through this, so it has to be a real sleep rather than a
+    // call that returns at once -- otherwise a program sitting at a menu
+    // polls as fast as the interpreter can go.
+    // The language's clock answers SECONDS, so a sixty millisecond nap is
+    // six hundredths -- worth stating, because reading it as milliseconds
+    // makes every duration here wrong by a thousand.
+    var Start := clock ();
+
+    CrtNap (60);
+
+    var Slept := clock () - Start;
+
+    AssertTrue (Slept >= 0.05);
+    AssertTrue (Slept < 2.0);
+
+    // Total: a senseless delay sleeps not at all rather than forever.
+    var Before := clock ();
+
+    CrtNap (0);
+    CrtNap (0 - 5);
+
+    AssertTrue (clock () - Before < 0.05);
+end
+
+test 'The Byte Reader Answers Known Values';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var B := Buffer (8);
+
+    // Little-endian words, and the high bit set so the signed read that the
+    // language gives back has to be brought into range first.
+    B.PutInt (0, 65 + 66 * 256 + 67 * 65536);
+    B.PutInt (4, 0 - 1);
+
+    AssertEqual (65, ByteAt (B, 0));
+    AssertEqual (66, ByteAt (B, 1));
+    AssertEqual (67, ByteAt (B, 2));
+    AssertEqual (0, ByteAt (B, 3));
+    AssertEqual (255, ByteAt (B, 4));
+    AssertEqual (255, ByteAt (B, 7));
+
+    CloseCrt ();
+end
+
+test 'A Window Validates Its Rectangle And Its Order';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var Message := '';
+
+    try Window (1, 1, 10, 5, 0); except on e : String do Message := e; end
+    AssertEqual ('Order 0 is the screen''s.', Message);
+
+    Message := '';
+    try Window (0, 1, 10, 5, 1); except on e : String do Message := e; end
+    AssertEqual ('Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.', Message);
+
+    Message := '';
+    try Window (10, 1, 5, 5, 1); except on e : String do Message := e; end
+    AssertEqual ('Window wants 1 <= X1 <= X2 and 1 <= Y1 <= Y2.', Message);
+
+    CloseCrt ();
+
+    Message := '';
+    try Window (1, 1, 5, 5, 1); except on e : String do Message := e; end
+    AssertEqual ('Crt is not open.', Message);
+end
+
+test 'CloseCrt Invalidates Every Surface';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (1, 1, 5, 3, 1);
+
+    CloseCrt ();
+
+    var Message := '';
+
+    try W.Emit ('x'); except on e : String do Message := e; end
+    AssertEqual ('CloseCrt has closed this surface.', Message);
+
+    Message := '';
+    try W.Clear (); except on e : String do Message := e; end
+    AssertEqual ('CloseCrt has closed this surface.', Message);
+
+    Message := '';
+    try W.GetPalette (); except on e : String do Message := e; end
+    AssertEqual ('CloseCrt has closed this surface.', Message);
+end
+
+test 'The Aliases Reach The Window Methods';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    var W := Window (2, 2, 12, 5, 1);
+
+    TextBackground (W, Blue);
+    TextColor (W, Yellow);
+    ClrScr (W);
+    GotoXY (W, 3, 2);
+    Write (W, 'hi');
+
+    AssertEqual (Ord ('h'), W.CellAt (3, 2));
+    AssertEqual (Yellow, W.InkAt (3, 2));
+    AssertEqual (5, WhereX (W));
+    AssertEqual (2, WhereY (W));
+
+    WriteLn (W, '!');
+    AssertEqual (1, WhereX (W));
+    AssertEqual (3, WhereY (W));
+
+    GotoXY (W, 1, 1);
+    DelLine (W);
+    InsLine (W);
+    ClrEol (W);
+
+    SetPalette (W, [Yellow : Red]);
+    AssertEqual (Red, GetPalette (W)[Yellow]);
+
+    HighVideo (W);
+    LowVideo (W);
+    NormVideo (W);
+
+    AssertEqual (LightGray, W.InkAsked);
+
+    CloseCrt ();
+end

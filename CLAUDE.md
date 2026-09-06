@@ -275,6 +275,7 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
 | `graph` | `InitGraph`, `CloseGraph`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 367 | complete |
+| `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning | 28 | complete |
 
 ⚠️ **`graph` has a design document, `DESIGN.md`, and it governs.** The unit is
 one world — celled text on a grid at Order 0, Canvas objects above and below
@@ -305,6 +306,34 @@ alike — `(1, 1)` is home, `GotoXY (TextCols (), TextRows ())` the far corner,
 `GetMaxX ()` the width itself — while the language's strings stay 0-based;
 the seam is `Text[Col - 1]`, at the memory boundary. `examples/ide.a24` is
 the acceptance piece — the Turbo C++ screen rebuilt from the vocabulary.
+
+⚠️ **`crt` duplicates `graph`'s constants deliberately, and must not be
+refactored to share them.** `uses` is **not transitive**: a program saying
+`uses crt` cannot see names a unit `crt` itself uses. Factoring the sixteen
+colors and the keys into a shared unit would force every consumer to say
+`uses` of that unit as well, merely to write `LightCyan` — breaking every
+program, example and reference entry at once. One import for the thing you
+actually want beats one definition.
+
+`crt` notes: nothing is emitted unless standard output is a terminal, so a
+piped run produces its own output and nothing else — which is also what makes
+the unit testable with no tty, the same discipline `SDL_VIDEODRIVER=dummy`
+gives `graph`. The screen composites in memory and paints by difference: a
+frame that changes six cells sends six cells, and a frame that changes nothing
+sends nothing. `alg_crt_paint` deliberately does **not** write; the unit
+decides whether anything reaches the terminal, which is what lets a test paint
+a screen and read the escapes back through `EscapeText ()`. Colors go out as
+24-bit where `COLORTERM` says truecolor, and as the nearest of the 256-color
+cube otherwise. `Blink` is the terminal's own cadence, so there is no
+`SetBlinkRate`. `Alpha` is 0 or visible, a cell holding one character. `ReadKey` naps ten milliseconds between polls through `alg_crt_nap`, so waiting for a key is a wait rather than a spin -- `graph` delays through SDL and this unit has no SDL. ⚠️ **The language's `clock ()` answers SECONDS**, not milliseconds; reading it the other way makes every duration wrong by a thousand.
+`examples/ide-crt.a24` is the acceptance piece — `examples/ide.a24` with three
+lines changed.
+
+⚠️ **Language points `crt` learned the hard way**: it is `Char (65)`, not
+`Chr`; `#0` is **not a Char**, so NUL cannot be a sentinel; `List` has no
+`Remove`, so a queue keeps a head index; `Buffer` addresses **words only**,
+with no `GetByte`; and `end` before `else` takes **no** semicolon, where a
+simple statement before `else` takes one.
 
 `examples/statistics.a24` is the worked application — built by
 `examples/build.sh`, verified by `examples/check.sh`, explained in

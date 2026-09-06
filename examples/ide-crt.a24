@@ -1,0 +1,239 @@
+// The Turbo-era IDE screen, rebuilt from the crt unit -- the same screen
+// examples/ide.a24 draws, on a terminal instead of a window.
+//
+//     algc examples/ide-crt.a24
+//
+// Esc, or any key, finishes.
+//
+// Put the two side by side and the point of the exercise shows: the code is
+// the same code. The menu bar, the double frame, the scrollbars, the status
+// line and the overlapping windows are written with the same verbs against
+// the same sixteen colors, and only the three lines that open the screen
+// differ. What ide.a24 has that this cannot is the graphics -- the ViewPorts
+// with their charts -- because a terminal cell holds a character and nothing
+// finer.
+//
+// The one real difference in the layout is that this adapts. A terminal has
+// whatever size the user gave it, so every position below is derived from
+// TextCols and TextRows rather than from a fixed 80 by 25.
+
+uses crt;
+
+/// N copies of Ch, joined.
+function Fill (Ch : Char, N : Integer) : String;
+begin
+    var B := Buffer ();
+
+    for var I := 0; I < N; I := I + 1 do
+        B.Append (Ch);
+
+    Exit B.Text;
+end
+
+/// Frames a window's own cells and titles it.
+procedure Frame (W, Title : String);
+begin
+    W.GotoXY (1, 1);
+    W.Write ('╔' + Fill ('═', W.Cols - 2) + '╗');
+
+    for var R := 2; R < W.Rows; R := R + 1 do
+    begin
+        W.GotoXY (1, R);
+        W.Write ('║');
+        W.GotoXY (W.Cols, R);
+        W.Write ('║');
+    end
+
+    W.GotoXY (1, W.Rows);
+    W.Write ('╚' + Fill ('═', W.Cols - 2) + '╝');
+
+    W.GotoXY (3, 1);
+    W.Write (' ' + Title + ' ');
+end
+
+/// One menu item: hotkey letter red, the rest black.
+procedure MenuItem (Text : String);
+begin
+    TextColor (Red);
+    Write (Str (Text[0]));
+    TextColor (Black);
+    Write (Copy (Text, 1, Length (Text) - 1) + '  ');
+end
+
+/// One status key: the key red, its label black.
+procedure StatusKey (Key : String, Label : String);
+begin
+    TextColor (Red);
+    Write (Key);
+    TextColor (Black);
+    Write (' ' + Label + '  ');
+end
+
+begin
+    InitCrt ();
+
+    // Every position derives from the grid -- one-based, storybook: (1, 1) is
+    // the corner and (Cols, Rows) the other one. Here the grid is whatever
+    // terminal the program was run in.
+    var Cols   := TextCols ();
+    var Rows   := TextRows ();
+    var Bottom := Rows - 1;          // the frame's bottom border row
+
+    // The desktop: every cell blue.
+    TextBackground (Blue);
+    ClrScr ();
+
+    // ------------------------------------------------------- the menu bar --
+    TextBackground (LightGray);
+    GotoXY (1, 1);
+    Write (Fill (' ', Cols - 1));
+    GotoXY (2, 1);
+    TextColor (Red);
+    Write ('≡');
+    GotoXY (5, 1);
+
+    for var Item in ['File', 'Edit', 'Search', 'Run', 'Compile',
+                     'Debug', 'Project', 'Options', 'Window', 'Help'] do
+        if WhereY () = 1 then
+          if WhereX () + Length (Item) + 2 < Cols then MenuItem (Item);
+
+    // ---------------------------------------------------- the editor frame --
+    TextBackground (Blue);
+    TextColor (White);
+
+    var Title := ' NONAME00.CPP ';
+    var Inner := Cols - 12 - Length (Title);   // between '╔═[■]' and '1═[↕]═╗'
+    var Side  := Inner div 2;
+
+    GotoXY (1, 2);
+    Write ('╔═[');
+    TextColor (LightGreen);
+    Write ('■');
+    TextColor (White);
+    Write (']' + Fill ('═', Side) + Title + Fill ('═', Inner - Side) + '1═[');
+    TextColor (LightGreen);
+    Write ('↕');
+    TextColor (White);
+    Write (']═╗');
+
+    for var Row := 3; Row < Bottom; Row := Row + 1 do
+    begin
+        GotoXY (1, Row);
+        Write ('║');
+        GotoXY (Cols, Row);
+
+        TextColor (Cyan);
+
+        if Row = 3 then Write ('▲');
+        else if Row = Bottom - 1 then Write ('▼');
+        else Write ('▒');
+
+        TextColor (White);
+    end
+
+    var HBar := Cols - 17;                     // between the fixed ends
+
+    GotoXY (1, Bottom);
+    Write ('╚═ 1:1 ' + Fill ('═', 4));
+    TextColor (Cyan);
+    Write ('◄' + Fill ('▒', HBar) + '►');
+    TextColor (White);
+    Write (Fill ('═', 2) + '╝');
+
+    // The editing cursor, waiting at the top of the empty file. Blinking is
+    // the terminal's own here rather than this unit's, which is the one thing
+    // about it that differs from the graph version.
+    GotoXY (2, 3);
+    TextColor (Yellow + Blink);
+    Write ('▄');
+
+    // Three lines of the file, one per intensity: the same cyan dimmed and
+    // brightened around NormVideo's everyday LightGray.
+    GotoXY (3, 5);
+    TextColor (LightCyan);
+    LowVideo ();
+    Write ('{ LowVideo  -- for the quiet aside }');
+
+    GotoXY (3, 6);
+    NormVideo ();
+    TextBackground (Blue);     // NormVideo resets the background too --
+    Write ('{ NormVideo -- the everyday text }');   // Transparent would let
+                                                    // the terminal show through
+    GotoXY (3, 7);
+    TextColor (Cyan);
+    HighVideo ();
+    Write ('{ HighVideo -- for the loud parts }');
+
+    // ------------------------------------ two windows that OVERLAP, each --
+    // ------------------------------------ with its own cursor and colors  --
+    //
+    // The stack a single text plane cannot express: two surfaces with their
+    // own cells, their own cursors and their own colors, the upper one cutting
+    // across the lower. Dragging either would carry its contents with it,
+    // because each holds its own cells rather than sharing the screen's.
+
+    var WinW := Cols div 3;
+    var WinH := Rows div 2;
+
+    if WinW < 24 then WinW := 24;
+    if WinH < 9  then WinH := 9;
+
+    // -- the lower window ---------------------------------------------------
+    var Notes := Window (3, 4, 2 + WinW, 3 + WinH, 1);
+
+    Notes.TextBackground (Black);
+    Notes.TextColor (LightGray);
+    Notes.Clear ();
+    Frame (Notes, 'Notes');
+
+    Notes.GotoXY (3, 3);
+    Notes.TextColor (LightCyan);
+    Notes.Write ('Its own cells, its own');
+    Notes.GotoXY (3, 4);
+    Notes.Write ('cursor, its own colors.');
+
+    Notes.GotoXY (3, 6);
+    Notes.TextColor (Yellow);
+    Notes.Write ('Order 1');
+
+    // -- the upper window, cutting across it --------------------------------
+    var Watch := Window (3 + WinW div 2, 4 + WinH div 2,
+                         2 + WinW + WinW div 2, 3 + WinH + WinH div 2, 2);
+
+    Watch.TextBackground (Cyan);
+    Watch.TextColor (Black);
+    Watch.Clear ();
+    Frame (Watch, 'Watch');
+
+    Watch.GotoXY (3, 3);
+    Watch.Write ('This one is above,');
+    Watch.GotoXY (3, 4);
+    Watch.Write ('and hides what it');
+    Watch.GotoXY (3, 5);
+    Watch.Write ('covers -- gaps and all.');
+
+    Watch.GotoXY (3, 7);
+    Watch.TextColor (Blue);
+    Watch.Write ('Order 2');
+
+    // --------------------------------------------------- the status line --
+    TextBackground (LightGray);
+    TextColor (Black);
+    GotoXY (1, Rows);
+    Write (Fill (' ', Cols - 1));
+    GotoXY (2, Rows);
+
+    for var Key in [['F1', 'Help'], ['F2', 'Save'], ['F3', 'Open'],
+                    ['Alt+F9', 'Compile'], ['F9', 'Make'], ['Alt+F10', 'Local']] do
+        if WhereY () = Rows then
+          if WhereX () + Length (Key[0]) + Length (Key[1]) + 4 < Cols then
+              StatusKey (Key[0], Key[1]);
+
+    Show ();
+
+    // A screen that is not a terminal has no keys to wait for, so a piped run
+    // finishes rather than hanging.
+    if IsTerminal () then ReadKey ();
+
+    CloseCrt ();
+end

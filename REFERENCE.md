@@ -15,24 +15,25 @@ Each example assumes the unit is reachable — run from the directory holding th
 | | | |
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
-| [`Aliases`](#aliases) | convention | `graph` |
+| [`Aliases`](#aliases) | convention | `graph` and `crt` |
 | [`Arc`](#arc) | procedure, alias | `graph` |
 | [`ArcCoords`](#arccoords) | class | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
 | [`Bar`](#bar) | procedure, alias | `graph` |
 | [`Bar3D`](#bar3d) | procedure, alias | `graph` |
-| [`Blink`](#blink) | constant | `graph` |
+| [`Blink`](#blink) | constant | `graph` and `crt` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`Circle`](#circle) | procedure, alias | `graph` |
-| [`Clear`](#clear) | method | `graph` |
+| [`Clear`](#clear) | method | `graph` and `crt` |
 | [`ClearViewPort`](#clearviewport) | procedure, alias | `graph` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
-| [`ClrEol`](#clreol) | procedure | `graph` |
-| [`ClrScr`](#clrscr) | procedure | `graph` |
-| [`Black` … `White`](#colors) | constants | `graph` |
+| [`ClrEol`](#clreol) | procedure | `graph` and `crt` |
+| [`ClrScr`](#clrscr) | procedure | `graph` and `crt` |
+| [`Black` … `White`](#colors) | constants | `graph` and `crt` |
 | [`Cos`](#cos) | function | `math` |
-| [`DelLine` `InsLine`](#delline) | procedures | `graph` |
+| [`Crt`](#crt) | unit | `crt` |
+| [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`Exp`](#exp) | function | `math` |
@@ -54,30 +55,32 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`GetTextSettings` `GetViewSettings`](#gettextsettings) | functions, aliases | `graph` |
 | [`GetX`](#getx) | function, alias | `graph` |
 | [`GetY`](#gety) | function, alias | `graph` |
-| [`GotoXY`](#gotoxy) | procedure | `graph` |
+| [`GotoXY`](#gotoxy) | procedure | `graph` and `crt` |
 | [`GraphDefaults`](#graphdefaults) | procedure, alias | `graph` |
-| [`HighVideo`](#highvideo) | procedure | `graph` |
+| [`HighVideo`](#highvideo) | procedure | `graph` and `crt` |
 | [`Image`](#image) | class | `graph` |
 | [`ImageSize`](#imagesize) | function | `graph` |
 | [`Infinity`](#infinity) | constant | `math` |
+| [`InitCrt`](#initcrt) | procedures | `crt` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
 | [`Int`](#int) | function | `math` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
-| [`KeyPressed`](#keypressed) | function | `graph` |
-| [`KeyUp` … `KeyClose`](#keys) | constants | `graph` |
+| [`IsTerminal`](#isterminal) | function | `crt` |
+| [`KeyPressed`](#keypressed) | function | `graph` and `crt` |
+| [`KeyUp` … `KeyClose`](#keys) | constants | `graph` and `crt` |
 | [`Line`](#line) | procedure, alias | `graph` |
 | [`LineRel`](#linerel) | procedure, alias | `graph` |
 | [`SolidLn` … `ThickWidth`](#linestyles) | constants | `graph` |
 | [`LineTo`](#lineto) | procedure, alias | `graph` |
 | [`Ln`](#ln) | function | `math` |
-| [`LowVideo`](#lowvideo) | procedure | `graph` |
+| [`LowVideo`](#lowvideo) | procedure | `graph` and `crt` |
 | [`Max`](#max) | function | `math` |
 | [`Min`](#min) | function | `math` |
-| [`MoveTo`](#moveto) | procedure, alias | `graph` |
+| [`MoveTo`](#moveto) | procedure, alias | `graph` and `crt` |
 | [`NaN`](#nan) | constant | `math` |
-| [`NormVideo`](#normvideo) | procedure | `graph` |
+| [`NormVideo`](#normvideo) | procedure | `graph` and `crt` |
 | [`Odd`](#odd) | function | `math` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
@@ -91,7 +94,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
 | [`RandomReal`](#randomreal) | function | `random` |
-| [`ReadKey`](#readkey) | function | `graph` |
+| [`ReadKey`](#readkey) | function | `graph` and `crt` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
@@ -103,30 +106,30 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
 | [`SetFillStyle`](#setfillstyle) | procedures, aliases | `graph` |
 | [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
-| [`SetPalette`](#setpalette) | procedures | `graph` |
+| [`SetPalette`](#setpalette) | procedures | `graph` and `crt` |
 | [`SetSeed`](#setseed) | procedure | `random` |
 | [`SetTextJustify`](#settextjustify) | procedure, alias | `graph` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
 | [`SetUserCharSize`](#setusercharsize) | procedure, alias | `graph` |
 | [`SetWriteMode` `GetWriteMode`](#setwritemode) | procedures, aliases | `graph` |
-| [`Show`](#show) | procedure, alias | `graph` |
+| [`Show`](#show) | procedure, alias | `graph` and `crt` |
 | [`Sin`](#sin) | function | `math` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
-| [`TextBackground`](#textbackground) | procedure | `graph` |
-| [`TextColor`](#textcolor) | procedure | `graph` |
-| [`TextCols`](#textcols) | function | `graph` |
+| [`TextBackground`](#textbackground) | procedure | `graph` and `crt` |
+| [`TextColor`](#textcolor) | procedure | `graph` and `crt` |
+| [`TextCols`](#textcols) | function | `graph` and `crt` |
 | [`LeftText` … `TopText`](#textjustify) | constants | `graph` |
 | [`TextMode`](#textmode) | procedure | `graph` |
-| [`TextRows`](#textrows) | function | `graph` |
+| [`TextRows`](#textrows) | function | `graph` and `crt` |
 | [`TextSettings` `ViewSettings`](#textsettings) | classes | `graph` |
 | [`TextWidth` `TextHeight`](#textwidth) | functions | `graph` |
 | [`Trunc`](#trunc) | function | `math` |
 | [`ViewPort`](#viewport) | class | `graph` |
-| [`WhereX`](#wherex) | function | `graph` |
-| [`WhereY`](#wherey) | function | `graph` |
-| [`Window`](#window) | class | `graph` |
-| [`Write` `WriteLn`](#write) | procedures | `graph` |
+| [`WhereX`](#wherex) | function | `graph` and `crt` |
+| [`WhereY`](#wherey) | function | `graph` and `crt` |
+| [`Window`](#window) | class | `graph` and `crt` |
+| [`Write` `WriteLn`](#write) | procedures | `graph` and `crt` |
 
 ---
 
@@ -188,7 +191,7 @@ WriteLn (Abs (-170141183460469231731687303715884105728));
 
 ## Aliases
 
-*a convention* — unit `graph`
+*a convention* — unit `graph` and `crt`
 
 **Function**
 
@@ -202,6 +205,9 @@ Line (V, 1, 1, 40, 20)  is      V.Line (1, 1, 40, 20)
 ```
 
 **Remarks**
+
+`crt` follows the same convention with the same spellings, for the text
+verbs it shares.
 
 Verb-first is how a Turbo Pascal program reads, and this library's vocabulary
 is Turbo Pascal's — so each of the seventy surface methods has a
@@ -666,7 +672,7 @@ true
 
 ## Blink
 
-*constant* — unit `graph`
+*constant* — unit `graph` and `crt`
 
 **Function**
 
@@ -679,6 +685,10 @@ const Blink := 16777216;
 ```
 
 **Remarks**
+
+In `crt` the terminal owns the cadence rather than this library, which is
+why that unit has no [`SetBlinkRate`](#setblinkrate). Some terminals ignore
+blinking altogether, and no unit can make them do otherwise.
 
 `TextColor (LightRed + Blink)` makes the ink blink — 267 milliseconds on,
 267 off by default, the VGA's own cadence of sixteen frames each way;
@@ -863,7 +873,7 @@ true
 
 ## Clear
 
-*method of [`Window`](#window) and [`ViewPort`](#viewport)* — unit `graph`
+*method of [`Window`](#window) and [`ViewPort`](#viewport)* — unit `graph` and `crt`
 
 **Function**
 
@@ -876,6 +886,9 @@ procedure Clear ();     // on a Window, and on a ViewPort
 ```
 
 **Remarks**
+
+`crt` has the same verb on its `Window`, aliased `ClrScr`, and no
+`ClearViewPort` — there being no viewports.
 
 The one clearing verb both kinds of surface answer to. Turbo Pascal had two
 unrelated names for it — `ClrScr` in Crt and `ClearViewPort` in Graph — because
@@ -1045,7 +1058,7 @@ closed without complaint
 
 ## ClrEol
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -1101,7 +1114,7 @@ CloseGraph ();
 
 ## ClrScr
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -1164,7 +1177,7 @@ CloseGraph ();
 
 ## Colors
 
-*constants* — unit `graph`
+*constants* — unit `graph` and `crt`
 
 **Function**
 
@@ -1186,6 +1199,10 @@ const Transparent  := -1;
 ```
 
 **Remarks**
+
+`crt` declares the same sixteen values and sends them to the terminal as
+24-bit color where it says it can, and as the nearest of the 256-color cube
+where it does not. See [`Crt`](#crt).
 
 Named 24-bit values, so `TextColor (Yellow)` reads like 1989 while being RGB
 underneath — and any other RGB Integer is just as welcome wherever these are.
@@ -1263,9 +1280,71 @@ for var Deg := 0; Deg <= 180; Deg := Deg + 90 do
 
 ---
 
+## Crt
+
+*a unit* — unit `crt`
+
+**Function**
+
+`graph`'s text mode, on a terminal instead of a window.
+
+**Declaration**
+
+```algol24
+uses crt;
+
+InitCrt ();
+```
+
+**Remarks**
+
+One world, as [`graph`](#initgraph) is, with the graphics half removed and a
+terminal underneath. **The vocabulary is the same** — [`Write`](#write),
+[`GotoXY`](#gotoxy), [`TextColor`](#textcolor), the [`Window`](#window) class
+stacked by `Order`, [palettes](#setpalette), [`ReadKey`](#readkey) — so a
+program written against one reads as a program written against the other.
+`examples/ide-crt.a24` is `examples/ide.a24` with three lines changed.
+
+Every text verb in this reference marked *unit `graph` and `crt`* is in both
+and means the same in each. What `crt` does not have is everything that needs
+a pixel: no ViewPorts, no pen, no figures, no fonts.
+
+⚠️ **The constants are declared twice, not shared.** `uses` is not transitive
+here, so a shared unit would force `uses crt` **and** `uses` of that shared
+unit merely to write `LightCyan`. One import for the thing you actually want
+is worth more than one definition.
+
+⚠️ **The screen is the terminal's own size**, asked afresh rather than fixed,
+so [`TextCols`](#textcols) and `TextRows` follow a resize between one frame and
+the next.
+
+Colors reach the terminal as 24-bit where `COLORTERM` says it can, and as the
+nearest of the 256-color cube where it does not — so a palette lands exactly
+on a modern terminal and approximately on an old one.
+
+⚠️ **Nothing is emitted unless standard output is a terminal.** Everything
+still composites, so a piped run produces its own output and nothing else, and
+this unit's own tests read a finished screen back without a byte escaping. See
+[`IsTerminal`](#isterminal).
+
+The screen is composited in memory and painted by difference: a frame that
+changes six cells sends six cells.
+
+**See also**
+
+[`InitCrt`](#initcrt), [`IsTerminal`](#isterminal), [`Window`](#window),
+[`Write`](#write)
+
+**Example**
+
+See [`InitCrt`](#initcrt).
+
+
+---
+
 ## DelLine
 
-*procedures* — unit `graph`
+*procedures* — unit `graph` and `crt`
 
 **Function**
 
@@ -2858,7 +2937,7 @@ See [`Line`](#line).
 
 ## GotoXY
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -2994,7 +3073,7 @@ picture   true
 
 ## HighVideo
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -3203,6 +3282,92 @@ Infinity
 true
 -1.25
 ```
+
+---
+
+## InitCrt
+
+*procedures* — unit `crt`
+
+**Function**
+
+Opens and closes the terminal screen.
+
+**Declaration**
+
+```algol24
+procedure InitCrt ();
+procedure CloseCrt ();
+```
+
+**Remarks**
+
+`InitCrt` takes nothing, where [`InitGraph`](#initgraph) takes a size and a
+title: a terminal already has both, and neither is this program's to choose.
+[`TextCols`](#textcols) and `TextRows` answer what it actually is.
+
+It puts the terminal into character-at-a-time mode so [`ReadKey`](#readkey)
+can work, and onto its **alternate screen**, so whatever was on the terminal
+before comes back when the program finishes.
+
+⚠️ **`CloseCrt` gives the terminal back as it was found**, and is worth
+calling from an exception handler as well as at the end — a program that dies
+without it leaves the terminal in raw mode, which the shell's `reset` fixes.
+
+Both are idempotent: opening twice changes nothing and closing twice is
+harmless. `CloseCrt` invalidates every surface, so a method called on one
+afterward raises `CloseCrt has closed this surface.`
+
+Raises `Crt is not open.` from any verb used before `InitCrt`.
+
+**See also**
+
+[`Crt`](#crt), [`IsTerminal`](#isterminal), [`TextCols`](#textcols),
+[`Window`](#window)
+
+**Example**
+
+```algol24
+uses crt;
+
+InitCrt ();
+
+// The screen is the terminal's own size, asked afresh rather than fixed --
+// so this is whatever window the program was run in.
+var Cols := TextCols ();
+var Rows := TextRows ();
+
+TextBackground (Blue);
+TextColor (Yellow);
+ClrScr ();
+
+GotoXY (3, 2);
+Write ('Hello from crt');
+
+// A window of its own, over the screen, with its own cursor and colors.
+var W := Window (5, 4, 30, 8, 1);
+
+W.TextBackground (Red);
+W.TextColor (White);
+W.Clear ();
+W.GotoXY (2, 2);
+W.Write ('and from a Window');
+
+Show ();
+
+// Nothing above reached the terminal, because this run is piped. Everything
+// composited all the same, which is what the screen can be read back from.
+CloseCrt ();
+
+System.WriteLn ('screen was ', Cols, ' by ', Rows);
+System.WriteLn ('a terminal: false, so nothing was emitted');
+```
+
+```console
+screen was 80 by 25
+a terminal: false, so nothing was emitted
+```
+
 
 ---
 
@@ -3506,9 +3671,84 @@ true
 
 ---
 
+## IsTerminal
+
+*function* — unit `crt`
+
+**Function**
+
+Whether this screen is painting a real terminal.
+
+**Declaration**
+
+```algol24
+function IsTerminal () : Boolean;
+```
+
+**Remarks**
+
+False when standard output is a file or a pipe.
+
+⚠️ **Everything works either way.** The surfaces composite, the cursor moves,
+the cells take their colors — only the emitting is skipped. That is what lets
+a program's own output stay clean when it is piped, and what lets this unit's
+tests read a finished screen back without a byte reaching stdout.
+
+It is worth asking before deciding to wait for a key: with no terminal none
+can arrive, so [`ReadKey`](#readkey) answers [`KeyClose`](#keys) at once and
+`KeyPressed` is always False. A program that would otherwise loop until a
+keypress should ask this first.
+
+```algol24
+if IsTerminal () then ReadKey ();
+```
+
+Raises `Crt is not open.` before [`InitCrt`](#initcrt).
+
+**See also**
+
+[`Crt`](#crt), [`InitCrt`](#initcrt), [`KeyPressed`](#keypressed),
+[`ReadKey`](#readkey)
+
+**Example**
+
+```algol24
+uses crt;
+
+InitCrt ();
+
+// Everything works whether or not there is a terminal to paint: the screen
+// composites either way, and only the emitting is skipped.
+var Live := IsTerminal ();
+
+TextColor (LightCyan);
+GotoXY (1, 1);
+Write ('composed either way');
+
+// There can be no keys without a terminal, so ReadKey answers KeyClose at
+// once rather than waiting for something that cannot come.
+var Waiting := KeyPressed ();
+var K       := ReadKey ();
+
+CloseCrt ();
+
+System.WriteLn ('a terminal:   ', Live);
+System.WriteLn ('key waiting:  ', Waiting);
+System.WriteLn ('ReadKey gave: ', K = KeyClose);
+```
+
+```console
+a terminal:   false
+key waiting:  false
+ReadKey gave: true
+```
+
+
+---
+
 ## KeyPressed
 
-*function* — unit `graph`
+*function* — unit `graph` and `crt`
 
 **Function**
 
@@ -3521,6 +3761,9 @@ function KeyPressed () : Boolean;
 ```
 
 **Remarks**
+
+In `crt`, a screen that is not a terminal has no keys at all, so this is
+always False there. See [`IsTerminal`](#isterminal).
 
 Neither consumes the key nor blocks; [`ReadKey`](#readkey) answers it.
 
@@ -3545,7 +3788,7 @@ See [`ReadKey`](#readkey), which shows the empty queue answered;
 
 ## Keys
 
-*constants* — unit `graph`
+*constants* — unit `graph` and `crt`
 
 **Function**
 
@@ -3825,7 +4068,7 @@ WriteLn (Ln (0.0));
 
 ## LowVideo
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -3945,7 +4188,7 @@ See [`Max`](#max), which shows both.
 
 ## MoveTo
 
-*procedure, alias of `Window.MoveTo` and `ViewPort.MoveTo`* — unit `graph`
+*procedure, alias of `Window.MoveTo` and `ViewPort.MoveTo`* — unit `graph` and `crt`
 
 **Function**
 
@@ -3958,6 +4201,9 @@ procedure MoveTo (Surface, X : Integer, Y : Integer);
 ```
 
 **Remarks**
+
+`crt`'s takes a `Window` and nothing else, that unit having no ViewPorts for
+an untyped surface to choose between.
 
 An [alias](#aliases) of both methods: `MoveTo (W, …)` is `W.MoveTo (…)`.
 
@@ -4065,7 +4311,7 @@ true
 
 ## NormVideo
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -4796,7 +5042,7 @@ WriteLn (RandomReal ());
 
 ## ReadKey
 
-*function* — unit `graph`
+*function* — unit `graph` and `crt`
 
 **Function**
 
@@ -4809,6 +5055,11 @@ function ReadKey () : Char;
 ```
 
 **Remarks**
+
+⚠️ **In `crt`, a screen that is not a terminal can never receive a key**, so
+`ReadKey` answers [`KeyClose`](#keys) at once rather than waiting for
+something that cannot come, and `KeyPressed` is always False. See
+[`IsTerminal`](#isterminal).
 
 One Char per key, always:
 
@@ -5560,7 +5811,7 @@ See [`Line`](#line), which draws dashed and solid from one viewport.
 
 ## SetPalette
 
-*procedures* — unit `graph`
+*procedures* — unit `graph` and `crt`
 
 **Function**
 
@@ -5577,6 +5828,8 @@ function  GetPalette (Surface) : Map;            // that Window or ViewPort
 ```
 
 **Remarks**
+
+`crt` has the same pair, and the same rule, on a `Window` or the screen.
 
 A palette is a **Map from one of the sixteen [color names](#colors) to the RGB
 it should mean here**. It is per surface, as every pen is — a themed screen
@@ -6128,7 +6381,7 @@ circle:  true
 
 ## Show
 
-*procedure, alias of `ViewPort.Show`* — unit `graph`
+*procedure, alias of `ViewPort.Show`* — unit `graph` and `crt`
 
 **Function**
 
@@ -6141,6 +6394,9 @@ procedure Show (V : ViewPort);
 ```
 
 **Remarks**
+
+In `crt` this composites the surfaces and paints the cells that changed;
+nothing reaches the terminal when standard output is not one.
 
 An [alias](#aliases) of the method: `Show (V)` is `V.Show ()`.
 
@@ -6303,7 +6559,7 @@ WriteLn (Sqrt (Sqr (A) + Sqr (B)));
 
 ## TextBackground
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -6359,7 +6615,7 @@ painted
 
 ## TextColor
 
-*procedure* — unit `graph`
+*procedure* — unit `graph` and `crt`
 
 **Function**
 
@@ -6396,7 +6652,7 @@ See [`TextBackground`](#textbackground), which sets both.
 
 ## TextCols
 
-*function* — unit `graph`
+*function* — unit `graph` and `crt`
 
 **Function**
 
@@ -6409,6 +6665,10 @@ function TextCols () : Integer;
 ```
 
 **Remarks**
+
+⚠️ **In `crt` these answer the terminal itself**, asked afresh, so a
+resized window changes them between one frame and the next. `graph`'s is a
+logical grid of a size the program chose.
 
 80, until [`TextMode`](#textmode) says otherwise. The grid is **logical**,
 not a division of the window: an 80 × 25 screen is 80 × 25 in every window,
@@ -6543,7 +6803,7 @@ CloseGraph ();
 
 ## TextRows
 
-*function* — unit `graph`
+*function* — unit `graph` and `crt`
 
 **Function**
 
@@ -6556,6 +6816,9 @@ function TextRows () : Integer;
 ```
 
 **Remarks**
+
+⚠️ **In `crt` these answer the terminal itself**, asked afresh, so a
+resized window changes them between one frame and the next.
 
 25, until [`TextMode`](#textmode) says otherwise, on the same reasoning as
 [`TextCols`](#textcols), which shows both.
@@ -7002,7 +7265,7 @@ CloseGraph ();
 
 ## WhereX
 
-*function* — unit `graph`
+*function* — unit `graph` and `crt`
 
 **Function**
 
@@ -7035,7 +7298,7 @@ See [`GotoXY`](#gotoxy) and [`Write`](#write).
 
 ## WhereY
 
-*function* — unit `graph`
+*function* — unit `graph` and `crt`
 
 **Function**
 
@@ -7064,7 +7327,7 @@ See [`GotoXY`](#gotoxy) and [`WriteLn`](#write).
 
 ## Window
 
-*class* — unit `graph`
+*class* — unit `graph` and `crt`
 
 **Function**
 
@@ -7102,6 +7365,12 @@ Alpha : Integer             0 invisible .. 255 opaque
 ```
 
 **Remarks**
+
+`crt`'s Window is the same class on a terminal: its own cells, its own
+cursor, its own colors, stacked by `Order`. It has no `Alpha` blending — a
+cell holds one character — so `Alpha` there is 0 for invisible and anything
+else for visible, and no `PixelLeft`/`PixelTop`, there being no pixels to
+place a viewport against.
 
 Turbo Pascal's `Window (X1, Y1, X2, Y2)` grown into an object. The corners
 are cells of the root grid's space, **inclusive and one-based**, so
@@ -7195,7 +7464,7 @@ CloseGraph ();
 
 ## Write
 
-*procedures* — unit `graph`
+*procedures* — unit `graph` and `crt`
 
 **Function**
 
@@ -7209,6 +7478,11 @@ procedure WriteLn (Values : List of Any);
 ```
 
 **Remarks**
+
+⚠️ **In `crt`, `System.Write` reaches the same terminal the unit is
+painting**, so a call to it while the screen is up lands in the middle of
+that screen. In `graph` the two are different devices and there is no
+conflict.
 
 The screen is the root [`Window`](#window), and these are its `Write` and
 `WriteLn` — celled text that wraps at the last column, scrolls the grid *and
