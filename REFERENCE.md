@@ -33,10 +33,13 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Black` … `White`](#colors) | constants | `graph` and `crt` |
 | [`Cos`](#cos) | function | `math` |
 | [`Crt`](#crt) | unit | `crt` |
-| [`Delay`](#delay) | procedure | `crt`, `graph` and `sound` |
+| [`Delay`](#delay) | procedure | `crt` and `graph` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
+| [`EnableMouse`](#enablemouse) | procedures and functions | `graph` and `crt` |
+| [`Event`](#event) | class | `graph` and `crt` |
+| [`EventKinds`](#eventkinds) | constants | `graph` and `crt` |
 | [`Exp`](#exp) | function | `math` |
 | [`FillEllipse`](#fillellipse) | procedure, alias | `graph` |
 | [`FillPoly`](#fillpoly) | procedure, alias | `graph` |
@@ -97,6 +100,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
 | [`RandomReal`](#randomreal) | function | `random` |
+| [`ReadEvent`](#readevent) | functions | `graph` and `crt` |
 | [`ReadKey`](#readkey) | function | `graph` and `crt` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Round`](#round) | function | `math` |
@@ -121,6 +125,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SoundAvailable`](#soundavailable) | function | `sound` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
+| [`SurfaceAt`](#surfaceat) | function | `graph` and `crt` |
 | [`TextBackground`](#textbackground) | procedure | `graph` and `crt` |
 | [`TextColor`](#textcolor) | procedure | `graph` and `crt` |
 | [`TextCols`](#textcols) | function | `graph` and `crt` |
@@ -1703,6 +1708,213 @@ CloseGraph ();
 true
 true
 ```
+
+---
+
+## EnableMouse
+
+*procedures and functions* — unit `graph` and `crt`
+
+**Function**
+
+Starts and stops reporting the mouse, and says where it is.
+
+**Declaration**
+
+```algol24
+procedure EnableMouse   ();
+procedure DisableMouse  ();
+function  MouseEnabled  () : Boolean;
+
+function  MouseX        () : Integer;
+function  MouseY        () : Integer;
+function  MouseButtons  () : Integer;
+```
+
+**Remarks**
+
+⚠️ **The mouse is off until a program asks for it.** Turbo Vision always had
+it on, but it owned the whole screen; a library's default should cost nothing.
+Off means a program reading only keys is unaffected, nothing accumulates in a
+queue nobody drains, and — in `crt` — the terminal is never sent the tracking
+escapes that a terminal ignoring them would print as junk.
+
+`MouseX` and `MouseY` are **polled** rather than queued, which is the older
+way and still the right one when all a program wants is where the pointer is
+now. They answer `1, 1` until the mouse has been enabled and moved.
+
+Coordinates are the screen's own space: **logical pixels** in `graph`,
+**cells** in `crt`. `graph` maps SDL's window pixels back into the logical
+space, which is the inverse of the scaling that puts a surface on screen —
+without it every coordinate would be wrong at any window size but one to one.
+
+`MouseButtons` answers the [button bits](#eventkinds) summed.
+
+⚠️ **Closing the screen forgets the mouse.** A new window or screen starts
+with it off, wherever the last one left it, and with no stale pointer
+position.
+
+Raises `Graph is not open.` or `Crt is not open.`
+
+**See also**
+
+[`Event`](#event), [`ReadEvent`](#readevent), [`SurfaceAt`](#surfaceat)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (1280, 800, 'mouse', False);
+
+// Off until asked for, so a program that reads only keys is unaffected and
+// nothing piles up in a queue nobody drains.
+System.WriteLn ('before: ', MouseEnabled ());
+
+EnableMouse ();
+
+System.WriteLn ('after:  ', MouseEnabled ());
+
+// Two surfaces, one over the other.
+var Under := ViewPort (100, 100, 300, 200, 1);
+var Over  := ViewPort (200, 150, 300, 200, 2);
+
+// The stack decides what a point is over. The root grid covers the whole
+// screen, so a point over nothing else answers it rather than nil.
+System.WriteLn ('at 120,120: over Under  ', SurfaceAt (120, 120) = Under);
+System.WriteLn ('at 250,200: over Over   ', SurfaceAt (250, 200) = Over);
+System.WriteLn ('at 5,5:     the screen  ', SurfaceAt (5, 5) = Root);
+System.WriteLn ('at 0,5:     nothing     ', SurfaceAt (0, 5) = nil);
+
+// Reordering is an assignment; nothing else has to be told.
+Under.Order := 3;
+
+System.WriteLn ('reordered:  over Under  ', SurfaceAt (250, 200) = Under);
+
+CloseGraph ();
+```
+
+```console
+before: false
+after:  true
+at 120,120: over Under  true
+at 250,200: over Over   true
+at 5,5:     the screen  true
+at 0,5:     nothing     true
+reordered:  over Under  true
+```
+
+
+---
+
+## Event
+
+*class* — unit `graph` and `crt`
+
+**Function**
+
+Something that happened: a key, or the mouse.
+
+**Declaration**
+
+```algol24
+constructor Event (Kind : Integer, Key : Char, X : Integer, Y : Integer,
+                   Buttons : Integer, Surface : Any, LocalX : Integer,
+                   LocalY : Integer);
+
+Kind : Integer            one of the EventKinds
+Key : Char                the key, when Kind is EventKey
+X, Y : Integer            where, in the screen's own space
+Buttons : Integer         which buttons are down, as bits
+Surface : Any             the topmost surface under the pointer, or nil
+LocalX, LocalY : Integer  the same point in that surface's own coordinates
+```
+
+**Remarks**
+
+Turbo Vision's `TEvent`, with the two fields it had to compute by hand filled
+in already.
+
+⚠️ **`Surface` and `LocalX`/`LocalY` are the point of this.** Working out which
+view a click landed on, and where within it, was `TView`'s job and a
+substantial part of that framework. A stack ordered by `Order` answers both,
+so the event carries them and no caller repeats the work:
+
+```algol24
+if E.Surface = Board then Play (KeyAtPoint (E.LocalX, E.LocalY));
+```
+
+`LocalX`/`LocalY` are in **that surface's own space** — cells for a
+[`Window`](#window), pixels for a [`ViewPort`](#viewport) — which is what a
+caller wants to compare against.
+
+`X` and `Y` are the screen's own space: logical pixels in `graph`, cells in
+`crt`. See [`SurfaceAt`](#surfaceat).
+
+⚠️ **`Key` means something only when `Kind` is `EventKey`.** It is a space
+otherwise, the language having no null Char.
+
+For a key event the mouse fields carry the pointer's last known position,
+which is occasionally useful and never wrong.
+
+**See also**
+
+[`EventKinds`](#eventkinds), [`ReadEvent`](#readevent),
+[`SurfaceAt`](#surfaceat), [`Window`](#window)
+
+**Example**
+
+See [`ReadEvent`](#readevent).
+
+
+---
+
+## EventKinds
+
+*constants* — unit `graph` and `crt`
+
+**Function**
+
+What an [`Event`](#event) is, and which mouse buttons are down.
+
+**Declaration**
+
+```algol24
+const EventNone      := 0;      const MouseLeft   := 1;
+const EventKey       := 1;      const MouseMiddle := 2;
+const EventMouseDown := 2;      const MouseRight  := 4;
+const EventMouseUp   := 3;
+const EventMouseMove := 4;
+```
+
+**Remarks**
+
+Both units declare the same values, so a program written against one reads
+against the other.
+
+The buttons are **bits**, so a chord is their sum and a test is a division:
+
+```algol24
+if E.Buttons div MouseLeft mod 2 = 1 then ...
+```
+
+Turbo Pascal's Crt and Graph had no mouse at all — it was INT 33h, called by
+hand. Turbo Vision was where it landed, and its `TEvent` carried keys and
+mouse in one queue because anything with both has to interleave them.
+
+There is no wheel event. A terminal reports the wheel as a button in the
+sixties and `crt` drops it rather than inventing a click that never happened;
+`graph` does not queue SDL's wheel event either. It can be added when
+something wants it.
+
+**See also**
+
+[`Event`](#event), [`ReadEvent`](#readevent)
+
+**Example**
+
+See [`ReadEvent`](#readevent).
+
 
 ---
 
@@ -5343,6 +5555,90 @@ WriteLn (RandomReal ());
 
 ---
 
+## ReadEvent
+
+*functions* — unit `graph` and `crt`
+
+**Function**
+
+Takes the next event, waiting or not.
+
+**Declaration**
+
+```algol24
+function ReadEvent () : Event;
+function PollEvent () : Any;      // an Event, or nil
+```
+
+**Remarks**
+
+`ReadEvent` waits; `PollEvent` answers nil at once when nothing has happened,
+which is what a loop with work of its own needs.
+
+⚠️ **One queue, keys and mouse together**, so a click and a keystroke keep the
+order they happened in. That is the whole reason Turbo Vision had one queue
+rather than two.
+
+⚠️ **[`ReadKey`](#readkey) is unchanged.** It answers keys alone and discards
+mouse events it passes over, so a program written before the mouse existed
+means exactly what it did. [`KeyPressed`](#keypressed) likewise does not
+report a queued click as a key.
+
+The mouse is off until [`EnableMouse`](#enablemouse) asks for it, so until
+then these answer only keys.
+
+`ReadEvent` presents while it waits in `graph`, as `ReadKey` does, so a
+program waiting on the mouse still blinks. In `crt`, a screen that is not a
+terminal can receive nothing, so `ReadEvent` answers a `KeyClose` event at
+once and `PollEvent` answers nil.
+
+Raises `Graph is not open.` or `Crt is not open.`
+
+**See also**
+
+[`EnableMouse`](#enablemouse), [`Event`](#event),
+[`EventKinds`](#eventkinds), [`ReadKey`](#readkey)
+
+**Example**
+
+```algol24
+uses graph;
+
+InitGraph (1280, 800, 'events', False);
+EnableMouse ();
+
+var Panel := ViewPort (200, 100, 400, 300, 1);
+
+// Nothing has happened, and PollEvent never waits.
+System.WriteLn ('nothing yet: ', PollEvent () = nil);
+
+// A key, queued as an event like any other.
+EnqueueKey ('a');
+
+var E := ReadEvent ();
+
+System.WriteLn ('kind is key: ', E.Kind = EventKey);
+System.WriteLn ('the key:     ', E.Key);
+
+// ReadKey still answers keys alone, so a program written before the mouse
+// existed means exactly what it did.
+EnqueueKey ('b');
+
+System.WriteLn ('ReadKey:     ', ReadKey ());
+
+CloseGraph ();
+```
+
+```console
+nothing yet: true
+kind is key: true
+the key:     a
+ReadKey:     b
+```
+
+
+---
+
 ## ReadKey
 
 *function* — unit `graph` and `crt`
@@ -6948,6 +7244,53 @@ WriteLn (Sqrt (Sqr (A) + Sqr (B)));
 1.4142135623730951
 5.0
 ```
+
+---
+
+## SurfaceAt
+
+*function* — unit `graph` and `crt`
+
+**Function**
+
+The topmost surface under a point, or nil.
+
+**Declaration**
+
+```algol24
+function SurfaceAt (X : Integer, Y : Integer) : Any;
+```
+
+**Remarks**
+
+The stack decides: highest `Order` wins, and a tie goes to whichever surface
+was made later — the same rule that decides what is drawn over what.
+
+⚠️ **The root grid covers the whole screen**, so a point over nothing else
+answers it rather than nil. Only a point off the screen entirely answers nil.
+
+An invisible surface — `Alpha` of 0 — is under nothing.
+
+Coordinates are the screen's own space: logical pixels in `graph`, cells in
+`crt`. In `graph` a [`Window`](#window) is measured in cells and a
+[`ViewPort`](#viewport) in pixels, but both live in the one logical space, so
+both answer here.
+
+[`ReadEvent`](#readevent) does this for every mouse event already and puts the
+answer in [`Event`](#event)`.Surface`, along with the point in that surface's
+own coordinates — so this is for asking about a point nothing has clicked.
+
+Raises `Graph is not open.` or `Crt is not open.`
+
+**See also**
+
+[`EnableMouse`](#enablemouse), [`Event`](#event), [`ReadEvent`](#readevent),
+[`ViewPort`](#viewport), [`Window`](#window)
+
+**Example**
+
+See [`EnableMouse`](#enablemouse).
+
 
 ---
 

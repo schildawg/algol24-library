@@ -275,6 +275,26 @@ const AndPut         := 3;
 const NotPut         := 4;
 const TransparentPut := 5;
 
+/// What an `Event` is: a key, or something the mouse did.
+///
+/// Turbo Pascal's Crt and Graph had no mouse at all -- it was INT 33h, called
+/// by hand. Turbo Vision was where it landed, and its `TEvent` carried keys
+/// and mouse alike in one queue, because anything with both has to interleave
+/// them. These are that idea with this library's names.
+const EventNone      := 0;
+const EventKey       := 1;
+const EventMouseDown := 2;
+const EventMouseUp   := 3;
+const EventMouseMove := 4;
+
+/// The mouse buttons, as bits of an Event's Buttons.
+///
+/// A bit each, so a chord is an addition and a test is `Buttons div Left mod
+/// 2`. `MouseButtons` answers the same word.
+const MouseLeft   := 1;
+const MouseMiddle := 2;
+const MouseRight  := 4;
+
 /// Where free text sits relative to the point it is placed at.
 ///
 /// Turbo Pascal's five names and its five values, `CenterText` serving both
@@ -403,8 +423,19 @@ var DstRect    := nil;
 
 // The key queue: what PumpKeys has read from SDL and ReadKey has not yet
 // answered. A head index rather than a shifting list, cleared when drained.
+// The event queue: keys and, once a program asks for them, the mouse. One
+// queue rather than two, so a click and a keystroke keep the order they
+// happened in -- which is the whole reason Turbo Vision had one.
 var KeyQueue      := [];
 var KeyHead       := 0;
+
+// The mouse, off until a program asks. Off by default so that a program
+// reading only keys is unaffected and nothing accumulates in a queue nobody
+// drains.
+var MouseOn       := False;
+var MouseAtX      := 1;
+var MouseAtY      := 1;
+var MouseBtns     := 0;
 var EventScratch  := nil;
 var LastPresentMs := 0;
 
@@ -1076,6 +1107,13 @@ begin
     SDL_DestroyRenderer (Renderer);
     SDL_DestroyWindow (SdlWin);
 
+    // The mouse belongs to the window that was open. A new one starts with
+    // it off, where it was left on, and with no stale pointer position.
+    MouseOn      := False;
+    MouseAtX     := 1;
+    MouseAtY     := 1;
+    MouseBtns    := 0;
+
     Texture      := nil;
     Pixels       := nil;
     Renderer     := nil;
@@ -1396,7 +1434,202 @@ end
 /// Private to this unit.
 procedure EnqueueKey (K : Char);
 begin
-    KeyQueue.Add (K);
+    KeyQueue.Add (Event (EventKey, K, MouseAtX, MouseAtY, MouseBtns,
+                         nil, 0, 0));
+end
+
+/// Empties the queue once everything in it has been handed out.
+///
+/// Private to this unit. The queue grows and is walked rather than shifted,
+/// so it has to be let go of when it is spent.
+procedure Drain ();
+begin
+    if KeyHead >= KeyQueue.Length then
+    begin
+        KeyQueue := [];
+        KeyHead  := 0;
+    end
+end
+
+/// Whether a surface covers a point of the logical space.
+///
+/// Private to this unit. A Window is measured in cells and a ViewPort in
+/// pixels, but both live in the one logical space, so both answer here.
+function Covers (S, X : Integer, Y : Integer) : Boolean;
+begin
+    if S.Dead then Exit False;
+    if S.Alpha = 0 then Exit False;
+
+    if S is Window then
+    begin
+        var L := (S.X1 - 1) * CellWidth () + 1;
+        var T := (S.Y1 - 1) * CellHeight () + 1;
+
+        if X < L then Exit False;
+        if Y < T then Exit False;
+        if X >= L + S.Cols * CellWidth () then Exit False;
+        if Y >= T + S.Rows * CellHeight () then Exit False;
+
+        Exit True;
+    end
+
+    if X < S.X then Exit False;
+    if Y < S.Y then Exit False;
+    if X >= S.X + S.W then Exit False;
+    if Y >= S.Y + S.H then Exit False;
+
+    Exit True;
+end
+
+/// A point of the logical space in a surface's own coordinates.
+///
+/// Private to this unit. Cells for a Window, pixels for a ViewPort -- each
+/// surface's own space, which is what a caller wants to compare against.
+function LocalXOf (S, X : Integer) : Integer;
+begin
+    if S is Window then
+        Exit (X - (S.X1 - 1) * CellWidth () - 1) div CellWidth () + 1;
+
+    Exit X - S.X + 1;
+end
+
+/// A point of the logical space in a surface's own rows.
+///
+/// Private to this unit.
+function LocalYOf (S, Y : Integer) : Integer;
+begin
+    if S is Window then
+        Exit (Y - (S.Y1 - 1) * CellHeight () - 1) div CellHeight () + 1;
+
+    Exit Y - S.Y + 1;
+end
+
+/// The topmost surface under a point of the logical space, or nil.
+///
+/// The stack decides: highest `Order` wins, and a tie goes to whichever was
+/// made later. An invisible surface -- `Alpha` of 0 -- is not under anything.
+///
+/// The root grid is a surface like any other and covers the whole screen, so
+/// a point over nothing else answers it rather than nil. Only a point off the
+/// screen entirely answers nil.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `SurfaceAt Answers The Topmost Surface Under A Point`
+function SurfaceAt (X : Integer, Y : Integer) : Any;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    var Best := nil;
+
+    for var S in Surfaces do
+      if Covers (S, X, Y) then
+        if Best = nil then Best := S;
+        else if S.Order > Best.Order then Best := S;
+        else if S.Order = Best.Order then
+          if S.Serial > Best.Serial then Best := S;
+
+    Exit Best;
+end
+
+/// A window pixel turned back into the logical space's X.
+///
+/// Private to this unit, and the exact inverse of what `Blit` does going the
+/// other way. Without it every mouse coordinate is wrong at any window size
+/// but one to one, which is the sort of fault that looks like bad aim.
+function WindowToLogicalX (Px : Integer) : Integer;
+begin
+    if WindowWidth <= 0 then Exit 1;
+
+    Exit Px * (GridCols * CellWidth ()) div WindowWidth + 1;
+end
+
+/// A window pixel turned back into the logical space's Y.
+///
+/// Private to this unit.
+function WindowToLogicalY (Px : Integer) : Integer;
+begin
+    if WindowHeight <= 0 then Exit 1;
+
+    Exit Px * (GridRows * CellHeight ()) div WindowHeight + 1;
+end
+
+/// The bit a mouse button number stands for.
+///
+/// Private to this unit. SDL numbers them 1, 2, 3 for left, middle, right,
+/// where this library gives each a bit so a chord is one word.
+function ButtonBit (Which : Integer) : Integer;
+begin
+    if Which = 1 then Exit MouseLeft;
+    if Which = 2 then Exit MouseMiddle;
+    if Which = 3 then Exit MouseRight;
+
+    Exit 0;
+end
+
+/// Builds a mouse Event where the pointer now is.
+///
+/// Private to this unit, and where the hit testing happens: the surface under
+/// the pointer and the point in its own coordinates are worked out once, here,
+/// rather than by every caller.
+function MouseEvent (Kind : Integer) : Event;
+begin
+    var S  := nil;
+    var LX := 0;
+    var LY := 0;
+
+    for var T in Surfaces do
+      if Covers (T, MouseAtX, MouseAtY) then
+        if S = nil then S := T;
+        else if T.Order > S.Order then S := T;
+        else if T.Order = S.Order then
+          if T.Serial > S.Serial then S := T;
+
+    if S <> nil then
+    begin
+        LX := LocalXOf (S, MouseAtX);
+        LY := LocalYOf (S, MouseAtY);
+    end
+
+    // A mouse event has no key. Key is a space rather than a nothing, the
+    // language having no null Char, and is meaningful only for EventKey.
+    Exit Event (Kind, ' ', MouseAtX, MouseAtY, MouseBtns, S, LX, LY);
+end
+
+/// Takes SDL's mouse motion, in window pixels, into the logical space.
+///
+/// Private to this unit.
+procedure TakeMouseMotion (E);
+begin
+    MouseAtX  := WindowToLogicalX (E.GetInt (20));
+    MouseAtY  := WindowToLogicalY (E.GetInt (24));
+    MouseBtns := E.GetInt (16);
+
+    KeyQueue.Add (MouseEvent (EventMouseMove));
+end
+
+/// Takes an SDL mouse button, down or up.
+///
+/// Private to this unit. The button word is kept by adding and removing the
+/// one bit rather than trusting a state field, so a chord survives.
+procedure TakeMouseButton (E, Down : Boolean);
+begin
+    MouseAtX := WindowToLogicalX (E.GetInt (20));
+    MouseAtY := WindowToLogicalY (E.GetInt (24));
+
+    var Bit := ButtonBit (E[16]);
+
+    if Bit > 0 then
+      if Down then
+      begin
+          if MouseBtns div Bit mod 2 = 0 then MouseBtns := MouseBtns + Bit;
+      end
+      else if MouseBtns div Bit mod 2 = 1 then MouseBtns := MouseBtns - Bit;
+
+    if Down then KeyQueue.Add (MouseEvent (EventMouseDown));
+    else KeyQueue.Add (MouseEvent (EventMouseUp));
 end
 
 /// Takes the UTF-8 text out of a TEXTINPUT event, one Char per codepoint.
@@ -1477,6 +1710,16 @@ begin
         if Kind = 256 then EnqueueKey (KeyClose);
         if Kind = 768 then TakeKeyEvent (EventScratch);
         if Kind = 771 then TakeTextEvent (EventScratch);
+
+        // The mouse arrives whether or not anyone asked; it is only queued
+        // once a program has, so a program reading keys alone is unaffected
+        // and nothing piles up in a queue nobody drains.
+        if MouseOn then
+        begin
+            if Kind = 1024 then TakeMouseMotion (EventScratch);
+            if Kind = 1025 then TakeMouseButton (EventScratch, True);
+            if Kind = 1026 then TakeMouseButton (EventScratch, False);
+        end
     end
 end
 
@@ -1488,6 +1731,180 @@ end
 procedure PresentIfDue ();
 begin
     if Trunc (Clock () * 1000.0) - LastPresentMs >= 16 then Present ();
+end
+
+/// Starts reporting the mouse.
+///
+/// Off until asked for, and deliberately so: a program that reads only keys
+/// is then unaffected, and nothing piles up in a queue nobody drains. Turbo
+/// Vision always had the mouse on, but it owned the whole screen; a library's
+/// default should cost nothing.
+///
+/// Once on, `ReadEvent` and `PollEvent` answer clicks and movement as well as
+/// keys, in the order they happened. `ReadKey` goes on answering keys alone
+/// and discards mouse events it passes over.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+procedure EnableMouse ();
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    MouseOn := True;
+end
+
+/// Stops reporting the mouse.
+///
+/// Events already queued stay queued; what is in hand was still true when it
+/// happened.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+procedure DisableMouse ();
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    MouseOn := False;
+end
+
+/// Whether the mouse is being reported.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseEnabled () : Boolean;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    Exit MouseOn;
+end
+
+/// The next event, waiting for one if none is ready.
+///
+/// Keys and mouse alike, in the order they happened -- which is the whole
+/// reason for one queue rather than two. What each field means is the
+/// `Event` class's business.
+///
+/// Presents while it waits, as `ReadKey` does, so a program waiting on the
+/// mouse still blinks.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `An Event Carries The Surface Under The Pointer`
+function ReadEvent () : Event;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    while True do
+    begin
+        PumpKeys ();
+
+        if KeyHead < KeyQueue.Length then
+        begin
+            var E := KeyQueue[KeyHead];
+
+            KeyHead := KeyHead + 1;
+
+            Drain ();
+
+            Exit E;
+        end
+
+        PresentIfDue ();
+        SDL_Delay (10);
+    end
+end
+
+/// The next event, or nil when none is waiting.
+///
+/// Never waits, which is what an animation loop needs: do the frame, take
+/// whatever happened, do the next frame.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `PollEvent Answers Nil When Nothing Has Happened`
+function PollEvent () : Any;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    PumpKeys ();
+    PresentIfDue ();
+
+    if KeyHead >= KeyQueue.Length then Exit nil;
+
+    var E := KeyQueue[KeyHead];
+
+    KeyHead := KeyHead + 1;
+
+    Drain ();
+
+    Exit E;
+end
+
+/// Where the pointer was last seen, in the logical space.
+///
+/// Polled rather than queued, which is the older way and still the right one
+/// for a program that only wants to know where the pointer is now. It is
+/// updated by the same pump the events come from, so asking presents nothing
+/// and waits for nothing.
+///
+/// Answers 1, 1 until the mouse has been enabled and moved.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseX () : Integer;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    PumpKeys ();
+
+    Exit MouseAtX;
+end
+
+/// Where the pointer was last seen, in the logical space.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseY () : Integer;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    PumpKeys ();
+
+    Exit MouseAtY;
+end
+
+/// Which buttons are down, as bits: `MouseLeft`, `MouseMiddle`, `MouseRight`.
+///
+/// A chord is their sum, so a test is `MouseButtons () div MouseLeft mod 2`.
+///
+/// # Raises
+/// `Graph is not open.` without a window.
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseButtons () : Integer;
+begin
+    if SdlWin = nil then raise 'Graph is not open.';
+
+    PumpKeys ();
+
+    Exit MouseBtns;
 end
 
 /// Whether a key is waiting.
@@ -1508,7 +1925,12 @@ begin
     PumpKeys ();
     PresentIfDue ();
 
-    Exit KeyHead < KeyQueue.Length;
+    // A key, specifically: with the mouse on, the queue may hold events this
+    // verb has never answered and must not start claiming.
+    for var I := KeyHead; I < KeyQueue.Length; I := I + 1 do
+        if KeyQueue[I].Kind = EventKey then Exit True;
+
+    Exit False;
 end
 
 /// The next key, waiting for one if none is ready.
@@ -1538,21 +1960,24 @@ begin
     begin
         PumpKeys ();
 
-        if KeyHead < KeyQueue.Length then
+        while KeyHead < KeyQueue.Length do
         begin
-            var K := KeyQueue[KeyHead];
+            var E := KeyQueue[KeyHead];
 
             KeyHead := KeyHead + 1;
 
-            if KeyHead = KeyQueue.Length then
+            // A mouse event passed over is discarded rather than left: this
+            // verb has always answered keys, and keeping them would put
+            // ReadEvent out of the order things happened in.
+            if E.Kind = EventKey then
             begin
-                KeyQueue := [];
-                KeyHead  := 0;
-            end
+                Drain ();
 
-            Exit K;
+                Exit E.Key;
+            end
         end
 
+        Drain ();
         PresentIfDue ();
         SDL_Delay (10);
     end
@@ -1771,6 +2196,43 @@ begin
         this.X2   := X2;
         this.Y2   := Y2;
         this.Clip := Clip;
+    end
+end
+
+/// Something that happened: a key, or the mouse.
+///
+/// Turbo Vision's `TEvent`, with the two fields it had to compute by hand
+/// filled in already. `Surface` is the topmost Window or ViewPort under the
+/// pointer, and `LocalX`, `LocalY` are the same point in that surface's own
+/// coordinates -- cells for a Window, pixels for a ViewPort. That is what a
+/// stack of surfaces makes cheap and what Turbo Vision spent a framework on.
+///
+/// For a key event the mouse fields are the pointer's last known position,
+/// which is occasionally useful and never wrong.
+class Event;
+var
+    Kind    : Integer;
+    Key     : Char;
+    X       : Integer;
+    Y       : Integer;
+    Buttons : Integer;
+    Surface : Any;
+    LocalX  : Integer;
+    LocalY  : Integer;
+
+begin
+    constructor Init (Kind : Integer, Key : Char, X : Integer, Y : Integer,
+                      Buttons : Integer, Surface : Any, LocalX : Integer,
+                      LocalY : Integer);
+    begin
+        this.Kind    := Kind;
+        this.Key     := Key;
+        this.X       := X;
+        this.Y       := Y;
+        this.Buttons := Buttons;
+        this.Surface := Surface;
+        this.LocalX  := LocalX;
+        this.LocalY  := LocalY;
     end
 end
 
@@ -12300,6 +12762,296 @@ begin
     Message := '';
     try GetPalette (42); except on e : String do Message := e; end
     AssertEqual ('GetPalette wants a Window or a ViewPort.', Message);
+
+    CloseGraph ();
+end
+
+test 'The Mouse Is Off Until A Program Asks For It';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'mouseoff', False);
+
+    // Turbo Vision always had the mouse on; it owned the screen. A library's
+    // default should cost nothing, so a program reading keys is unaffected
+    // until it says otherwise.
+    AssertTrue (not MouseEnabled ());
+    AssertEqual (1, MouseX ());
+    AssertEqual (1, MouseY ());
+    AssertEqual (0, MouseButtons ());
+
+    EnableMouse ();
+    AssertTrue (MouseEnabled ());
+
+    DisableMouse ();
+    AssertTrue (not MouseEnabled ());
+
+    CloseGraph ();
+
+    var Message := '';
+
+    try EnableMouse (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try MouseX (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+
+    Message := '';
+    try ReadEvent (); except on e : String do Message := e; end
+    AssertEqual ('Graph is not open.', Message);
+end
+
+test 'A Window Pixel Turns Back Into The Logical Space';
+begin
+    // Read the sizes rather than assuming them: an earlier test may have
+    // left the grid at another TextMode, and the invariant is about the two
+    // spaces agreeing, not about any particular one.
+    for var Size in [[1280, 800], [640, 400], [800, 600]] do
+    begin
+        CloseGraph ();
+        InitGraph (Size[0], Size[1], 'mousemap', False);
+
+        var LogW := TextCols () * CellWidth ();
+        var LogH := TextRows () * CellHeight ();
+        var WinW := GetMaxX ();
+        var WinH := GetMaxY ();
+
+        // One window pixel covers a whole step of the logical space when the
+        // window is smaller, so the last of them lands on the FIRST logical
+        // pixel of the last step rather than on the last one. Asserting it
+        // hits LogW exactly would be asserting an arithmetic that cannot
+        // hold; asserting it lands in the final step is the real invariant.
+        var StepX := (LogW + WinW - 1) div WinW;
+        var StepY := (LogH + WinH - 1) div WinH;
+
+        AssertEqual (1, WindowToLogicalX (0));
+        AssertEqual (1, WindowToLogicalY (0));
+
+        AssertTrue (WindowToLogicalX (WinW - 1) <= LogW);
+        AssertTrue (WindowToLogicalX (WinW - 1) > LogW - StepX - 1);
+        AssertTrue (WindowToLogicalY (WinH - 1) <= LogH);
+        AssertTrue (WindowToLogicalY (WinH - 1) > LogH - StepY - 1);
+
+        // Never goes backwards, whatever the ratio.
+        for var P := 1; P < WinW; P := P + 1 do
+            if P mod 37 = 0 then
+                AssertTrue (WindowToLogicalX (P) >= WindowToLogicalX (P - 1));
+
+        // And it undoes what Blit does going the other way, to within the
+        // rounding a division cannot avoid.
+        for var L in [1, 2, LogW div 3, LogW] do
+        begin
+            var Back := WindowToLogicalX ((L - 1) * WinW div LogW);
+
+            AssertTrue (Back <= L);
+            AssertTrue (Back > L - 1 - LogW div WinW);
+        end
+    end
+
+    CloseGraph ();
+end
+
+test 'SurfaceAt Answers The Topmost Surface Under A Point';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'hittest', False);
+
+    // The root grid covers everything, so a point over nothing else is
+    // still over it rather than over nothing.
+    EnsureRoot ();
+
+    AssertEqual (Root, SurfaceAt (5, 5));
+
+    var Under := ViewPort (100, 100, 200, 150, 1);
+    var Over  := ViewPort (150, 120, 200, 150, 2);
+
+    AssertEqual (Under, SurfaceAt (110, 110));
+    AssertEqual (Over, SurfaceAt (200, 200));
+    AssertEqual (Root, SurfaceAt (5, 5));
+
+    // Order decides, and reordering is an assignment.
+    Under.Order := 3;
+    AssertEqual (Under, SurfaceAt (200, 200));
+
+    // A surface made invisible is not under anything.
+    Under.Alpha := 0;
+    AssertEqual (Over, SurfaceAt (200, 200));
+
+    Under.Alpha := 255;
+
+    // The edges are inclusive at the near corner and exclusive at the far
+    // one, so two touching surfaces never both claim a point.
+    AssertEqual (Under, SurfaceAt (100, 100));
+    AssertEqual (Root, SurfaceAt (99, 100));
+    AssertEqual (Under, SurfaceAt (299, 100));
+
+    // Off the screen entirely is over nothing at all.
+    AssertEqual (nil, SurfaceAt (0, 5));
+    AssertEqual (nil, SurfaceAt (5000, 5));
+
+    CloseGraph ();
+end
+
+test 'A Point Lands In A Surface Own Coordinates';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'localco', False);
+
+    var V := ViewPort (100, 60, 200, 150, 1);
+
+    // A ViewPort measures in pixels from 1, so its top-left is 1, 1.
+    AssertEqual (1, LocalXOf (V, 100));
+    AssertEqual (1, LocalYOf (V, 60));
+    AssertEqual (200, LocalXOf (V, 299));
+
+    // A Window measures in cells, so the same logical point answers a cell.
+    var W := Window (3, 2, 20, 8, 2);
+
+    AssertEqual (1, LocalXOf (W, (3 - 1) * CellWidth () + 1));
+    AssertEqual (1, LocalYOf (W, (2 - 1) * CellHeight () + 1));
+    AssertEqual (2, LocalXOf (W, (3 - 1) * CellWidth () + CellWidth () + 1));
+
+    CloseGraph ();
+end
+
+test 'An Event Carries The Surface Under The Pointer';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'mouseev', False);
+
+    EnsureRoot ();
+    EnableMouse ();
+
+    var V := ViewPort (100, 60, 200, 150, 1);
+
+    // The pump takes its bytes from SDL, so a test hands the same bytes to
+    // the decoders directly -- the same way the UTF-8 decoder is tested.
+    var E := Buffer (64);
+
+    E.PutInt (20, 150);          // window X
+    E.PutInt (24, 100);          // window Y
+    E[16] := 1;                  // SDL's left button
+
+    TakeMouseButton (E, True);
+
+    var Down := KeyQueue[KeyQueue.Length - 1];
+
+    AssertEqual (EventMouseDown, Down.Kind);
+    AssertEqual (151, Down.X);
+    AssertEqual (101, Down.Y);
+    AssertEqual (MouseLeft, Down.Buttons);
+
+    // The hit surface and the point in its own coordinates, worked out once
+    // rather than by every caller -- which is what Turbo Vision spent a
+    // framework on and a stack of surfaces makes cheap.
+    AssertEqual (V, Down.Surface);
+    AssertEqual (52, Down.LocalX);
+    AssertEqual (42, Down.LocalY);
+
+    // The button word is kept by the bit, so a chord survives.
+    E[16] := 3;                  // SDL's right button
+    TakeMouseButton (E, True);
+
+    AssertEqual (MouseLeft + MouseRight, MouseButtons ());
+
+    E[16] := 1;
+    TakeMouseButton (E, False);
+
+    AssertEqual (MouseRight, MouseButtons ());
+
+    CloseGraph ();
+end
+
+test 'ReadKey Passes Over Mouse Events And ReadEvent Does Not';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'mixed', False);
+
+    EnsureRoot ();
+    EnableMouse ();
+
+    var E := Buffer (64);
+
+    E.PutInt (20, 10);
+    E.PutInt (24, 10);
+    E[16] := 1;
+
+    // A click, then a key, then a click.
+    TakeMouseButton (E, True);
+    EnqueueKey ('x');
+    TakeMouseButton (E, False);
+
+    // ReadEvent sees all three, in the order they happened -- which is the
+    // whole reason for one queue rather than two.
+    AssertEqual (EventMouseDown, ReadEvent ().Kind);
+    AssertEqual (EventKey, ReadEvent ().Kind);
+    AssertEqual (EventMouseUp, ReadEvent ().Kind);
+
+    // ReadKey answers keys alone, discarding what it passes over, so a
+    // program written before the mouse existed still means what it did.
+    TakeMouseButton (E, True);
+    EnqueueKey ('y');
+
+    AssertEqual (Str ('y'), Str (ReadKey ()));
+
+    // And KeyPressed does not claim a mouse event as a key.
+    TakeMouseButton (E, False);
+
+    AssertTrue (not KeyPressed ());
+
+    EnqueueKey ('z');
+
+    AssertTrue (KeyPressed ());
+
+    CloseGraph ();
+end
+
+test 'PollEvent Answers Nil When Nothing Has Happened';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'pollnil', False);
+
+    EnsureRoot ();
+
+    // Never waits, which is what an animation loop needs.
+    AssertEqual (nil, PollEvent ());
+
+    EnqueueKey ('q');
+
+    var E := PollEvent ();
+
+    AssertEqual (EventKey, E.Kind);
+    AssertEqual (Str ('q'), Str (E.Key));
+    AssertEqual (nil, PollEvent ());
+
+    CloseGraph ();
+end
+
+test 'The Mouse Is Not Queued Until It Is Enabled';
+begin
+    CloseGraph ();
+    InitGraph (1280, 800, 'mousegate', False);
+
+    EnsureRoot ();
+
+    // The pump discards mouse events while the mouse is off, so nothing
+    // accumulates in a queue a key-reading program never drains.
+    AssertTrue (not MouseEnabled ());
+    AssertEqual (nil, PollEvent ());
+
+    EnableMouse ();
+
+    var E := Buffer (64);
+
+    E.PutInt (20, 40);
+    E.PutInt (24, 40);
+    E.PutInt (16, 0);
+
+    TakeMouseMotion (E);
+
+    AssertEqual (EventMouseMove, PollEvent ().Kind);
+    AssertEqual (41, MouseX ());
+    AssertEqual (41, MouseY ());
 
     CloseGraph ();
 end

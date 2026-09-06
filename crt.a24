@@ -157,6 +157,23 @@ const Transparent := -1;
 /// and this unit cannot make them do otherwise.
 const Blink := 16777216;
 
+/// What an `Event` is: a key, or something the mouse did.
+///
+/// The same five `graph` declares, and the same values, so a program written
+/// against one reads against the other. Turbo Pascal had no mouse at all;
+/// Turbo Vision was where it landed, carrying keys and mouse in one queue
+/// because anything with both has to interleave them.
+const EventNone      := 0;
+const EventKey       := 1;
+const EventMouseDown := 2;
+const EventMouseUp   := 3;
+const EventMouseMove := 4;
+
+/// The mouse buttons, as bits of an Event's Buttons.
+const MouseLeft   := 1;
+const MouseMiddle := 2;
+const MouseRight  := 4;
+
 /// The keys that are not characters, each as one Char of its own.
 ///
 /// The same values `graph` uses, in Unicode's private use area, so a key
@@ -229,6 +246,14 @@ var Escapes    := nil;
 // having no Remove -- and the queue is emptied once it is spent.
 var KeyQueue := [];
 var KeyHead  := 0;
+
+// The mouse, off until a program asks. Off by default so a key-reading
+// program is unaffected, and because enabling it makes this unit send
+// tracking escapes a terminal that ignores them would print as junk.
+var MouseOn   := False;
+var MouseAtX  := 1;
+var MouseAtY  := 1;
+var MouseBtns := 0;
 
 
 /// The bright partner of a palette color, or the color itself.
@@ -314,6 +339,42 @@ begin
     Exit Copy;
 end
 
+
+/// Something that happened: a key, or the mouse.
+///
+/// `graph`'s Event, on a terminal. `Surface` is the topmost Window under the
+/// pointer and `LocalX`, `LocalY` are the same point in that window's own
+/// cells -- worked out once, here, rather than by every caller.
+///
+/// Coordinates are cells, which is what a terminal reports and what this
+/// unit measures everything else in. `graph`'s are logical pixels, for the
+/// same reason.
+class Event;
+var
+    Kind    : Integer;
+    Key     : Char;
+    X       : Integer;
+    Y       : Integer;
+    Buttons : Integer;
+    Surface : Any;
+    LocalX  : Integer;
+    LocalY  : Integer;
+
+begin
+    constructor Init (Kind : Integer, Key : Char, X : Integer, Y : Integer,
+                      Buttons : Integer, Surface : Any, LocalX : Integer,
+                      LocalY : Integer);
+    begin
+        this.Kind    := Kind;
+        this.Key     := Key;
+        this.X       := X;
+        this.Y       := Y;
+        this.Buttons := Buttons;
+        this.Surface := Surface;
+        this.LocalX  := LocalX;
+        this.LocalY  := LocalY;
+    end
+end
 
 /// A rectangle of text cells with a place in the stack.
 ///
@@ -1084,10 +1145,23 @@ begin
 
     if Emitting then
     begin
+        if MouseOn then
+        begin
+            Send (#27 + '[?1006l');
+            Send (#27 + '[?1002l');
+            Send (#27 + '[?1000l');
+        end
+
         Send (#27 + '[0m');
         Send (#27 + '[?1049l');
         CrtRaw (0);
     end
+
+    // The mouse belongs to the screen that was open.
+    MouseOn    := False;
+    MouseAtX   := 1;
+    MouseAtY   := 1;
+    MouseBtns  := 0;
 
     Started    := False;
     Emitting   := False;
@@ -1441,6 +1515,172 @@ var KeySeqs := ['[A' : KeyUp,    '[B' : KeyDown,  '[C' : KeyRight,
                 '[18~' : KeyF7,  '[19~' : KeyF8,  '[20~' : KeyF9,
                 '[21~' : KeyF10, '[23~' : KeyF11, '[24~' : KeyF12];
 
+/// Empties the queue once everything in it has been handed out.
+///
+/// Private to this unit.
+procedure Drain ();
+begin
+    if KeyHead >= KeyQueue.Length then
+    begin
+        KeyQueue := [];
+        KeyHead  := 0;
+    end
+end
+
+/// Queues a key as an Event.
+///
+/// Private to this unit.
+procedure EnqueueKey (K : Char);
+begin
+    KeyQueue.Add (Event (EventKey, K, MouseAtX, MouseAtY, MouseBtns,
+                         nil, 0, 0));
+end
+
+/// Whether a window covers a cell of the screen.
+///
+/// Private to this unit. An invisible window covers nothing.
+function Covers (S, Col : Integer, Row : Integer) : Boolean;
+begin
+    if S.Dead then Exit False;
+    if S.Alpha = 0 then Exit False;
+    if Col < S.X1 then Exit False;
+    if Row < S.Y1 then Exit False;
+    if Col > S.X2 then Exit False;
+    if Row > S.Y2 then Exit False;
+
+    Exit True;
+end
+
+/// The topmost window under a cell of the screen, or nil.
+///
+/// The stack decides: highest `Order` wins, and a tie goes to whichever was
+/// made later. The root grid covers the whole screen, so a cell over nothing
+/// else answers it rather than nil; only a cell off the screen answers nil.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `SurfaceAt Answers The Topmost Window Under A Cell`
+function SurfaceAt (Col : Integer, Row : Integer) : Any;
+begin
+    NeedOpen ();
+
+    var Best := nil;
+
+    for var S in Surfaces do
+      if Covers (S, Col, Row) then
+        if Best = nil then Best := S;
+        else if S.Order > Best.Order then Best := S;
+        else if S.Order = Best.Order then
+          if S.Serial > Best.Serial then Best := S;
+
+    Exit Best;
+end
+
+/// Builds a mouse Event where the pointer now is.
+///
+/// Private to this unit, and where the hit testing happens.
+function MouseEvent (Kind : Integer) : Event;
+begin
+    var S  := nil;
+    var LX := 0;
+    var LY := 0;
+
+    for var T in Surfaces do
+      if Covers (T, MouseAtX, MouseAtY) then
+        if S = nil then S := T;
+        else if T.Order > S.Order then S := T;
+        else if T.Order = S.Order then
+          if T.Serial > S.Serial then S := T;
+
+    if S <> nil then
+    begin
+        LX := MouseAtX - S.X1 + 1;
+        LY := MouseAtY - S.Y1 + 1;
+    end
+
+    // A mouse event has no key. Key is a space rather than a nothing, the
+    // language having no null Char, and means something only for EventKey.
+    Exit Event (Kind, ' ', MouseAtX, MouseAtY, MouseBtns, S, LX, LY);
+end
+
+/// Turns one SGR mouse report into an Event.
+///
+/// Private to this unit. The sequence is `[<b;x;yM` for a press and `...m`
+/// for a release, with x and y already in cells counting from 1 -- which is
+/// this unit's own space, so nothing has to be mapped.
+///
+/// The button word is kept by adding and removing the one bit, so a chord
+/// survives. A wheel report -- 64 and up -- is dropped rather than pretended
+/// to be a button.
+///
+/// # Examples
+/// `The Mouse Decoder Reads An SGR Report`
+procedure TakeMouseReport (Seq : String);
+begin
+    var Button := 0;
+    var Col    := 0;
+    var Row    := 0;
+    var Field  := 0;
+    var N      := 0;
+
+    for var I := 2; I < Length (Seq); I := I + 1 do
+    begin
+        var C := Seq[I];
+
+        if C >= '0' then
+          if C <= '9' then
+          begin
+              N := N * 10 + Ord (C) - Ord ('0');
+
+              continue;
+          end
+
+        if Field = 0 then Button := N;
+        else if Field = 1 then Col := N;
+        else Row := N;
+
+        Field := Field + 1;
+        N     := 0;
+    end
+
+    if Button >= 64 then Exit;              // the wheel, which is not a button
+
+    var Moving := Button >= 32;
+    var Which  := Button;
+
+    if Moving then Which := Which - 32;
+
+    if Col > 0 then MouseAtX := Col;
+    if Row > 0 then MouseAtY := Row;
+
+    var Bit := 0;
+
+    if Which = 0 then Bit := MouseLeft;
+    if Which = 1 then Bit := MouseMiddle;
+    if Which = 2 then Bit := MouseRight;
+
+    if Moving then
+    begin
+        KeyQueue.Add (MouseEvent (EventMouseMove));
+
+        Exit;
+    end
+
+    var Down := Seq[Length (Seq) - 1] = 'M';
+
+    if Bit > 0 then
+      if Down then
+      begin
+          if MouseBtns div Bit mod 2 = 0 then MouseBtns := MouseBtns + Bit;
+      end
+      else if MouseBtns div Bit mod 2 = 1 then MouseBtns := MouseBtns - Bit;
+
+    if Down then KeyQueue.Add (MouseEvent (EventMouseDown));
+    else KeyQueue.Add (MouseEvent (EventMouseUp));
+end
+
 /// Decodes the bytes waiting at the terminal into the key queue.
 ///
 /// Private to this unit. Reads what is there and stops; nothing here blocks.
@@ -1454,7 +1694,7 @@ begin
 
         if B <> 27 then
         begin
-            KeyQueue.Add (Char (B));
+            EnqueueKey (Char (B));
 
             continue;
         end
@@ -1465,7 +1705,9 @@ begin
         var Found := False;
         var Idle  := 0;
 
-        while Length (Seq) < 5 do
+        // Long enough for a mouse report, whose coordinates are digits and
+        // so have no fixed length, where every key sequence is short.
+        while Length (Seq) < 24 do
         begin
             var C := CrtGetch ();
 
@@ -1488,9 +1730,22 @@ begin
             Idle := 0;
             Seq  := Seq + Char (C);
 
+            // A mouse report ends at its M or m rather than at a length.
+            if Length (Seq) > 2 then
+              if Seq[0] = '[' then
+                if Seq[1] = '<' then
+                  if C = Ord ('M') or C = Ord ('m') then
+                  begin
+                      if MouseOn then TakeMouseReport (Seq);
+
+                      Found := True;
+
+                      break;
+                  end
+
             if Seq in KeySeqs then
             begin
-                KeyQueue.Add (KeySeqs[Seq]);
+                EnqueueKey (KeySeqs[Seq]);
 
                 Found := True;
 
@@ -1503,12 +1758,191 @@ begin
         // the ordinary case rather than an error.
         if not Found then
         begin
-            KeyQueue.Add (Char (27));
+            EnqueueKey (Char (27));
 
             for var I := 0; I < Length (Seq); I := I + 1 do
-                KeyQueue.Add (Seq[I]);
+                EnqueueKey (Seq[I]);
         end
     end
+end
+
+/// Starts reporting the mouse.
+///
+/// Off until asked for. Enabling it makes this unit send the terminal's
+/// tracking escapes, which a terminal that does not understand them would
+/// print as junk -- so a program that does not want the mouse must not pay
+/// for it.
+///
+/// Once on, `ReadEvent` and `PollEvent` answer clicks and movement as well as
+/// keys, in the order they happened. `ReadKey` goes on answering keys alone.
+///
+/// The reports come back as SGR sequences, whose coordinates are cells
+/// counting from 1 -- this unit's own space, so nothing is mapped.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+procedure EnableMouse ();
+begin
+    NeedOpen ();
+
+    MouseOn := True;
+
+    // Button events, movement while a button is held, and SGR coordinates --
+    // which is the only encoding that survives a screen wider than 223 cells.
+    Send (#27 + '[?1000h');
+    Send (#27 + '[?1002h');
+    Send (#27 + '[?1006h');
+end
+
+/// Stops reporting the mouse, and tells the terminal to stop sending it.
+///
+/// Events already queued stay queued; what is in hand was still true when it
+/// happened.
+///
+/// # Raises
+/// `Crt is not open.`
+procedure DisableMouse ();
+begin
+    NeedOpen ();
+
+    MouseOn := False;
+
+    Send (#27 + '[?1006l');
+    Send (#27 + '[?1002l');
+    Send (#27 + '[?1000l');
+end
+
+/// Whether the mouse is being reported.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseEnabled () : Boolean;
+begin
+    NeedOpen ();
+
+    Exit MouseOn;
+end
+
+/// The next event, waiting for one if none is ready.
+///
+/// Keys and mouse alike, in the order they happened. On a screen that is not
+/// a terminal no event can ever arrive, so this answers a `KeyClose` event at
+/// once rather than waiting for something that cannot come.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `An Event Carries The Window Under The Pointer`
+function ReadEvent () : Event;
+begin
+    NeedOpen ();
+
+    if not Emitting then
+        Exit Event (EventKey, KeyClose, MouseAtX, MouseAtY, 0, nil, 0, 0);
+
+    while True do
+    begin
+        PumpKeys ();
+
+        if KeyHead < KeyQueue.Length then
+        begin
+            var E := KeyQueue[KeyHead];
+
+            KeyHead := KeyHead + 1;
+
+            Drain ();
+
+            Exit E;
+        end
+
+        CrtNap (10);
+    end
+end
+
+/// The next event, or nil when none is waiting.
+///
+/// Never waits, which is what a loop that also has work to do needs.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `PollEvent Answers Nil When Nothing Has Happened`
+function PollEvent () : Any;
+begin
+    NeedOpen ();
+
+    if not Emitting then Exit nil;
+
+    PumpKeys ();
+
+    if KeyHead >= KeyQueue.Length then Exit nil;
+
+    var E := KeyQueue[KeyHead];
+
+    KeyHead := KeyHead + 1;
+
+    Drain ();
+
+    Exit E;
+end
+
+/// The column the pointer was last seen in.
+///
+/// Polled rather than queued, for a program that only wants to know where the
+/// pointer is now. Answers 1 until the mouse has been enabled and moved.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseX () : Integer;
+begin
+    NeedOpen ();
+
+    if Emitting then PumpKeys ();
+
+    Exit MouseAtX;
+end
+
+/// The row the pointer was last seen in.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseY () : Integer;
+begin
+    NeedOpen ();
+
+    if Emitting then PumpKeys ();
+
+    Exit MouseAtY;
+end
+
+/// Which buttons are down, as bits: `MouseLeft`, `MouseMiddle`, `MouseRight`.
+///
+/// # Raises
+/// `Crt is not open.`
+///
+/// # Examples
+/// `The Mouse Is Off Until A Program Asks For It`
+function MouseButtons () : Integer;
+begin
+    NeedOpen ();
+
+    if Emitting then PumpKeys ();
+
+    Exit MouseBtns;
 end
 
 /// Whether a key is waiting to be read.
@@ -1526,7 +1960,12 @@ begin
 
     PumpKeys ();
 
-    Exit KeyHead < KeyQueue.Length;
+    // A key, specifically: with the mouse on, the queue may hold events this
+    // verb has never answered and must not start claiming.
+    for var I := KeyHead; I < KeyQueue.Length; I := I + 1 do
+        if KeyQueue[I].Kind = EventKey then Exit True;
+
+    Exit False;
 end
 
 /// The next key, waiting for one if none is ready.
@@ -1550,24 +1989,30 @@ begin
     // A wait for a key is a wait, not a spin: without the nap this loop
     // would poll as fast as the interpreter can go and burn a core while a
     // program sits at a menu.
-    while KeyHead >= KeyQueue.Length do
+    while True do
     begin
         PumpKeys ();
 
-        if KeyHead >= KeyQueue.Length then CrtNap (10);
+        while KeyHead < KeyQueue.Length do
+        begin
+            var E := KeyQueue[KeyHead];
+
+            KeyHead := KeyHead + 1;
+
+            // A mouse event passed over is discarded rather than left: this
+            // verb has always answered keys, and keeping them would put
+            // ReadEvent out of the order things happened in.
+            if E.Kind = EventKey then
+            begin
+                Drain ();
+
+                Exit E.Key;
+            end
+        end
+
+        Drain ();
+        CrtNap (10);
     end
-
-    var K := KeyQueue[KeyHead];
-
-    KeyHead := KeyHead + 1;
-
-    if KeyHead = KeyQueue.Length then
-    begin
-        KeyQueue := [];
-        KeyHead  := 0;
-    end
-
-    Exit K;
 end
 
 
@@ -2410,6 +2855,249 @@ begin
     NormVideo (W);
 
     AssertEqual (LightGray, W.InkAsked);
+
+    CloseCrt ();
+end
+
+test 'The Mouse Is Off Until A Program Asks For It';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    // Enabling it makes this unit send tracking escapes, which a terminal
+    // that ignores them prints as junk -- so a program that does not want
+    // the mouse must not pay for it.
+    AssertTrue (not MouseEnabled ());
+    AssertEqual (1, MouseX ());
+    AssertEqual (1, MouseY ());
+    AssertEqual (0, MouseButtons ());
+
+    EnableMouse ();
+    AssertTrue (MouseEnabled ());
+
+    DisableMouse ();
+    AssertTrue (not MouseEnabled ());
+
+    // A new screen starts with it off, wherever the last one left it.
+    EnableMouse ();
+    CloseCrt ();
+    InitCrt ();
+
+    AssertTrue (not MouseEnabled ());
+
+    CloseCrt ();
+
+    var Message := '';
+
+    try EnableMouse (); except on e : String do Message := e; end
+    AssertEqual ('Crt is not open.', Message);
+
+    Message := '';
+    try MouseX (); except on e : String do Message := e; end
+    AssertEqual ('Crt is not open.', Message);
+end
+
+test 'The Mouse Decoder Reads An SGR Report';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    EnsureRoot ();
+    EnableMouse ();
+
+    // The terminal sends [<b;x;yM for a press and ...m for a release, with
+    // the coordinates already in cells -- so the decoder is handed the same
+    // string PumpKeys would assemble.
+    TakeMouseReport ('[<0;12;5M');
+
+    var Down := KeyQueue[KeyQueue.Length - 1];
+
+    AssertEqual (EventMouseDown, Down.Kind);
+    AssertEqual (12, Down.X);
+    AssertEqual (5, Down.Y);
+    AssertEqual (MouseLeft, Down.Buttons);
+    AssertEqual (12, MouseX ());
+    AssertEqual (5, MouseY ());
+
+    // Right button is 2, and a chord is the two bits together.
+    TakeMouseReport ('[<2;12;5M');
+    AssertEqual (MouseLeft + MouseRight, MouseButtons ());
+
+    TakeMouseReport ('[<0;12;5m');
+
+    var Up := KeyQueue[KeyQueue.Length - 1];
+
+    AssertEqual (EventMouseUp, Up.Kind);
+    AssertEqual (MouseRight, MouseButtons ());
+
+    // Movement is the button plus 32, and reports where without changing
+    // which buttons are held.
+    TakeMouseReport ('[<35;40;9M');
+
+    var Moved := KeyQueue[KeyQueue.Length - 1];
+
+    AssertEqual (EventMouseMove, Moved.Kind);
+    AssertEqual (40, Moved.X);
+    AssertEqual (9, Moved.Y);
+    AssertEqual (MouseRight, MouseButtons ());
+
+    // The wheel is 64 and up, and is dropped rather than pretended to be a
+    // button -- a click that never happened is worse than a scroll ignored.
+    var Before := KeyQueue.Length;
+
+    TakeMouseReport ('[<64;40;9M');
+
+    AssertEqual (Before, KeyQueue.Length);
+
+    // Coordinates of three digits, which a screen wider than 99 cells needs
+    // and which is why SGR is asked for rather than the older encoding.
+    TakeMouseReport ('[<0;150;42M');
+
+    AssertEqual (150, MouseX ());
+    AssertEqual (42, MouseY ());
+
+    CloseCrt ();
+end
+
+test 'SurfaceAt Answers The Topmost Window Under A Cell';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    EnsureRoot ();
+
+    // The root grid covers the whole screen, so a cell over nothing else is
+    // still over it rather than over nothing.
+    AssertEqual (Root, SurfaceAt (2, 2));
+
+    var Under := Window (3, 3, 20, 10, 1);
+    var Over  := Window (10, 6, 30, 14, 2);
+
+    AssertEqual (Under, SurfaceAt (5, 5));
+    AssertEqual (Over, SurfaceAt (15, 8));
+    AssertEqual (Root, SurfaceAt (1, 1));
+
+    // Order decides, and reordering is an assignment.
+    Under.Order := 3;
+    AssertEqual (Under, SurfaceAt (15, 8));
+
+    // An invisible window is not under anything.
+    Under.Alpha := 0;
+    AssertEqual (Over, SurfaceAt (15, 8));
+
+    Under.Alpha := 255;
+
+    // The corners are inclusive, cells being whole things.
+    AssertEqual (Under, SurfaceAt (3, 3));
+    AssertEqual (Under, SurfaceAt (20, 10));
+    AssertEqual (Root, SurfaceAt (2, 3));
+
+    // Off the screen is over nothing at all.
+    AssertEqual (nil, SurfaceAt (0, 1));
+    AssertEqual (nil, SurfaceAt (1, 0));
+
+    CloseCrt ();
+end
+
+test 'An Event Carries The Window Under The Pointer';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    EnsureRoot ();
+    EnableMouse ();
+
+    var W := Window (10, 5, 30, 12, 1);
+
+    TakeMouseReport ('[<0;12;7M');
+
+    var E := KeyQueue[KeyQueue.Length - 1];
+
+    // The hit window and the cell in its own coordinates, worked out once
+    // rather than by every caller -- which is what Turbo Vision spent a
+    // framework on and a stack of surfaces makes cheap.
+    AssertEqual (W, E.Surface);
+    AssertEqual (3, E.LocalX);
+    AssertEqual (3, E.LocalY);
+
+    // A click outside it lands on the screen instead.
+    TakeMouseReport ('[<0;2;2M');
+
+    var Out := KeyQueue[KeyQueue.Length - 1];
+
+    AssertEqual (Root, Out.Surface);
+    AssertEqual (2, Out.LocalX);
+
+    CloseCrt ();
+end
+
+test 'ReadKey Passes Over Mouse Events And ReadEvent Does Not';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    EnsureRoot ();
+    EnableMouse ();
+
+    // A click, a key, a release -- queued in the order they happened, which
+    // is the whole reason for one queue rather than two.
+    TakeMouseReport ('[<0;5;5M');
+    EnqueueKey ('x');
+    TakeMouseReport ('[<0;5;5m');
+
+    AssertEqual (3, KeyQueue.Length);
+    AssertEqual (EventMouseDown, KeyQueue[0].Kind);
+    AssertEqual (EventKey, KeyQueue[1].Kind);
+    AssertEqual (EventMouseUp, KeyQueue[2].Kind);
+
+    // KeyPressed answers False on a screen that is not a terminal whatever
+    // is queued -- there can be no keys -- so the filtering is asserted on
+    // the queue itself, which is what that verb walks.
+    AssertTrue (not KeyPressed ());
+
+    KeyQueue := [];
+    KeyHead  := 0;
+
+    TakeMouseReport ('[<0;5;5M');
+
+    var Keys := 0;
+
+    for var I := 0; I < KeyQueue.Length; I := I + 1 do
+        if KeyQueue[I].Kind = EventKey then Keys := Keys + 1;
+
+    AssertEqual (0, Keys);
+    AssertEqual (1, KeyQueue.Length);
+
+    EnqueueKey ('z');
+
+    Keys := 0;
+
+    for var I := 0; I < KeyQueue.Length; I := I + 1 do
+        if KeyQueue[I].Kind = EventKey then Keys := Keys + 1;
+
+    AssertEqual (1, Keys);
+    AssertEqual (2, KeyQueue.Length);
+
+    CloseCrt ();
+end
+
+test 'PollEvent Answers Nil When Nothing Has Happened';
+begin
+    CloseCrt ();
+    InitCrt ();
+
+    EnsureRoot ();
+
+    // A screen that is not a terminal can never receive anything, so this
+    // answers nil at once rather than waiting for what cannot come.
+    AssertTrue (not IsTerminal ());
+    AssertEqual (nil, PollEvent ());
+
+    // And ReadEvent answers a KeyClose event rather than blocking.
+    var E := ReadEvent ();
+
+    AssertEqual (EventKey, E.Kind);
+    AssertEqual (KeyClose, E.Key);
 
     CloseCrt ();
 end

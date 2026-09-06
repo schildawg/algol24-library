@@ -1,0 +1,364 @@
+// A jukebox and a piano you can click.
+//
+//     algc examples/jukebox.a24
+//
+//   click a title   plays it, lighting each key as it sounds
+//   click a key     plays that note
+//   Esc             finishes
+//
+// Two octaves, because Jesu does not fit in one.
+//
+// This is where the mouse earns the shape it was given. Each title is a
+// ViewPort of its own, so working out which one was clicked is not
+// arithmetic on coordinates -- the event says which surface it landed on:
+//
+//     if E.Surface = Titles[0] then Perform (0);
+//
+// The keyboard is one surface, so its click does use LocalX and LocalY -- the
+// point in the keyboard's own pixels, which the event also carries. Turbo
+// Vision computed both of those by hand in TView; a stack of surfaces makes
+// them fall out.
+
+uses graph;
+uses sound;
+uses math;      // Round, Exp and Ln -- `uses` is not transitive here
+
+// Three tunes, in BASIC's Music Macro Language. Nothing below knows what any
+// of them sound like; Score turns each into the notes it means.
+var Tunes := [
+  ['Twinkle, Twinkle, Little Star',
+   'T120 O4 L4 CCGG AAG2 FFEE DDC2 GGFF EED2 CCGG AAG2 FFEE DDC2'],
+  ['Ode to Joy',
+   'T112 O4 L4 EEFG GFED CCDE E.D8D2 EEFG GFED CCDE D.C8C2'],
+  ['Jesu, Joy of Man''s Desiring',
+   'T92 O4 L8 GAB >DCC EDD GF#GD <BGB A2']];
+
+// Two octaves from middle C: MIDI 60 to 83.
+var KeyMidi  := [];
+var KeyBlack := [];
+var KeyName  := [];
+var KeyWhite := [];
+
+const WhiteW := 80;
+const WhiteH := 250;
+const BlackW := 48;
+const BlackH := 160;
+
+const BoardX := 40;
+const BoardY := 430;
+
+var Board  := nil;
+var Titles := [];
+var Lit    := 0 - 1;
+
+/// The frequency of a MIDI note, rounded as Score rounds it.
+function HertzOf (Midi : Integer) : Integer;
+begin
+    Exit Round (440.0 * Exp ((Midi - 69) * Ln (2.0) / 12.0));
+end
+
+/// Builds the two octaves: which keys are black, and where each white one is.
+procedure MakeKeys ();
+begin
+    var Names  := ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#',
+                   'G', 'G#', 'A', 'A#', 'B'];
+    var Blacks := [False, True, False, True, False, False,
+                   True, False, True, False, True, False];
+    var Whites := 0;
+
+    for var Octave := 0; Octave < 2; Octave := Octave + 1 do
+        for var Step := 0; Step < 12; Step := Step + 1 do
+        begin
+            KeyMidi.Add (60 + Octave * 12 + Step);
+            KeyBlack.Add (Blacks[Step]);
+            KeyName.Add (Names[Step] + Str (4 + Octave));
+
+            // A white key gets the next slot; a black one sits after the
+            // white key it follows.
+            if Blacks[Step] then KeyWhite.Add (Whites - 1);
+            else
+            begin
+                KeyWhite.Add (Whites);
+
+                Whites := Whites + 1;
+            end
+        end
+end
+
+/// Where a key sits on the board, as [X1, Y1, X2, Y2] in its own pixels.
+function KeyBox (I : Integer) : List;
+begin
+    var W := KeyWhite[I];
+
+    if not KeyBlack[I] then
+        Exit [1 + W * WhiteW, 1, W * WhiteW + WhiteW, WhiteH];
+
+    // A black key straddles the join between two white ones.
+    var Mid := 1 + (W + 1) * WhiteW;
+
+    Exit [Mid - BlackW div 2, 1, Mid + BlackW div 2 - 1, BlackH];
+end
+
+/// Draws the whole keyboard: white keys, then black keys over them.
+procedure DrawBoard ();
+begin
+    for var I := 0; I < KeyMidi.Length; I := I + 1 do
+        if not KeyBlack[I] then
+        begin
+            var B := KeyBox (I);
+
+            Board.SetFillStyle (SolidFill, White);
+            Board.Bar (B[0], B[1], B[2], B[3]);
+            Board.SetColor (Black);
+            Board.Rectangle (B[0], B[1], B[2], B[3]);
+        end
+
+    for var I := 0; I < KeyMidi.Length; I := I + 1 do
+        if KeyBlack[I] then
+        begin
+            var B := KeyBox (I);
+
+            Board.SetFillStyle (SolidFill, Black);
+            Board.Bar (B[0], B[1], B[2], B[3]);
+            Board.SetColor (DarkGray);
+            Board.Rectangle (B[0], B[1], B[2], B[3]);
+        end
+
+    Board.Show ();
+end
+
+/// Lights a key, or puts it back to its own color.
+///
+/// Two filled rectangles rather than a redraw. A white key lights only below
+/// where the black keys end, which is the part nothing overlaps -- so this
+/// never has to repair a border or a neighbor.
+procedure LightKey (I : Integer, On : Boolean);
+begin
+    if I < 0 then Exit;
+
+    var B    := KeyBox (I);
+    var Tint := White;
+
+    if KeyBlack[I] then Tint := Black;
+    if On then Tint := LightRed;
+    if On then if KeyBlack[I] then Tint := Red;
+
+    var Y1 := B[1] + 1;
+
+    if not KeyBlack[I] then Y1 := BlackH + 1;
+
+    Board.SetFillStyle (SolidFill, Tint);
+    Board.Bar (B[0] + 1, Y1, B[2] - 1, B[3] - 1);
+    Board.Show ();
+end
+
+/// Lights one key and darkens whichever was lit before.
+procedure LightOnly (I : Integer);
+begin
+    if Lit = I then Exit;
+
+    LightKey (Lit, False);
+    LightKey (I, True);
+
+    Lit := I;
+end
+
+/// The key with this frequency, or -1.
+function KeyForHertz (Hz : Integer) : Integer;
+begin
+    for var I := 0; I < KeyMidi.Length; I := I + 1 do
+        if HertzOf (KeyMidi[I]) = Hz then Exit I;
+
+    Exit 0 - 1;
+end
+
+/// The key at a point of the board, or -1.
+///
+/// Black keys are tested first because they lie over the white ones: a click
+/// near the top of a white key that a black one covers belongs to the black.
+function KeyAtPoint (X : Integer, Y : Integer) : Integer;
+begin
+    for var I := 0; I < KeyMidi.Length; I := I + 1 do
+        if KeyBlack[I] then
+        begin
+            var B := KeyBox (I);
+
+            if X >= B[0] then if X <= B[2] then
+              if Y >= B[1] then if Y <= B[3] then Exit I;
+        end
+
+    for var I := 0; I < KeyMidi.Length; I := I + 1 do
+        if not KeyBlack[I] then
+        begin
+            var B := KeyBox (I);
+
+            if X >= B[0] then if X <= B[2] then
+              if Y >= B[1] then if Y <= B[3] then Exit I;
+        end
+
+    Exit 0 - 1;
+end
+
+/// Writes the line under the titles.
+procedure Say (Text : String);
+begin
+    TextBackground (Blue);
+    TextColor (Yellow);
+    GotoXY (4, 8);
+    Write ('                                                       ');
+    GotoXY (4, 8);
+    Write (Text);
+end
+
+/// Draws one title, lit or not.
+procedure DrawTitle (I : Integer, On : Boolean);
+begin
+    var V    := Titles[I];
+    var Back := Cyan;
+    var Ink  := Black;
+
+    if On then Back := LightRed;
+    if On then Ink := White;
+
+    V.SetFillStyle (SolidFill, Back);
+    V.Bar (1, 1, V.W, V.H);
+    V.SetColor (Black);
+    V.Rectangle (1, 1, V.W, V.H);
+
+    V.SetColor (Ink);
+    V.SetTextJustify (CenterText, CenterText);
+    V.OutTextXY (V.W div 2, V.H div 2, Tunes[I][0]);
+    V.Show ();
+end
+
+/// Throws away whatever piled up while a tune was playing.
+///
+/// A click during the music is not a click at the menu, and without this the
+/// jukebox would work through a queue of them the moment it finished.
+procedure DrainEvents ();
+begin
+    while PollEvent () <> nil do
+    begin
+    end
+end
+
+/// Plays one tune, lighting each key as it sounds.
+procedure Perform (Which : Integer);
+begin
+    DrawTitle (Which, True);
+    Say ('Playing: ' + Tunes[Which][0]);
+
+    // Score answers what the MML means without sounding any of it. Everything
+    // below is a walk over that list.
+    for var N in Score (Tunes[Which][1]) do
+    begin
+        var Key := KeyForHertz (N[0]);
+
+        if Key >= 0 then LightOnly (Key);
+
+        if N[0] > 0 then Sound (N[0]);
+
+        Delay (N[1]);
+        NoSound ();
+
+        if N[2] > 0 then
+        begin
+            LightOnly (0 - 1);
+            Delay (N[2]);
+        end
+    end
+
+    LightOnly (0 - 1);
+    NoSound ();
+
+    DrawTitle (Which, False);
+    Say ('Click a title, or a key.');
+    DrainEvents ();
+end
+
+/// Sounds one key for as long as the button is held, or briefly.
+procedure Strike (Key : Integer);
+begin
+    LightOnly (Key);
+    Say (KeyName[Key] + '   ' + Str (HertzOf (KeyMidi[Key])) + ' Hz');
+    Sound (HertzOf (KeyMidi[Key]));
+
+    // Held down: sound until the button comes up, so the keyboard plays like
+    // one rather than beeping.
+    while MouseButtons () div MouseLeft mod 2 = 1 do Delay (10);
+
+    NoSound ();
+    LightOnly (0 - 1);
+end
+
+begin
+    InitGraph (1280, 800, 'Jukebox', False);
+    EnableMouse ();
+
+    MakeKeys ();
+
+    TextBackground (Blue);
+    ClrScr ();
+
+    TextColor (Yellow);
+    GotoXY (4, 2);
+    Write ('Jukebox');
+
+    TextColor (LightGray);
+    GotoXY (14, 2);
+    Write ('click a title to play it, or play the keys yourself');
+
+    TextColor (DarkGray);
+    GotoXY (4, 24);
+    Write ('Esc finishes');
+
+    if not SoundAvailable () then
+    begin
+        TextColor (LightRed);
+        GotoXY (4, 23);
+        Write ('(no audio device -- the keys still light)');
+    end
+
+    // Each title is a surface of its own, so a click tells us which one it
+    // was without any arithmetic on coordinates.
+    for var I := 0; I < 3; I := I + 1 do
+    begin
+        Titles.Add (ViewPort (60 + I * 400, 140, 360, 90, I + 1));
+        DrawTitle (I, False);
+    end
+
+    Board := ViewPort (BoardX, BoardY, 14 * WhiteW + 2, WhiteH + 2, 10);
+
+    DrawBoard ();
+    Say ('Click a title, or a key.');
+
+    while True do
+    begin
+        var E := ReadEvent ();
+
+        if E.Kind = EventKey then
+        begin
+            if E.Key = #27 then break;
+            if E.Key = KeyClose then break;
+        end
+
+        if E.Kind = EventMouseDown then
+        begin
+            // The event says which surface it landed on. Turbo Vision worked
+            // this out in TView; here it arrives with the click.
+            if E.Surface = Board then
+            begin
+                var Key := KeyAtPoint (E.LocalX, E.LocalY);
+
+                if Key >= 0 then Strike (Key);
+            end
+
+            for var I := 0; I < 3; I := I + 1 do
+                if E.Surface = Titles[I] then Perform (I);
+        end
+    end
+
+    NoSound ();
+    CloseSound ();
+    CloseGraph ();
+end
