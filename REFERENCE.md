@@ -100,8 +100,10 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`RandomInteger`](#randominteger) | function | `random` |
 | [`Randomize`](#randomize) | procedure | `random` |
 | [`RandomReal`](#randomreal) | function | `random` |
+| [`ReadAll`](#readall) | functions and procedures | `file` |
 | [`ReadEvent`](#readevent) | functions | `graph` and `crt` |
 | [`ReadKey`](#readkey) | function | `graph` and `crt` |
+| [`ReadLines`](#readlines) | function and procedure | `file` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
@@ -5555,6 +5557,121 @@ WriteLn (RandomReal ());
 
 ---
 
+## ReadAll
+
+*functions and procedures* — unit `file`
+
+**Function**
+
+Reads and writes whole text files.
+
+**Declaration**
+
+```algol24
+function  ReadAll   (Path : String) : String;
+procedure WriteAll  (Path : String, Text : String);
+procedure AppendAll (Path : String, Text : String);
+
+function  Exists      (Path : String) : Boolean;
+function  IsDirectory (Path : String) : Boolean;
+function  FileSize    (Path : String) : Integer;
+
+procedure Erase    (Path : String);
+procedure Rename   (From : String, To : String);
+procedure CopyFile (From : String, To : String);
+```
+
+**Remarks**
+
+⚠️ **Whole files, deliberately.** There is no handle to hold, no cursor to
+keep, and nothing to remember to close. That covers everything this library
+does with files and almost everything a program does with a text file.
+
+The unit owns its own C rather than using the language's `TextFile`, which
+exists for the compiler. That is the same bargain [`math`](#abs) and
+[`Sound`](#sound) strike, and it means `file` can grow without the language
+changing. It is also the library's **first foreign code that builds
+anywhere** — `soundffi.c` is macOS-only and `crtffi.c` is POSIX-only, where
+nothing here is worse than `fopen`.
+
+`Exists` never raises: asking about a path that is not there is the question,
+not a fault. `IsDirectory` is worth asking separately, because opening a
+directory as a file succeeds on some systems and then reads nothing — which
+would look like an empty file rather than a mistake. `ReadAll` refuses one
+outright.
+
+An empty file answers an empty String rather than raising.
+
+`AppendAll` makes the file if it is not there. `CopyFile` copies a block at a
+time in the C rather than reading then writing here, so a large file is not
+held in memory to be moved.
+
+⚠️ **A file holding a zero byte is not text**, and `ReadAll` says so rather
+than answering a truncated String. See `DEFECTS.md` H-2 for why that check
+exists and what it protects.
+
+Newlines arrive exactly as the file holds them —
+[`ReadLines`](#readlines) is what strips carriage returns.
+
+Paths resolve against the working directory.
+
+Raises `ReadAll: cannot read '<path>'.`, `ReadAll: '<path>' is not text.`,
+`FileSize: cannot read '<path>'.`, `WriteAll: cannot write '<path>'.`,
+`AppendAll: cannot write '<path>'.`, `Erase: cannot remove '<path>'.`,
+`Rename: cannot rename '<from>'.` and `CopyFile: cannot copy '<from>'.`
+
+**See also**
+
+[`ReadLines`](#readlines)
+
+**Example**
+
+```algol24
+uses file;
+
+// Whole files, so there is no handle to hold and nothing to close.
+WriteAll ('notes.txt', 'alpha' + #10 + 'beta' + #10 + 'gamma' + #10);
+
+System.WriteLn ('exists:   ', Exists ('notes.txt'));
+System.WriteLn ('bytes:    ', FileSize ('notes.txt'));
+
+var Lines := ReadLines ('notes.txt');
+
+System.WriteLn ('lines:    ', Lines.Length);
+System.WriteLn ('the last: ', Lines[2]);
+
+// A trailing newline does not invent an empty last line.
+AppendAll ('notes.txt', 'delta' + #10);
+
+System.WriteLn ('appended: ', ReadLines ('notes.txt').Length, ' lines');
+
+CopyFile ('notes.txt', 'copy.txt');
+System.WriteLn ('copied:   ', ReadAll ('copy.txt') = ReadAll ('notes.txt'));
+
+Rename ('copy.txt', 'moved.txt');
+System.WriteLn ('moved:    ', Exists ('moved.txt'), ' and copy.txt gone: ',
+                not Exists ('copy.txt'));
+
+Erase ('notes.txt');
+Erase ('moved.txt');
+
+System.WriteLn ('cleaned:  ', not Exists ('notes.txt'));
+```
+
+```console
+exists:   true
+bytes:    17
+lines:    3
+the last: gamma
+appended: 4 lines
+copied:   true
+moved:    true and copy.txt gone: true
+cleaned:  true
+```
+
+
+---
+
 ## ReadEvent
 
 *functions* — unit `graph` and `crt`
@@ -5709,6 +5826,84 @@ System.WriteLn ('no key was waiting');
 false
 no key was waiting
 ```
+
+---
+
+## ReadLines
+
+*function and procedure* — unit `file`
+
+**Function**
+
+Reads and writes a text file as a list of lines.
+
+**Declaration**
+
+```algol24
+function  ReadLines  (Path : String) : List;
+procedure WriteLines (Path : String, Lines : List);
+```
+
+**Remarks**
+
+The lines come back **without their newlines**, and the two are inverses:
+`WriteLines` gives every line a newline including the last, which is what
+makes a file read back unchanged.
+
+⚠️ **A trailing newline does not make an empty last line.** A file of three
+lines answers three however it ends, which is what almost every program wants
+and what a naive split on newline gets wrong.
+
+⚠️ **Either newline convention reads the same.** A carriage return
+immediately before a newline belongs to the newline and is dropped, so a file
+written on Windows reads as it would here. A carriage return anywhere else is
+just a character.
+
+An empty list writes an empty file, and an empty file reads back as no lines.
+
+Raises [`ReadAll`](#readall)'s messages.
+
+**See also**
+
+[`ReadAll`](#readall)
+
+**Example**
+
+```algol24
+uses file;
+
+// WriteLines and ReadLines are inverses: each line gets a newline, including
+// the last, which is what makes the file read back unchanged.
+WriteLines ('poem.txt', ['the sea', 'the sea', 'the open sea']);
+
+var Back := ReadLines ('poem.txt');
+
+System.WriteLn ('lines back: ', Back.Length);
+System.WriteLn ('unchanged:  ', Back[0] = 'the sea', ' ', Back[2] = 'the open sea');
+
+// However the file ends, three lines are three lines.
+WriteAll ('poem.txt', 'a' + #10 + 'b' + #10 + 'c');
+System.WriteLn ('no trailing newline: ', ReadLines ('poem.txt').Length, ' lines');
+
+WriteAll ('poem.txt', 'a' + #10 + 'b' + #10 + 'c' + #10);
+System.WriteLn ('with one:            ', ReadLines ('poem.txt').Length, ' lines');
+
+// A file written on Windows reads the same as one written here. Note the
+// Str: a one-character literal is a Char, and a Char never equals a String.
+WriteAll ('poem.txt', 'a' + #13 + #10 + 'b' + #13 + #10);
+System.WriteLn ('carriage returns:    ', ReadLines ('poem.txt')[0] = Str ('a'));
+
+Erase ('poem.txt');
+```
+
+```console
+lines back: 3
+unchanged:  true true
+no trailing newline: 3 lines
+with one:            3 lines
+carriage returns:    true
+```
+
 
 ---
 

@@ -102,6 +102,68 @@ one, and `this.Ping` names the method.
 
 ## Hazards
 
+### H-2 — a String returned from C borrows the bytes, and does not copy them
+
+**Status:** hazard, not a defect. Recorded 2026-09-05 while building `file`.
+The library's defence is below; whether the language wants to say anything
+about it is the compiler project's call.
+
+A foreign function declared to answer a `String` hands back a `const char *`,
+and the String that arrives **points at the C's own memory**. It is not a
+copy. So a C function that reuses or frees its buffer corrupts a String the
+program is still holding — silently, with no error, and at a distance:
+
+```algol24
+function ReadAll (Path : String) : String;
+    external 'alg_file_readall' in 'libfileffi.dylib';
+
+var A := ReadAll ('a.txt');
+var B := ReadAll ('b.txt');     // the C reused its buffer
+
+WriteLn (A);                     // garbage: A pointed at what B overwrote
+```
+
+Measured, not assumed. `A` came back as `first file` before the second call
+and as binary rubbish after it, with `A = 'first file' + #10` answering False.
+
+This is arguably the same ground [FUN-014] already covers — the language
+defines the call and not the callee, and a C function's memory is the callee's
+business. It is recorded separately because the failure is *not* a signature
+mismatch: the declaration is right, the types agree, and the call is
+well-formed. What is wrong is a lifetime, which nothing in the declaration can
+express.
+
+**The library's defence: no foreign function here answers a pointer.**
+
+`fileffi.c` says so at the top and every function obeys it. A read fills a
+buffer the *caller* owns and answers a count:
+
+```algol24
+var N := RawSize (Path);
+var B := Buffer (N);            // sized exactly -- see below
+
+RawRead (Path, B.Address, N);
+
+Exit B.Text;
+```
+
+Going the other way is safe and needs no care: a `String` passed **into** C
+arrives as bytes the C reads during the call and does not keep.
+
+**A neighboring trap, found the same day.** The library's C is named
+`alg_something`, which is also the compiler runtime's prefix. `fileffi.c`
+first used `alg_file_exists` -- a name the runtime already defines. Nothing
+failed while the C was a shared library, because the interpreter resolves the
+library's copy first; it failed only when `examples/build.sh --static` linked
+everything into one executable. Not a language fault, but worth knowing that
+the two namespaces overlap and only one build shows it.
+
+**A Buffer must be sized exactly, which helps.** `Buffer.Text` refuses a
+buffer holding a zero byte — `A Buffer holding a zero byte has no Text.` — so
+a buffer larger than its contents fails on its own trailing zeros rather than
+answering a truncated String. That turns a silent fault into a loud one, and
+is why `file` calls `alg_file_size` before every read.
+
 ### H-1 — a foreign declaration's signature is never checked, and a mismatch is silent
 
 **Status:** specified behavior, not a defect. Recorded 2026-09-02,

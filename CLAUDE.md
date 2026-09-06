@@ -307,6 +307,35 @@ alike — `(1, 1)` is home, `GotoXY (TextCols (), TextRows ())` the far corner,
 the seam is `Text[Col - 1]`, at the memory boundary. `examples/ide.a24` is
 the acceptance piece — the Turbo C++ screen rebuilt from the vocabulary.
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `Delay`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 13 | complete |
+| `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
+
+⚠️ **`file` owns its primitive rather than using the core's `TextFile`.**
+That class exists for the compiler and is being pared to what the compiler
+needs; the library reads exactly one file -- a glyph file, in
+`InstallUserFont` -- and now does it through `file`. Nothing in the core is
+needed for file I/O: C can take a path as a String and answer a count, which
+is all `fileffi.c` uses.
+
+⚠️ **`alg_` is the runtime's prefix, and a common noun after it will
+collide.** `fileffi.c` first used `alg_file_exists`, which the compiler's own
+runtime already defines. A shared library hides such a clash -- the
+interpreter resolves ours first -- so it appeared only in
+`examples/build.sh --static`, where everything is linked into one executable.
+That build is the last thing `./test.sh` runs, and it is the only check that
+would have caught it. Library C is now `alg_libfile_*`; name new C so that it
+cannot be anything but ours.
+
+⚠️ **No foreign function here may answer a pointer.** A `String` returned from
+C **borrows** the bytes rather than copying them, so a C function that reuses
+its buffer corrupts a String still in hand -- silently. `fileffi.c` fills a
+caller-owned Buffer and answers a count instead. `DEFECTS.md` H-2 has the
+measurement. Going the other way is safe: a String passed *into* C is read
+during the call and not kept.
+
+⚠️ **A Buffer must be sized exactly to become Text.** `Buffer.Text` refuses a
+buffer holding a zero byte, so a buffer larger than its contents fails on its
+own trailing zeros rather than answering a truncated String. That is why
+`ReadAll` asks `alg_file_size` first.
 
 ⚠️ **Sound is its own unit for a portability reason, and must stay there.**
 `soundffi.c` reaches CoreAudio, which is a system framework on macOS and
@@ -363,9 +392,13 @@ lines changed.
 indexes by byte** -- `B[4]` reads and `B[4] := 200` writes, which `graph`'s
 key decoder uses and `crt`'s `ByteAt` predates; `end` before `else` takes **no** semicolon,
 where a simple statement before `else` takes one; a one-character map key is a
-**Char**, so `Str (C) in Map` never matches a `'C' : 0` entry; and **Lists and
+**Char**, so `Str (C) in Map` never matches a `'C' : 0` entry; **Lists and
 Maps compare by identity, not by content** -- `AssertEqual` on two
-equal-looking Lists always fails, so a comparison has to walk them.
+equal-looking Lists always fails, so a comparison has to walk them; and the
+**Char versus String seam bites constantly** -- it has now cost this session
+three separate bugs (`sound`'s note table, `file`'s tests, `file`'s reference
+example), always as `X = 'a'` silently answering False where `X` is a String.
+Write `Str ('a')` on the literal side.
 
 `examples/piano.a24` is where `graph` and `sound` meet: one octave of keys,
 Ode to Joy, each key lit as it sounds. It is a walk over what `Score` answers

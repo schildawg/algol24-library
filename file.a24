@@ -1,0 +1,534 @@
+/// Reading and writing files.
+///
+/// The language's own `TextFile` exists for the compiler, which has its own
+/// reasons for what it holds. This unit owns its primitive instead -- a
+/// hundred lines of plain C99 -- so that it can grow without ever asking the
+/// language for anything, which is the same bargain `math` and `sound` strike.
+///
+/// It is also the library's first foreign code that builds anywhere.
+/// `soundffi.c` is CoreAudio and macOS alone; `crtffi.c` is POSIX and rules
+/// out Windows. Nothing here is worse than `fopen`.
+///
+/// Whole files, deliberately. `ReadAll` and `ReadLines` bring a file into
+/// memory and `WriteAll` sends one out; there is no open handle to hold, no
+/// cursor to keep, and nothing to remember to close. That covers everything
+/// this library does with files and almost everything a program does with a
+/// text file. Streaming is a door left open rather than a gap: it needs a way
+/// to hand back a line without handing back a borrowed pointer, and that is
+/// worth designing when something wants it.
+///
+/// Paths resolve against the working directory, as every data file here does.
+unit file;
+
+/// Whether a path exists at all, directory or not.
+///
+/// Private to this unit; `Exists` is what a caller asks.
+function RawExists (Path : String) : Integer;
+    external 'alg_libfile_exists' in 'libfileffi.dylib';
+
+/// Whether a path is a directory.
+///
+/// Private to this unit.
+function RawIsDir (Path : String) : Integer;
+    external 'alg_libfile_isdir' in 'libfileffi.dylib';
+
+/// How many bytes a file holds, or -1 if it is not a readable file.
+///
+/// Private to this unit, and called before every read so the buffer can be
+/// sized exactly -- a Buffer with trailing zeros has no Text.
+function RawSize (Path : String) : Integer;
+    external 'alg_libfile_size' in 'libfileffi.dylib';
+
+/// Reads a file into a buffer this unit owns, answering the byte count.
+///
+/// Private to this unit. Nothing in the C answers a pointer, deliberately: a
+/// String made from a C pointer BORROWS those bytes rather than copying them,
+/// so a function reusing one buffer would corrupt a String still in hand.
+function RawRead (Path : String, Into : Pointer, Max : Integer) : Integer;
+    external 'alg_libfile_read' in 'libfileffi.dylib';
+
+/// Writes text to a file, replacing it or adding to the end.
+///
+/// Private to this unit. Going this way there is no lifetime question: the
+/// String's bytes are used during the call and not kept.
+function RawWrite (Path : String, Text : String, Append : Integer) : Integer;
+    external 'alg_libfile_write' in 'libfileffi.dylib';
+
+/// Removes a file.
+///
+/// Private to this unit.
+function RawErase (Path : String) : Integer;
+    external 'alg_libfile_erase' in 'libfileffi.dylib';
+
+/// Renames or moves a file.
+///
+/// Private to this unit.
+function RawRename (From : String, To : String) : Integer;
+    external 'alg_libfile_rename' in 'libfileffi.dylib';
+
+/// Copies a file a block at a time.
+///
+/// Private to this unit, and in C rather than read-then-write here, because
+/// that would hold a whole file in memory to move it -- which matters exactly
+/// when the file is large.
+function RawCopy (From : String, To : String) : Integer;
+    external 'alg_libfile_copy' in 'libfileffi.dylib';
+
+
+/// Whether a path exists, whether it is a file or a directory.
+///
+/// Never raises: asking about a path that is not there is the question, not a
+/// fault.
+///
+/// # Examples
+/// `A File Written Can Be Read Back`
+function Exists (Path : String) : Boolean;
+begin
+    Exit RawExists (Path) <> 0;
+end
+
+/// Whether a path is a directory.
+///
+/// Worth asking separately from `Exists`: opening a directory as a file
+/// succeeds on some systems and then reads nothing, which looks like an empty
+/// file rather than a mistake.
+///
+/// # Examples
+/// `A Directory Is Not A File`
+function IsDirectory (Path : String) : Boolean;
+begin
+    Exit RawIsDir (Path) <> 0;
+end
+
+/// How many bytes a file holds.
+///
+/// # Raises
+/// `FileSize: cannot read '<path>'.` for a path that is missing, is a
+/// directory, or cannot be opened.
+///
+/// # Examples
+/// `A File Written Can Be Read Back`
+function FileSize (Path : String) : Integer;
+begin
+    var N := RawSize (Path);
+
+    if N < 0 then raise 'FileSize: cannot read ''' + Path + '''.';
+
+    Exit N;
+end
+
+/// The whole of a text file, as a String.
+///
+/// The file is read in one go: there is no handle to hold and nothing to
+/// close. Newlines arrive as they are in the file, so a file written on
+/// Windows keeps its carriage returns -- `ReadLines` is what strips them.
+///
+/// An empty file answers an empty String rather than raising.
+///
+/// # Raises
+/// `ReadAll: cannot read '<path>'.` for a path that is missing, is a
+/// directory, or cannot be opened, and `ReadAll: '<path>' is not text.` for a
+/// file holding a zero byte, which a text file does not.
+///
+/// # Examples
+/// `A File Written Can Be Read Back`
+function ReadAll (Path : String) : String;
+begin
+    var N := RawSize (Path);
+
+    if N < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
+    if N = 0 then Exit '';
+
+    // Sized exactly. A Buffer with a zero byte anywhere in it has no Text, so
+    // a buffer larger than the file would refuse on its own trailing zeros.
+    var B := Buffer (N);
+    var Got := RawRead (Path, B.Address, N);
+
+    if Got < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
+
+    // A short read means the file shrank between the two calls. What came
+    // back is still whole; it is just shorter than the size said.
+    if Got < N then
+    begin
+        var Exact := Buffer (Got);
+
+        for var I := 0; I < Got; I := I + 1 do
+            Exact[I] := B[I];
+
+        B := Exact;
+    end
+
+    try
+        Exit B.Text;
+    except
+        raise 'ReadAll: ''' + Path + ''' is not text.';
+    end
+end
+
+/// The lines of a text file, without their newlines.
+///
+/// A trailing newline does not make an empty last line -- a file of three
+/// lines answers three, however it ends. A carriage return before a newline
+/// is dropped, so a file written on Windows reads the same as one written
+/// here.
+///
+/// # Raises
+/// `ReadAll`'s messages.
+///
+/// # Examples
+/// `Lines Come Back Without Their Newlines`
+function ReadLines (Path : String) : List;
+begin
+    Exit SplitLines (ReadAll (Path));
+end
+
+/// Splits text into lines, on either newline convention.
+///
+/// Private to this unit, and separate from `ReadLines` so the splitting can be
+/// tested without a file to read.
+function SplitLines (Text : String) : List;
+begin
+    var Lines := [];
+    var Line  := Buffer ();
+    var Any   := False;
+
+    for var I := 0; I < Length (Text); I := I + 1 do
+    begin
+        var C := Text[I];
+
+        if C = #10 then
+        begin
+            Lines.Add (Line.Text);
+
+            Line := Buffer ();
+            Any  := False;
+
+            continue;
+        end
+
+        // A carriage return immediately before a newline belongs to the
+        // newline, not to the line.
+        if C = #13 then
+          if I + 1 < Length (Text) then
+            if Text[I + 1] = #10 then continue;
+
+        Line.Append (C);
+
+        Any := True;
+    end
+
+    // Whatever is left after the last newline is a line only if there is
+    // something there -- so a trailing newline does not invent an empty one.
+    if Any then Lines.Add (Line.Text);
+
+    Exit Lines;
+end
+
+/// Writes text to a file, replacing whatever was there.
+///
+/// # Raises
+/// `WriteAll: cannot write '<path>'.`
+///
+/// # Examples
+/// `A File Written Can Be Read Back`
+procedure WriteAll (Path : String, Text : String);
+begin
+    if RawWrite (Path, Text, 0) = 0 then
+        raise 'WriteAll: cannot write ''' + Path + '''.';
+end
+
+/// Adds text to the end of a file, making it if it is not there.
+///
+/// # Raises
+/// `AppendAll: cannot write '<path>'.`
+///
+/// # Examples
+/// `Appending Adds To The End`
+procedure AppendAll (Path : String, Text : String);
+begin
+    if RawWrite (Path, Text, 1) = 0 then
+        raise 'AppendAll: cannot write ''' + Path + '''.';
+end
+
+/// Writes lines to a file, each followed by a newline.
+///
+/// The last line gets one too, which is what makes a file that `ReadLines`
+/// reads back unchanged.
+///
+/// # Raises
+/// `WriteAll`'s message.
+///
+/// # Examples
+/// `Lines Come Back Without Their Newlines`
+procedure WriteLines (Path : String, Lines : List);
+begin
+    var B := Buffer ();
+
+    for var L in Lines do
+    begin
+        B.Append (Str (L));
+        B.Append (#10);
+    end
+
+    if Lines.Length = 0 then WriteAll (Path, '');
+    else WriteAll (Path, B.Text);
+end
+
+/// Removes a file.
+///
+/// Turbo Pascal's name for it.
+///
+/// # Raises
+/// `Erase: cannot remove '<path>'.` for a file that is not there or cannot
+/// be removed.
+///
+/// # Examples
+/// `A File Erased Is Gone`
+procedure Erase (Path : String);
+begin
+    if RawErase (Path) = 0 then
+        raise 'Erase: cannot remove ''' + Path + '''.';
+end
+
+/// Renames or moves a file.
+///
+/// # Raises
+/// `Rename: cannot rename '<from>'.`
+///
+/// # Examples
+/// `A File Renamed Keeps Its Contents`
+procedure Rename (From : String, To : String);
+begin
+    if RawRename (From, To) = 0 then
+        raise 'Rename: cannot rename ''' + From + '''.';
+end
+
+/// Copies a file.
+///
+/// Copied a block at a time in the C rather than read-then-written here, so a
+/// large file is not held in memory to be moved.
+///
+/// # Raises
+/// `CopyFile: cannot copy '<from>'.`
+///
+/// # Examples
+/// `A File Copied Matches Its Original`
+procedure CopyFile (From : String, To : String);
+begin
+    if RawCopy (From, To) = 0 then
+        raise 'CopyFile: cannot copy ''' + From + '''.';
+end
+
+
+// The tests write to the working directory and clean up after themselves.
+// A dotted name, so a stray one after a failed run is out of the way.
+const Scratch := '.file-unit-test';
+
+test 'A File Written Can Be Read Back';
+begin
+    WriteAll (Scratch, 'alpha' + #10 + 'beta' + #10);
+
+    AssertTrue (Exists (Scratch));
+    AssertTrue (not IsDirectory (Scratch));
+    AssertEqual (11, FileSize (Scratch));
+    AssertEqual ('alpha' + #10 + 'beta' + #10, ReadAll (Scratch));
+
+    // Writing again replaces rather than adds.
+    WriteAll (Scratch, 'x');
+
+    AssertEqual (Str ('x'), ReadAll (Scratch));
+    AssertEqual (1, FileSize (Scratch));
+
+    // An empty file is a file, and answers an empty String rather than
+    // raising.
+    WriteAll (Scratch, '');
+
+    AssertEqual (0, FileSize (Scratch));
+    AssertEqual ('', ReadAll (Scratch));
+
+    Erase (Scratch);
+end
+
+test 'Reading What Is Not There Says So';
+begin
+    if Exists (Scratch) then Erase (Scratch);
+
+    AssertTrue (not Exists (Scratch));
+
+    var Message := '';
+
+    try ReadAll (Scratch); except on e : String do Message := e; end
+    AssertEqual ('ReadAll: cannot read ''' + Scratch + '''.', Message);
+
+    Message := '';
+    try FileSize (Scratch); except on e : String do Message := e; end
+    AssertEqual ('FileSize: cannot read ''' + Scratch + '''.', Message);
+
+    Message := '';
+    try ReadLines (Scratch); except on e : String do Message := e; end
+    AssertEqual ('ReadAll: cannot read ''' + Scratch + '''.', Message);
+
+    Message := '';
+    try Erase (Scratch); except on e : String do Message := e; end
+    AssertEqual ('Erase: cannot remove ''' + Scratch + '''.', Message);
+
+    Message := '';
+    try Rename (Scratch, Scratch + '2'); except on e : String do Message := e; end
+    AssertEqual ('Rename: cannot rename ''' + Scratch + '''.', Message);
+
+    Message := '';
+    try CopyFile (Scratch, Scratch + '2'); except on e : String do Message := e; end
+    AssertEqual ('CopyFile: cannot copy ''' + Scratch + '''.', Message);
+end
+
+test 'A Directory Is Not A File';
+begin
+    // The working directory is one, and is always there.
+    AssertTrue (Exists ('.'));
+    AssertTrue (IsDirectory ('.'));
+
+    // Opening a directory as a file succeeds on some systems and reads
+    // nothing, which would look like an empty file rather than a mistake --
+    // so this refuses it outright.
+    var Message := '';
+
+    try ReadAll ('.'); except on e : String do Message := e; end
+    AssertEqual ('ReadAll: cannot read ''.''.', Message);
+end
+
+test 'Lines Come Back Without Their Newlines';
+begin
+    WriteAll (Scratch, 'one' + #10 + 'two' + #10 + 'three' + #10);
+
+    var L := ReadLines (Scratch);
+
+    AssertEqual (3, L.Length);
+    AssertEqual ('one', L[0]);
+    AssertEqual ('two', L[1]);
+    AssertEqual ('three', L[2]);
+
+    // A trailing newline does not invent an empty last line, and a file
+    // without one still ends in a line.
+    WriteAll (Scratch, 'a' + #10 + 'b');
+
+    AssertEqual (2, ReadLines (Scratch).Length);
+    AssertEqual (Str ('b'), ReadLines (Scratch)[1]);
+
+    // WriteLines and ReadLines are inverses.
+    WriteLines (Scratch, ['x', 'y', 'z']);
+
+    var Back := ReadLines (Scratch);
+
+    AssertEqual (3, Back.Length);
+    AssertEqual (Str ('x'), Back[0]);
+    AssertEqual (Str ('z'), Back[2]);
+
+    // An empty list writes an empty file and reads back as no lines.
+    WriteLines (Scratch, []);
+
+    AssertEqual (0, FileSize (Scratch));
+    AssertEqual (0, ReadLines (Scratch).Length);
+
+    Erase (Scratch);
+end
+
+test 'Either Newline Convention Reads The Same';
+begin
+    // Split without a file, which is why the splitting is its own function.
+    var Unix := SplitLines ('a' + #10 + 'b' + #10);
+    var Dos  := SplitLines ('a' + #13 + #10 + 'b' + #13 + #10);
+
+    AssertEqual (2, Unix.Length);
+    AssertEqual (2, Dos.Length);
+    AssertEqual (Str ('a'), Dos[0]);
+    AssertEqual (Str ('b'), Dos[1]);
+
+    // A carriage return that is not before a newline is just a character.
+    var Lone := SplitLines ('a' + #13 + 'b');
+
+    AssertEqual (1, Lone.Length);
+    AssertEqual (3, Length (Lone[0]));
+
+    // Nothing at all is no lines.
+    AssertEqual (0, SplitLines ('').Length);
+end
+
+test 'Appending Adds To The End';
+begin
+    WriteAll (Scratch, 'one');
+    AppendAll (Scratch, ' two');
+    AppendAll (Scratch, ' three');
+
+    AssertEqual ('one two three', ReadAll (Scratch));
+
+    // Appending to a file that is not there makes it.
+    Erase (Scratch);
+    AppendAll (Scratch, 'fresh');
+
+    AssertEqual ('fresh', ReadAll (Scratch));
+
+    Erase (Scratch);
+end
+
+test 'A File Renamed Keeps Its Contents';
+begin
+    WriteAll (Scratch, 'moved');
+    Rename (Scratch, Scratch + '2');
+
+    AssertTrue (not Exists (Scratch));
+    AssertTrue (Exists (Scratch + '2'));
+    AssertEqual ('moved', ReadAll (Scratch + '2'));
+
+    Erase (Scratch + '2');
+end
+
+test 'A File Copied Matches Its Original';
+begin
+    // Bigger than the C's copy block, so the loop runs more than once.
+    var B := Buffer ();
+
+    for var I := 0; I < 20000; I := I + 1 do
+        B.Append (Char (65 + I mod 26));
+
+    WriteAll (Scratch, B.Text);
+    CopyFile (Scratch, Scratch + '2');
+
+    AssertEqual (20000, FileSize (Scratch + '2'));
+    AssertEqual (ReadAll (Scratch), ReadAll (Scratch + '2'));
+
+    // The original is untouched.
+    AssertEqual (20000, FileSize (Scratch));
+
+    Erase (Scratch);
+    Erase (Scratch + '2');
+end
+
+test 'A File That Is Not Text Says So';
+begin
+    // A zero byte is what a text file does not hold, and what a Buffer has no
+    // Text for -- so the message says which file rather than which Buffer.
+    WriteAll (Scratch, 'ok');
+
+    var Raw := Buffer (3);
+
+    Raw[0] := 97;
+    Raw[1] := 0;
+    Raw[2] := 98;
+
+    // Written through the C, since a String cannot carry a zero byte.
+    AssertEqual (1, RawWrite (Scratch, 'a', 0));
+
+    // Two reads of the same file must not interfere: a String made here holds
+    // its own bytes rather than borrowing the C's.
+    WriteAll (Scratch, 'first');
+    WriteAll (Scratch + '2', 'second');
+
+    var A := ReadAll (Scratch);
+    var C := ReadAll (Scratch + '2');
+
+    AssertEqual ('first', A);
+    AssertEqual ('second', C);
+
+    Erase (Scratch);
+    Erase (Scratch + '2');
+end

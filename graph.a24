@@ -16,6 +16,7 @@ unit graph;
 
 uses math;
 uses testing;
+uses file;
 
 // ------------------------------------------------------------------ SDL --
 //
@@ -768,12 +769,14 @@ end
 /// `InstallUserFont Selects Another Glyph File`
 procedure InstallUserFont (Path : String);
 begin
-    var F := TextFile ();
-
-    F.Assign (Path);
+    // Read whole, through the library's own `file` unit rather than the
+    // core's TextFile -- which exists for the compiler and is being pared to
+    // what the compiler needs. A glyph file is a couple of hundred kilobytes;
+    // reading it in one go costs nothing and leaves no handle to close.
+    var Lines := [];
 
     try
-        F.Reset ();
+        Lines := ReadLines (Path);
     except
         raise 'InstallUserFont: cannot open ''' + Path + '''.';
     end
@@ -784,10 +787,8 @@ begin
     FontGray     := False;
     FontHeight   := 16;
 
-    while not F.Eof do
+    for var Line in Lines do
     begin
-        var Line := F.ReadLn ();
-
         // The separator IS the format: ':' is ink, '+' is a picture.
         var Sep     := Pos (Line, ':');
         var Painted := False;
@@ -846,8 +847,6 @@ begin
             FontGlyphs[Code] := Words;
         end
     end
-
-    F.Close ();
 
     FontLoaded := True;
 
