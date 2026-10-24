@@ -26,6 +26,10 @@ built.
 | --- | --- |
 | `math` | arithmetic, the transcendentals, the Double-to-Integer conversions, `NaN` and `Infinity` |
 | `random` | a seedable generator, kept apart from `math` because it has state |
+| `graph` | a windowed screen: celled text on a grid, Windows and ViewPorts stacked around it, the drawing vocabulary, the keyboard and the mouse |
+| `crt` | the same text mode on a terminal, composited in memory and painted by difference |
+| `sound` | tones, BASIC's `Play`, and sampled sounds mixed sixteen at a time |
+| `file` | whole-file reads and writes, and the questions to ask about a path |
 | `testing` | `AssertNear`, for results whose exact bits are not guaranteed |
 
 `REFERENCE.md` documents every routine and constant, after the pattern of Turbo
@@ -35,7 +39,10 @@ is what it printed.
 
 ## Building and testing
 
-Needs `algc` on the path (`brew install algol24`) and a C compiler.
+Needs `algc` on the path (`brew install algol24`), a C compiler, and SDL2 for
+`graph` (`brew install sdl2`). The test run opens no windows and makes no
+noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`
+draws nowhere and `sound` computes every note and plays none of them.
 
 ```sh
 ./test.sh                 # every unit, the reference examples, and the example app
@@ -66,6 +73,14 @@ them, and that a compiled program agrees with the interpreter.
 `examples/README.md` explains what is linked in and what is loaded, which turns
 out to be the interesting part.
 
+Eleven demos sit beside it, run interpreted and checked by eye — the window and
+its glyph files, the keys, the figures and their fills, the arc convention, the
+stacked surfaces, a piano that plays Ode to Joy and a jukebox driven by the
+mouse. Two are acceptance pieces: `examples/ide.a24` rebuilds the Turbo C++
+screen out of `graph`'s vocabulary, and `examples/ide-crt.a24` is the same
+screen on a terminal with three lines changed. `examples/README.md` catalogues
+them.
+
 ## Turbo Pascal
 
 The routine names are Turbo Pascal's and so is the reference's shape, as an
@@ -78,9 +93,11 @@ library takes it and says why:
 - **`Round` breaks ties toward the even neighbor**, which is what IEEE 754
   already does for every arithmetic result in the language, and what does not
   accumulate a bias.
-- **`Random` and `RandomInteger` are separate names.** Overload selection
-  happens at run time and warns at every call site, so one name answering both
-  shapes would make the unit's commonest call its noisiest.
+- **`Random`, `RandomInteger` and `RandomReal` are separate names.** Turbo
+  Pascal spells all of it `Random` and takes the return type from the argument
+  count. Here the name says which you get. The original objection was louder —
+  0.1.3 warned at every call site of an overload — and 0.1.4 closed that half;
+  the readability half is why the names stay apart.
 
 ## Licence
 

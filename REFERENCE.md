@@ -5367,10 +5367,13 @@ bounded Integer. [`RandomReal`](#randomreal) has no short spelling for the same
 reason.
 
 ⚠️ **It is a pass-through rather than a second overload of one name.** Turbo
-Pascal spells both shapes `Random`, which is not available here: overload
-selection happens at run time and warns at *every* call site, so a single
-`Random` answering both shapes would make the unit's commonest call its
-noisiest.
+Pascal spells both shapes `Random`, and since 0.1.4 the language would allow
+it — two arities settle statically and in silence, where 0.1.3 warned at every
+call site and would have made the unit's commonest call its noisiest. The two
+names are kept for what is left: a single `Random` would take its return type
+from how many arguments it was given, a Double for none and an Integer for
+one, which is something a reader counts rather than reads. `Random` and
+[`RandomReal`](#randomreal) say which at the call site.
 
 **See also**
 

@@ -1,8 +1,10 @@
 # Building an application with the library
 
-`statistics.a24` estimates pi by throwing darts and rolls two dice ten thousand
-times, which between them reach most of `math` and all of `random`. It exists to
-show what shipping an application built on this library involves.
+Twelve programs live here. `statistics.a24` is the one that gets built: it
+estimates pi by throwing darts and rolls two dice ten thousand times, which
+between them reach most of `math` and all of `random`, and it exists to show
+what shipping an application built on this library involves. Most of this file
+is about it. The other eleven are demos, catalogued at the foot.
 
 Run it, from the repository root:
 
@@ -80,3 +82,32 @@ cheap sanity check on the generator.
 The pi estimate is the opposite lesson. The error falls with the square root of
 the dart count, so a hundredfold more darts buys about one more digit — a
 hundred thousand darts still only gets two.
+
+## The other programs here
+
+None of these is built or compared — they are run interpreted, by eye, and most
+of them want a window and a person:
+
+| | |
+| --- | --- |
+| `window.a24` | the window itself, and free text through both glyph files — five scripts and emoji, then the same machine one bit per pixel |
+| `keys.a24` | `ReadKey` answering one Char per key, every key named as it arrives |
+| `video.a24` | `HighVideo`, `LowVideo` and `NormVideo` over the sixteen colors, the Brown/Yellow oddity included |
+| `textstyle.a24` | `SetTextStyle` on a ViewPort: four quarter turns and five magnifications, which celled text can have neither of |
+| `arcs.a24` | the `Arc` convention drawn so it can be checked by eye — zero at three o'clock, counterclockwise, so 90 degrees is up |
+| `figures.a24` | the figures, the thirteen fills woven, and what a boundary `FloodFill` does including when it leaks |
+| `surfaces.a24` | the interleave one text plane cannot express — a chart drawn over a window's own text, and a second window dragged over both |
+| `ide.a24` | the acceptance piece: the Turbo C++ screen rebuilt from the vocabulary |
+| `ide-crt.a24` | the same screen on a terminal, three lines changed |
+| `piano.a24` | where `graph` meets `sound` — an octave of keys, Ode to Joy, each key lit as it sounds |
+| `jukebox.a24` | where the mouse pays off: each title is a ViewPort, so a click is `E.Surface = Titles[I]` rather than arithmetic |
+
+Three of them have caught what the test suite could not, each correct against
+every test and wrong in use: `ide.a24` found the escape-sequence race in `crt`'s
+key reader, `piano.a24` found the `Delay` ambiguity between `graph` and `sound`,
+and `jukebox.a24` found that `CloseGraph` was not resetting the mouse.
+
+Which is also the gap worth naming: `check.sh` compiles and compares
+`statistics.a24` alone, so nothing reaching SDL, CoreAudio or termios is ever
+built the two ways and diffed. The `--static` link is the only check that found
+the `alg_file_exists` collision with the compiler's own runtime.
