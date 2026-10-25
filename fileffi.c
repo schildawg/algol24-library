@@ -98,6 +98,84 @@ int64_t alg_libfile_size (const char *path)
  * Reads at most `max`, so a file that grew between the size call and this one
  * cannot run past the buffer.
  */
+/* ------------------------------------------------ reading to end of file -- */
+/*
+ * A whole-file read cannot be done with stat and one fread, which is what
+ * this file did at first and what was measured wrong: `stat` answers the
+ * bytes currently BUFFERED for a pipe, zero for most character devices, and a
+ * stale figure for a regular file that grows between the two calls. A
+ * megabyte piped into ReadAll came back as 65536 bytes -- one pipe buffer --
+ * reported as success.
+ *
+ * Reading to end of file instead needs the stream held open across several
+ * reads, because a pipe can be neither re-opened nor seeked: its bytes are
+ * gone once read. So there is a handle here now, even though the unit's own
+ * surface is still whole-file.
+ *
+ * The handle is a small integer into a table rather than a pointer, which is
+ * the shape `sound` already uses for a loaded clip: a stale integer answers a
+ * defined failure where a stale pointer would not.
+ */
+
+#define ALG_MAX_FILES 32
+
+static FILE *handles[ALG_MAX_FILES];
+
+/* Opens a file for reading and answers a handle, or -1. */
+int64_t alg_libfile_open (const char *path)
+{
+    if (path == NULL) return -1;
+
+    int slot = -1;
+
+    for (int i = 0; i < ALG_MAX_FILES; i++)
+        if (handles[i] == NULL) { slot = i; break; }
+
+    if (slot < 0) return -1;
+
+    FILE *f = fopen (path, "rb");
+
+    if (f == NULL) return -1;
+
+    handles[slot] = f;
+
+    return slot;
+}
+
+/* Reads up to `max` bytes into `into` at `offset`, answering how many came
+ * back and 0 at end of file.
+ *
+ * The offset is a parameter because a Pointer cannot be offset in the
+ * language -- the unit passes one Buffer and the position within it, rather
+ * than arithmetic it has no operator for.
+ *
+ * Answers -1 for a handle that is not open, which the unit raises on.
+ */
+int64_t alg_libfile_read_into (int64_t handle, void *into, int64_t offset,
+                               int64_t max)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return -1;
+    if (handles[handle] == NULL) return -1;
+    if (into == NULL || offset < 0 || max <= 0) return 0;
+
+    size_t got = fread ((char *) into + offset, 1, (size_t) max,
+                        handles[handle]);
+
+    return (int64_t) got;
+}
+
+/* Closes a handle. A no-op for one already closed, so a handler can release
+ * on the way out without knowing how far the program got. */
+void alg_libfile_close (int64_t handle)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return;
+    if (handles[handle] == NULL) return;
+
+    fclose (handles[handle]);
+
+    handles[handle] = NULL;
+}
+
 int64_t alg_libfile_read (const char *path, void *into, int64_t max)
 {
     if (path == NULL || into == NULL || max < 0) return -1;

@@ -528,11 +528,19 @@ it there was no version floor at all; now `./test.sh` fails on anything older.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
 so the only one besides it that is portable as written — nothing for a
-per-platform build to rewrite. `Upper` and `Lower` are **ASCII only** and leave
-every other code point alone, because Unicode case mapping is a table rather
-than a rule and is not even character-to-character (`ß` uppercases to `SS`).
-That limitation is asserted rather than merely documented: a test checks
-`Upper ('café')` answers `CAFé`. `Repeat` takes a `String` and a Char is
+per-platform build to rewrite. ⚠️ **`Upper` and `Lower` delegate to the core's
+`ToUpper`/`ToLower` [RT-025] and must not be reimplemented** -- they were, at
+first, because nobody checked the built-in table before adding them, and two
+of the unit's nine methods were a duplicate of the core for a while. A test
+now asserts they agree with the core routines so they cannot drift. They exist
+only for the extension spelling, `S.Upper ()` composing in a chain where
+`ToUpper (S)` would not. The ASCII-only limit is the core's decision, not this
+unit's.
+
+⚠️ **`Pos` takes a start index**, which `Split` and `Replace` use to scan in
+one pass. They re-sliced the remainder with `Copy` at first -- quadratic in
+the length, and a fresh string per separator. Check the specification's
+built-in table before writing a loop that walks a string. `Repeat` takes a `String` and a Char is
 accepted where one is declared, which is what makes `Repeat ('-', 40)` the
 call it exists for. `Split` keeps the empty pieces, which is what makes
 `Join (Split (S, By), By)` answer `S` for every input — a test asserts the
@@ -573,6 +581,40 @@ its buffer corrupts a String still in hand -- silently. `fileffi.c` fills a
 caller-owned Buffer and answers a count instead. `DEFECTS.md` H-2 has the
 measurement. Going the other way is safe: a String passed *into* C is read
 during the call and not kept.
+
+⚠️ **`stat` is not a file's size for anything but a regular file holding
+still, and `ReadAll` learned that the hard way.** It answers the bytes
+currently **buffered** for a pipe, zero for most character devices, and a
+stale figure for a file that grows between the size call and the read. The
+first version of `ReadAll` sized a Buffer from it and read once, so a megabyte
+piped in came back as 65536 bytes -- one pipe buffer -- **reported as
+success**, which is the worst shape a fault can take. Reproduction:
+
+```console
+$ yes abcdefghijklmnopqrstuvwxyz | head -c 1048576 | algc big.a24
+read 65536 of 1048576 bytes          # before
+read 1048576 of 1048576 bytes        # after
+```
+
+`ReadAll` now holds a handle **internally** and reads to end of file, growing
+its buffer -- `fileffi.c` gained `alg_libfile_open`, `read_into` and `close`
+for it. A caller still sees no handle.
+
+⚠️ **The pipe case is not unit-testable and the tests do not pretend to cover
+it.** A pipe needs a second process writing to it, so the two regression tests
+drive the growth loop with large regular files instead -- and **the buggy
+version would have passed both**, `stat` being accurate for exactly that case.
+The pipe was verified by hand. Do not read those tests as a reproduction.
+
+⚠️ **Whole files is a scope decision, not a principle**, and `file.a24` now
+says so in the unit rather than only in a commit message -- where the
+reasoning used to live, which is why it read as an assumption. The original
+objection to streaming was that it "needs a way to hand back a line without
+handing back a borrowed pointer"; that pattern is now used three times here
+(`ReadAll`, `dos.GetEnv`, `graph`'s SDL error reader), so the obstacle is
+gone. Every other runtime makes the stream the primitive and the whole-file
+read the sugar; this unit has it the other way round, which is a design
+question still open.
 
 ⚠️ **A Buffer must be sized exactly to become Text.** `Buffer.Text` refuses a
 buffer holding a zero byte, so a buffer larger than its contents fails on its

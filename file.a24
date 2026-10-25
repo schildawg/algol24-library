@@ -9,13 +9,32 @@
 /// `soundffi.c` and `graphffi.c` want SDL2; `crtffi.c` and `dosffi.c` are
 /// POSIX and rule out Windows. Nothing here is worse than `fopen`.
 ///
-/// Whole files, deliberately. `ReadAll` and `ReadLines` bring a file into
-/// memory and `WriteAll` sends one out; there is no open handle to hold, no
-/// cursor to keep, and nothing to remember to close. That covers everything
-/// this library does with files and almost everything a program does with a
-/// text file. Streaming is a door left open rather than a gap: it needs a way
-/// to hand back a line without handing back a borrowed pointer, and that is
-/// worth designing when something wants it.
+/// Whole files, and that is a scope decision rather than a principle -- which
+/// is worth stating here, because the reasoning used to live only in a commit
+/// message and so read as an assumption to anyone editing this file.
+///
+/// `ReadAll` and `ReadLines` bring a file into memory and `WriteAll` sends one
+/// out; there is no open handle for a CALLER to hold, no cursor to keep and
+/// nothing to remember to close. That covers everything this library does with
+/// files, and it is a convenience layer rather than a foundation -- which is
+/// the opposite of how it was first described.
+///
+/// Two things changed the picture. The original reason for having no handle
+/// was that streaming "needs a way to hand back a line without handing back a
+/// borrowed pointer", and that pattern has since been solved three times over
+/// in this library: `ReadAll` itself, `dos.GetEnv` and `graph`'s SDL error
+/// reader all ask C for a length, size a Buffer and read it back. The obstacle
+/// is gone.
+///
+/// And a whole-file read cannot be built on `stat` the way this unit tried to
+/// build it: `stat` answers the bytes currently buffered for a pipe and zero
+/// for most character devices, so a megabyte piped in came back as 65536 and
+/// reported success. `ReadAll` therefore holds a handle INTERNALLY and reads
+/// to end of file, growing as it goes. A caller still sees none of that.
+///
+/// Where streaming should sit is a design question rather than a gap:
+/// every modern runtime makes the stream the primitive and the whole-file
+/// read the sugar on top, and this unit has it the other way round.
 ///
 /// Paths resolve against the working directory, as every data file here does.
 unit file;
@@ -38,6 +57,30 @@ function RawIsDir (Path : String) : Integer;
 /// sized exactly -- a Buffer with trailing zeros has no Text.
 function RawSize (Path : String) : Integer;
     external 'alg_libfile_size' in 'libfileffi.so';
+
+/// Opens a file for reading and answers a handle, or -1.
+///
+/// Private to this unit. A handle exists because reading to end of file needs
+/// the stream held open: a pipe can be neither re-opened nor seeked, its bytes
+/// being gone once read. The unit's own surface stays whole-file.
+private function RawOpen (Path : String) : Integer;
+    external 'alg_libfile_open' in 'libfileffi.so';
+
+/// Reads up to Max bytes into a buffer at Offset, answering the count and 0
+/// at end of file.
+///
+/// Private to this unit. The offset is a parameter because a Pointer cannot be
+/// offset in this language -- the buffer and the position within it are passed
+/// separately rather than added.
+private function RawReadInto (Handle : Integer, Into : Pointer,
+                              Offset : Integer, Max : Integer) : Integer;
+    external 'alg_libfile_read_into' in 'libfileffi.so';
+
+/// Closes a handle, and does nothing for one already closed.
+///
+/// Private to this unit.
+private procedure RawClose (Handle : Integer);
+    external 'alg_libfile_close' in 'libfileffi.so';
 
 /// Reads a file into a buffer this unit owns, answering the byte count.
 ///
@@ -134,29 +177,51 @@ end
 /// `A File Written Can Be Read Back`
 function ReadAll (Path : String) : String;
 begin
-    var N := RawSize (Path);
+    // Asked first for the directory check, and for a size to start the buffer
+    // at. The size is a HINT and not a contract -- see below.
+    var Hint := RawSize (Path);
 
-    if N < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
-    if N = 0 then Exit '';
+    if Hint < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
 
-    // Sized exactly. A Buffer with a zero byte anywhere in it has no Text, so
-    // a buffer larger than the file would refuse on its own trailing zeros.
-    var B := Buffer (N);
-    var Got := RawRead (Path, B.Address, N);
+    var Handle := RawOpen (Path);
 
-    if Got < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
+    if Handle < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
 
-    // A short read means the file shrank between the two calls. What came
-    // back is still whole; it is just shorter than the size said.
-    if Got < N then
+    // The read runs to end of file whatever the size said, because the size
+    // is unreliable for everything except a regular file that holds still:
+    // `stat` answers the bytes currently BUFFERED for a pipe, zero for most
+    // character devices, and a stale figure for a file that grows between the
+    // two calls. Trusting it cost a megabyte piped in coming back as 65536
+    // bytes -- one pipe buffer -- reported as success.
+    var Cap := Hint;
+
+    if Cap < 65536 then Cap := 65536;
+
+    var B   := Buffer (Cap);
+    var Got := 0;
+
+    while True do
     begin
-        var Exact := Buffer (Got);
+        if Got = Cap then
+        begin
+            Cap := Cap * 2;
 
-        for var I := 0; I < Got; I := I + 1 do
-            Exact[I] := B[I];
+            B.Resize (Cap);
+        end
 
-        B := Exact;
+        // B.Address is taken afresh each time: Resize may move the bytes.
+        var N := RawReadInto (Handle, B.Address, Got, Cap - Got);
+
+        if N <= 0 then break;
+
+        Got := Got + N;
     end
+
+    RawClose (Handle);
+
+    // Sized exactly, because a Buffer holding a zero byte has no Text and a
+    // buffer larger than its contents would refuse on its own trailing zeros.
+    B.Resize (Got);
 
     try
         Exit B.Text;
@@ -531,4 +596,63 @@ begin
 
     Erase (Scratch);
     Erase (Scratch + '2');
+end
+
+/// The growth loop, which is what makes a read to end of file work.
+///
+/// Note what this does and does not cover. The fault that prompted it was a
+/// pipe: `stat` answers the bytes currently buffered, so a megabyte piped in
+/// came back as 65536 and reported success. A pipe cannot be made inside a
+/// test -- it needs a second process writing to it -- so **the version with
+/// the bug would have passed both of these**, `stat` being perfectly accurate
+/// for a regular file that holds still.
+///
+/// What they do guard is the mechanism the fix rests on: that the read grows
+/// its buffer and runs to end of file rather than trusting a size. The pipe
+/// itself was verified by hand, with `yes | head -c 1048576 | algc`, and the
+/// reproduction is recorded in `CLAUDE.md`.
+test 'ReadAll Reads Past Its Starting Buffer';
+begin
+    var Path := 'alg-file-grow-test.txt';
+
+    // Past the 65536 the read starts with, so the loop has to grow at least
+    // twice to hold it.
+    var Chunk := '0123456789ABCDEF';          // sixteen bytes
+    var Big   := Buffer ();
+
+    for var I := 0; I < 12000; I := I + 1 do Big.Append (Chunk);
+
+    var Text := Big.Text;
+
+    AssertEqual (192000, Length (Text));
+
+    WriteAll (Path, Text);
+
+    var Back := ReadAll (Path);
+
+    AssertEqual (192000, Length (Back));
+    AssertEqual (Text, Back);
+
+    Erase (Path);
+end
+
+/// Exactly the starting capacity, where the buffer fills on the last read and
+/// the loop must ask once more to learn it is at the end.
+test 'ReadAll Handles A File Exactly Its Buffer Size';
+begin
+    var Path := 'alg-file-exact-test.txt';
+    var Big  := Buffer ();
+
+    for var I := 0; I < 4096; I := I + 1 do Big.Append ('0123456789ABCDEF');
+
+    var Text := Big.Text;
+
+    AssertEqual (65536, Length (Text));
+
+    WriteAll (Path, Text);
+
+    AssertEqual (65536, Length (ReadAll (Path)));
+    AssertEqual (Text, ReadAll (Path));
+
+    Erase (Path);
 end

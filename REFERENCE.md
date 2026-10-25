@@ -5141,9 +5141,11 @@ extension function Lower (S : String) : String;
 
 **Remarks**
 
-ASCII only, on the same terms as [`Upper`](#upper) and for the same reason:
-Unicode case mapping is a table rather than a rule. Every character outside
-`A`–`Z` comes back exactly as it went in, accented letters and emoji included.
+⚠️ **This is the core's own `ToLower`, with the extension spelling added**,
+on the same terms as [`Upper`](#upper). `ToLower (S)` is the same call.
+
+ASCII only, which is the core's decision: every character outside `A`–`Z`
+comes back exactly as it went in, accented letters and emoji included.
 
 Both spellings work: `Lower (S)` and `S.Lower ()`.
 
@@ -8259,7 +8261,9 @@ An empty separator raises, there being no sequence of pieces that would mean
 it.
 
 To find one occurrence rather than cut at all of them, the core's own `Pos`
-answers the index of the first, or −1 when there is none.
+answers the index of the first, or −1 when there is none — and takes a start
+index, so `Pos (S, What, From)` walks the occurrences without slicing. That is
+what this routine does internally, in one pass over `S`.
 
 Both spellings work: `Split (S, ',')` and `S.Split (',')`.
 
@@ -9050,12 +9054,15 @@ extension function Upper (S : String) : String;
 
 **Remarks**
 
-ASCII only, and deliberately. Unicode case mapping is a table rather than a
-rule, and not even a character-to-character one: `ß` uppercases to `SS`, and
-Turkish `i` to a dotted capital that is not `I`. A routine handling some of the
-exceptions and not others would be harder to reason about than one handling
-none, so every character outside `a`–`z` comes back exactly as it went in —
-accented letters, Greek, Cyrillic and emoji alike.
+⚠️ **This is the core's own `ToUpper`, with the extension spelling added.**
+It exists so that `S.Upper ()` composes in a chain, which a built-in function
+cannot; `ToUpper (S)` is the same call and needs no `uses`.
+
+ASCII only, which is the core's decision rather than this unit's — and the
+right one. Unicode case mapping is a table and not even
+character-to-character: `ß` uppercases to `SS`. Every character outside
+`a`–`z` comes back exactly as it went in, accented letters, Greek, Cyrillic
+and emoji alike.
 
 Both spellings work: `Upper (S)` and `S.Upper ()`.
 
