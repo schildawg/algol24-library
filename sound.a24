@@ -1,15 +1,19 @@
 /// Tones, sound effects, and BASIC's PLAY.
 ///
 /// A unit of its own rather than a part of `crt` or `graph`, and the reason is
-/// portability. It reaches CoreAudio, which is a system framework on macOS --
-/// present on every machine, nothing to install -- but which exists nowhere
-/// else. `crt` calls only POSIX and would build on Linux tomorrow; folding
-/// this into it would narrow that unit to one operating system for the sake
-/// of a beep. So the noise lives here, where a program asks for it
-/// deliberately and the one platform-bound unit is easy to see.
+/// still portability though the shape of it has changed. It plays through
+/// SDL2, which carries audio on macOS, Linux, Windows and Android alike,
+/// where the CoreAudio backend it replaced was a macOS framework and existed
+/// nowhere else -- so this unit could once only ever have made a noise on one
+/// operating system. The noise stays here rather than folding into `crt`
+/// because `crt` calls only POSIX and needs nothing installed, and a terminal
+/// program should not acquire SDL by asking for a beep.
 ///
-/// It needs neither a window nor a terminal. A program that says `uses sound`
-/// and nothing else can still make a noise.
+/// `SDL_INIT_AUDIO` opens no window and needs no display server, so a program
+/// that says `uses sound` and nothing else can still make a noise on a
+/// machine with no desktop at all. What it does need is SDL2 present, which
+/// is the whole of what the change costs and is a dependency `graph` already
+/// carries.
 ///
 /// There is deliberately no `Delay` here, where `crt` and `graph` both have
 /// one. Three copies made a bare `Delay` ambiguous in exactly the two
@@ -26,8 +30,10 @@
 /// minute.
 ///
 /// `LoadSound` and `PlaySound` are neither's: a sound effect from a file,
-/// mixed under whatever else is sounding. CoreAudio decodes WAV, AIFF, CAF,
-/// MP3 and M4A.
+/// mixed under whatever else is sounding. WAV only -- SDL2 carries one
+/// decoder, where CoreAudio read AIFF, CAF, MP3 and M4A through the system's
+/// codecs. That breadth was the price of one operating system, and the trade
+/// was made the other way deliberately.
 ///
 /// Setting `ALG_SOUND=dummy` computes everything and plays nothing, which is
 /// what lets this unit's own tests run in silence -- the same bargain
@@ -40,80 +46,80 @@ uses math;
 ///
 /// Private to this unit; `SoundAvailable` is what a caller asks.
 function SoundAudible () : Integer;
-    external 'alg_sound_audible' in 'libsoundffi.dylib';
+    external 'alg_sound_audible' in 'libsoundffi.so';
 
 /// Starts a square wave at Hz, or stops it when Hz is zero or less.
 ///
 /// Private to this unit.
 procedure SoundTone (Hz : Integer);
-    external 'alg_sound_tone' in 'libsoundffi.dylib';
+    external 'alg_sound_tone' in 'libsoundffi.so';
 
 /// Stops the tone, leaving sound effects sounding.
 ///
 /// Private to this unit.
 procedure SoundOff ();
-    external 'alg_sound_off' in 'libsoundffi.dylib';
+    external 'alg_sound_off' in 'libsoundffi.so';
 
 /// Sets the tone's loudness, 0 to 255.
 ///
 /// Private to this unit.
 procedure SoundVolume (Level : Integer);
-    external 'alg_sound_volume' in 'libsoundffi.dylib';
+    external 'alg_sound_volume' in 'libsoundffi.so';
 
 /// Decodes an audio file into memory, answering a handle or -1.
 ///
 /// Private to this unit.
 function SoundLoad (Path : String) : Integer;
-    external 'alg_sound_load' in 'libsoundffi.dylib';
+    external 'alg_sound_load' in 'libsoundffi.so';
 
 /// How many frames a loaded sound holds, or -1 for a handle that is not one.
 ///
 /// Private to this unit.
 function SoundFrames (Clip : Integer) : Integer;
-    external 'alg_sound_frames' in 'libsoundffi.dylib';
+    external 'alg_sound_frames' in 'libsoundffi.so';
 
 /// The mixer's sample rate, which turns frames into milliseconds.
 ///
 /// Private to this unit.
 function SoundRate () : Integer;
-    external 'alg_sound_rate' in 'libsoundffi.dylib';
+    external 'alg_sound_rate' in 'libsoundffi.so';
 
 /// Starts a loaded sound playing; answers 1 if a voice was free for it.
 ///
 /// Private to this unit.
 function SoundStart (Clip : Integer, Volume : Integer) : Integer;
-    external 'alg_sound_play' in 'libsoundffi.dylib';
+    external 'alg_sound_play' in 'libsoundffi.so';
 
 /// Whether any voice is still playing a loaded sound.
 ///
 /// Private to this unit.
 function SoundBusy (Clip : Integer) : Integer;
-    external 'alg_sound_playing' in 'libsoundffi.dylib';
+    external 'alg_sound_playing' in 'libsoundffi.so';
 
 /// Silences every sound effect, leaving the tone alone.
 ///
 /// Private to this unit.
 procedure SoundHush ();
-    external 'alg_sound_hush' in 'libsoundffi.dylib';
+    external 'alg_sound_hush' in 'libsoundffi.so';
 
 /// Forgets a loaded sound and gives its memory back.
 ///
 /// Private to this unit.
 procedure SoundForget (Clip : Integer);
-    external 'alg_sound_free' in 'libsoundffi.dylib';
+    external 'alg_sound_free' in 'libsoundffi.so';
 
 /// Stops everything and closes the device.
 ///
 /// Private to this unit.
 procedure SoundShut ();
-    external 'alg_sound_close' in 'libsoundffi.dylib';
+    external 'alg_sound_close' in 'libsoundffi.so';
 
 /// Waits for Millis milliseconds.
 ///
 /// Private to this unit; `crt` and `graph` export a `Delay` of their own, and
 /// this one is here so that `Play` does not need either of them.
 procedure SoundNap (Millis : Integer);
-    external 'alg_crt_nap' in 'libcrtffi.dylib';
+    external 'alg_crt_nap' in 'libcrtffi.so';
 
 
 // The twelve semitones, by the letters MML names them with. C is 0, and the
@@ -548,16 +554,27 @@ end
 
 /// Loads an audio file and answers a handle for playing it.
 ///
-/// Whatever CoreAudio reads: WAV, AIFF, CAF, MP3 and M4A. The file is decoded
-/// once, up front, so playing it later costs only the mixing -- which is what
-/// a sound effect needs and why this is not done on each play.
+/// WAV only. The unit plays through SDL2, which carries one decoder, where the
+/// CoreAudio backend this replaced read AIFF, CAF, MP3 and M4A as well through
+/// the system's codecs. That breadth was the price of working on one operating
+/// system alone; SDL2_mixer would buy it back at the price of a second
+/// dependency and is deliberately not here.
+///
+/// Any WAV is read whatever its rate, width or channel count, and is converted
+/// once to the mixer's own format. So the file need not match the mixer and a
+/// stereo recording is folded to mono rather than refused.
+///
+/// The file is decoded once, up front, so playing it later costs only the
+/// mixing -- which is what a sound effect needs and why this is not done on
+/// each play. Decoding asks nothing of the audio device, so it works under
+/// `ALG_SOUND=dummy` and before anything has made a noise.
 ///
 /// The handle is an Integer to pass to `PlaySound`. Sixty-four may be loaded
 /// at once; `FreeSound` gives one back.
 ///
 /// # Raises
-/// `LoadSound could not read <path>.` for a file that is missing, is not
-/// audio, is longer than ten minutes, or when sixty-four are already loaded.
+/// `LoadSound could not read <path>.` for a file that is missing, is not a
+/// WAV, is longer than ten minutes, or when sixty-four are already loaded.
 ///
 /// # Examples
 /// `A Loaded Sound Reports Its Own Length`
@@ -892,20 +909,24 @@ end
 
 test 'A Loaded Sound Reports Its Own Length';
 begin
-    // A file every Mac has, this unit being macOS-bound anyway. Decoding is
-    // the one thing ALG_SOUND=dummy does not skip, so the length is real
-    // even in a silent run.
-    var Ping := LoadSound ('/System/Library/Sounds/Ping.aiff');
+    // A file this repository owns, so the test is not tied to one operating
+    // system -- it used to load /System/Library/Sounds/Ping.aiff, which was
+    // both AIFF and macOS-only. beep.wav is 300 ms of 880 Hz at 22050 Hz in
+    // 16-bit mono, which is deliberately NOT the mixer's float32 at 44100:
+    // loading it therefore exercises SDL's conversion rather than a
+    // pass-through. Decoding is the one thing ALG_SOUND=dummy does not skip,
+    // so the length is real even in a silent run.
+    var Ping := LoadSound ('beep.wav');
 
     AssertTrue (Ping >= 0);
 
     var Millis := SoundLength (Ping);
 
-    // Not asserted to the millisecond, which would break on a macOS that
-    // ships a different recording -- but a real decode of a real chime, and
-    // not a zero or a wild number.
-    AssertTrue (Millis > 200);
-    AssertTrue (Millis < 10000);
+    // The file is 300 ms, and resampling to the mixer's rate must not change
+    // its duration -- a conversion that dropped or doubled frames would show
+    // here as a length that is not 300.
+    AssertTrue (Millis > 290);
+    AssertTrue (Millis < 310);
 
     // Nothing is sounding until something starts it, and nothing can start
     // on a device that was never opened.

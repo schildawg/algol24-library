@@ -233,7 +233,7 @@ program is still holding — silently, with no error, and at a distance:
 
 ```algol24
 function ReadAll (Path : String) : String;
-    external 'alg_file_readall' in 'libfileffi.dylib';
+    external 'alg_file_readall' in 'libfileffi.so';
 
 var A := ReadAll ('a.txt');
 var B := ReadAll ('b.txt');     // the C reused its buffer

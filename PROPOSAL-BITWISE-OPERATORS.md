@@ -64,7 +64,7 @@ Because it has already paid for the gap, twice, in the two largest units.
 /// `and` and `or` are logical, answering an operand rather than combining
 /// bits -- so this is a genuine gap rather than a shortcut.
 function XorWords (A : Integer, B : Integer) : Integer;
-    external 'alg_xor' in 'libgraphffi.dylib';
+    external 'alg_xor' in 'libgraphffi.so';
 ```
 
 **And that workaround cannot generalize, which is the heart of the ask.** The C

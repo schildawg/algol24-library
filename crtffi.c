@@ -1,3 +1,18 @@
+/* POSIX and XSI declarations are hidden under a strict -std=c11 on glibc and
+ * musl, where Apple's headers expose them whatever the standard asked for.
+ * Measured: without this, Linux cannot see nanosleep.
+ *
+ * _XOPEN_SOURCE 700 implies POSIX.1-2008 and turns on XSI, which is where the
+ * drand48 family lives. On macOS asking for it makes Apple's headers STRICTER
+ * and would hide their own additions -- _NSGetEnviron and TIOCGWINSZ among
+ * them -- so _DARWIN_C_SOURCE puts those back. Both lines must precede every
+ * include.
+ */
+#define _XOPEN_SOURCE 700
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
+
 /* crtffi.c -- what the `crt` unit cannot ask the language for.
  *
  * A terminal is not a window: its size belongs to whoever resized it, its
@@ -19,10 +34,273 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#else
 #include <termios.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#endif
 #include <time.h>
+
+/* ------------------------------------------------------ the host's six -- */
+/*
+ * Everything below this point is one implementation, and these six primitives
+ * are the whole of what it needs from an operating system. POSIX and Windows
+ * answer them differently; nothing else in the file knows which it is on.
+ *
+ * ⚠️ The Windows half is COMPILE-VERIFIED ONLY. It builds with mingw-w64 and
+ * has never been run, there being no Windows machine in reach -- see
+ * CLAUDE.md. The parts most likely to want work on real hardware are
+ * tty_raw's virtual-terminal flags and tty_read_byte's non-blocking poll,
+ * both noted where they sit.
+ */
+
+#ifdef _WIN32
+
+static int tty_is_terminal (int fd)
+{
+    return _isatty (fd) ? 1 : 0;
+}
+
+/* The console window's cells, not the buffer's -- srWindow is what the user
+ * can see, where dwSize is the scrollback and would answer far too tall. */
+static int tty_size (int64_t *cols, int64_t *rows)
+{
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    HANDLE h = GetStdHandle (STD_OUTPUT_HANDLE);
+
+    if (h == INVALID_HANDLE_VALUE || !GetConsoleScreenBufferInfo (h, &info))
+        return 0;
+
+    int64_t c = (int64_t) (info.srWindow.Right  - info.srWindow.Left + 1);
+    int64_t r = (int64_t) (info.srWindow.Bottom - info.srWindow.Top  + 1);
+
+    if (c > 0) *cols = c;
+    if (r > 0) *rows = r;
+
+    return 1;
+}
+
+static DWORD saved_in_mode  = 0;
+static DWORD saved_out_mode = 0;
+
+/* Raw mode, Windows' way.
+ *
+ * Two handles rather than one. On input, clearing ENABLE_LINE_INPUT and
+ * ENABLE_ECHO_INPUT is the equivalent of dropping ICANON and ECHO, and
+ * clearing ENABLE_PROCESSED_INPUT is what makes Ctrl-C arrive as a byte
+ * instead of raising an event -- the same choice the termios branch makes by
+ * dropping ISIG.
+ *
+ * ENABLE_VIRTUAL_TERMINAL_INPUT is the load-bearing one: with it the console
+ * translates arrow and function keys into the ANSI escape sequences this
+ * unit's decoder already understands, so the key reader needs no Windows
+ * branch of its own. Without it they arrive as Windows key records and
+ * nothing would decode them.
+ *
+ * On output ENABLE_VIRTUAL_TERMINAL_PROCESSING makes the console interpret
+ * the escapes the painter writes, rather than printing them. Both flags want
+ * Windows 10 1511 or newer; on anything older SetConsoleMode fails and this
+ * answers 0, which the unit reads as "no raw mode" and keeps quiet about.
+ */
+static int tty_raw (int on)
+{
+    HANDLE in  = GetStdHandle (STD_INPUT_HANDLE);
+    HANDLE out = GetStdHandle (STD_OUTPUT_HANDLE);
+
+    if (in == INVALID_HANDLE_VALUE) return 0;
+
+    if (on)
+    {
+        if (!GetConsoleMode (in, &saved_in_mode)) return 0;
+
+        DWORD raw = saved_in_mode;
+
+        raw &= ~(DWORD) (ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT
+                         | ENABLE_PROCESSED_INPUT);
+        raw |=  (DWORD) ENABLE_VIRTUAL_TERMINAL_INPUT;
+
+        if (!SetConsoleMode (in, raw)) return 0;
+
+        if (out != INVALID_HANDLE_VALUE && GetConsoleMode (out, &saved_out_mode))
+            SetConsoleMode (out, saved_out_mode
+                                 | (DWORD) ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
+        return 1;
+    }
+
+    SetConsoleMode (in, saved_in_mode);
+
+    if (out != INVALID_HANDLE_VALUE && saved_out_mode != 0)
+        SetConsoleMode (out, saved_out_mode);
+
+    return 1;
+}
+
+/* One byte, or -1 when none is waiting, without ever blocking.
+ *
+ * The peek is not optional. A console input queue holds records for window
+ * resizes, focus changes and mouse movement as well as keys, so asking only
+ * whether the queue is non-empty would hand us a resize and then block in
+ * ReadFile waiting for a key that is not there. So non-key records are
+ * discarded until a key is at the head or the queue is empty, and only then
+ * is a byte read -- ReadFile rather than ReadConsoleInput, because the
+ * virtual-terminal flag means the bytes are already the escape sequence the
+ * decoder wants.
+ */
+static int64_t tty_read_byte (void)
+{
+    HANDLE h = GetStdHandle (STD_INPUT_HANDLE);
+
+    if (h == INVALID_HANDLE_VALUE) return -1;
+
+    for (;;)
+    {
+        DWORD pending = 0;
+
+        if (!GetNumberOfConsoleInputEvents (h, &pending) || pending == 0)
+            return -1;
+
+        INPUT_RECORD rec;
+        DWORD        got = 0;
+
+        if (!PeekConsoleInputA (h, &rec, 1, &got) || got == 0)
+            return -1;
+
+        if (rec.EventType == KEY_EVENT && rec.Event.KeyEvent.bKeyDown)
+            break;
+
+        /* Not a key, so take it off the queue and look again. */
+        if (!ReadConsoleInputA (h, &rec, 1, &got) || got == 0)
+            return -1;
+    }
+
+    unsigned char c;
+    DWORD         n = 0;
+
+    if (!ReadFile (h, &c, 1, &n, NULL) || n != 1) return -1;
+
+    return (int64_t) c;
+}
+
+static void tty_sleep_ms (int64_t millis)
+{
+    Sleep ((DWORD) millis);
+}
+
+static int tty_write (const char *bytes, size_t len)
+{
+    HANDLE h = GetStdHandle (STD_OUTPUT_HANDLE);
+    size_t sent = 0;
+
+    if (h == INVALID_HANDLE_VALUE) return 0;
+
+    while (sent < len)
+    {
+        DWORD n = 0;
+
+        if (!WriteFile (h, bytes + sent, (DWORD) (len - sent), &n, NULL)
+            || n == 0)
+            break;
+
+        sent += (size_t) n;
+    }
+
+    return sent == len;
+}
+
+#else   /* POSIX */
+
+static int tty_is_terminal (int fd)
+{
+    return isatty (fd) ? 1 : 0;
+}
+
+static int tty_size (int64_t *cols, int64_t *rows)
+{
+    struct winsize ws;
+
+    if (ioctl (1, TIOCGWINSZ, &ws) != 0) return 0;
+
+    if (ws.ws_col > 0) *cols = ws.ws_col;
+    if (ws.ws_row > 0) *rows = ws.ws_row;
+
+    return 1;
+}
+
+static struct termios saved_mode;
+static int            saved_valid = 0;
+
+static int tty_raw (int on)
+{
+    if (on)
+    {
+        if (saved_valid) return 1;               /* already raw, idempotent */
+        if (tcgetattr (0, &saved_mode) != 0) return 0;
+
+        struct termios raw = saved_mode;
+
+        /* Character at a time, no echo, and no signal or flow-control
+         * interception -- Ctrl-C arrives as a byte, which is what lets a
+         * full-screen program decide for itself what it means. */
+        raw.c_lflag &= ~(unsigned long) (ICANON | ECHO | ISIG | IEXTEN);
+        raw.c_iflag &= ~(unsigned long) (IXON | ICRNL | INLCR | ISTRIP);
+        raw.c_oflag &= ~(unsigned long) (OPOST);
+        raw.c_cc[VMIN]  = 0;
+        raw.c_cc[VTIME] = 0;
+
+        if (tcsetattr (0, TCSAFLUSH, &raw) != 0) return 0;
+
+        saved_valid = 1;
+
+        return 1;
+    }
+
+    if (!saved_valid) return 0;
+
+    tcsetattr (0, TCSAFLUSH, &saved_mode);
+    saved_valid = 0;
+
+    return 1;
+}
+
+static int64_t tty_read_byte (void)
+{
+    unsigned char c;
+    ssize_t       n = read (0, &c, 1);
+
+    return n == 1 ? (int64_t) c : -1;
+}
+
+static void tty_sleep_ms (int64_t millis)
+{
+    struct timespec t;
+
+    t.tv_sec  = (time_t) (millis / 1000);
+    t.tv_nsec = (long) ((millis % 1000) * 1000000L);
+
+    nanosleep (&t, NULL);
+}
+
+static int tty_write (const char *bytes, size_t len)
+{
+    size_t sent = 0;
+
+    while (sent < len)
+    {
+        ssize_t n = write (1, bytes + sent, len - sent);
+
+        if (n <= 0) break;                  /* a closed pipe, and no more */
+
+        sent += (size_t) n;
+    }
+
+    return sent == len;
+}
+
+#endif
 
 /* Whether standard output is a terminal at all.
  *
@@ -31,7 +309,7 @@
  */
 int64_t alg_crt_istty (void)
 {
-    return isatty (1) ? 1 : 0;
+    return tty_is_terminal (1);
 }
 
 /* The terminal's width and height in cells, as it is right now.
@@ -43,16 +321,10 @@ int64_t alg_crt_istty (void)
  */
 static void winsize_now (int64_t *cols, int64_t *rows)
 {
-    struct winsize ws;
-
     *cols = 80;
     *rows = 25;
 
-    if (ioctl (1, TIOCGWINSZ, &ws) == 0)
-    {
-        if (ws.ws_col > 0) *cols = ws.ws_col;
-        if (ws.ws_row > 0) *rows = ws.ws_row;
-    }
+    tty_size (cols, rows);      /* leaves the classic 80 by 25 if it cannot */
 }
 
 int64_t alg_crt_cols (void)
@@ -102,42 +374,11 @@ int64_t alg_crt_truecolor (void)
  * exception handler.
  */
 
-static struct termios saved_mode;
-static int            saved_valid = 0;
-
 int64_t alg_crt_raw (int64_t on)
 {
-    if (!isatty (0)) return 0;
+    if (!tty_is_terminal (0)) return 0;
 
-    if (on)
-    {
-        if (saved_valid) return 1;               /* already raw, idempotent */
-        if (tcgetattr (0, &saved_mode) != 0) return 0;
-
-        struct termios raw = saved_mode;
-
-        /* Character at a time, no echo, and no signal or flow-control
-         * interception -- Ctrl-C arrives as a byte, which is what lets a
-         * full-screen program decide for itself what it means. */
-        raw.c_lflag &= ~(unsigned long) (ICANON | ECHO | ISIG | IEXTEN);
-        raw.c_iflag &= ~(unsigned long) (IXON | ICRNL | INLCR | ISTRIP);
-        raw.c_oflag &= ~(unsigned long) (OPOST);
-        raw.c_cc[VMIN]  = 0;
-        raw.c_cc[VTIME] = 0;
-
-        if (tcsetattr (0, TCSAFLUSH, &raw) != 0) return 0;
-
-        saved_valid = 1;
-
-        return 1;
-    }
-
-    if (!saved_valid) return 0;
-
-    tcsetattr (0, TCSAFLUSH, &saved_mode);
-    saved_valid = 0;
-
-    return 1;
+    return tty_raw (on ? 1 : 0);
 }
 
 /* One byte of input, or -1 when none is waiting.
@@ -147,13 +388,9 @@ int64_t alg_crt_raw (int64_t on)
  */
 int64_t alg_crt_getch (void)
 {
-    unsigned char c;
+    if (!tty_is_terminal (0)) return -1;
 
-    if (!isatty (0)) return -1;
-
-    ssize_t n = read (0, &c, 1);
-
-    return n == 1 ? (int64_t) c : -1;
+    return tty_read_byte ();
 }
 
 /* Sleep for a few milliseconds, so a wait for input is not a spin.
@@ -175,12 +412,7 @@ void alg_crt_nap (int64_t millis)
     if (millis <= 0) return;
     if (millis > 1000) millis = 1000;
 
-    struct timespec t;
-
-    t.tv_sec  = (time_t) (millis / 1000);
-    t.tv_nsec = (long) ((millis % 1000) * 1000000L);
-
-    nanosleep (&t, NULL);
+    tty_sleep_ms (millis);
 }
 
 /* -------------------------------------------------------------- output -- */
@@ -196,17 +428,7 @@ void alg_crt_write (const char *text)
 {
     if (text == NULL) return;
 
-    size_t len  = strlen (text);
-    size_t sent = 0;
-
-    while (sent < len)
-    {
-        ssize_t n = write (1, text + sent, len - sent);
-
-        if (n <= 0) break;                  /* a closed pipe, and no more */
-
-        sent += (size_t) n;
-    }
+    tty_write (text, strlen (text));
 }
 
 /* -------------------------------------------------------------- cells -- */

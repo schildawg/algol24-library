@@ -7,9 +7,10 @@
  *
  * PLAIN C99, DELIBERATELY
  *
- * This is the library's first foreign code that builds anywhere. soundffi.c is
- * CoreAudio and macOS alone; crtffi.c is POSIX and rules out Windows. Nothing
- * here is worse than fopen, so `file` should port wherever a C compiler goes.
+ * This is the library's first foreign code that builds anywhere. soundffi.c
+ * and graphffi.c want SDL2; crtffi.c and dosffi.c are POSIX and rule out
+ * Windows. Nothing here is worse than fopen, so `file` should port wherever a
+ * C compiler goes.
  *
  * NOTHING HERE RETURNS A POINTER TO ALGOL-24
  *

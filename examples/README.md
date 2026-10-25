@@ -36,7 +36,7 @@ Measured, not assumed:
 
 | Declared as | Interpreted | Compiled |
 | --- | --- | --- |
-| `external 'alg_trunc' in 'libmathffi.dylib'` | works | dlopens the library at run time, **even when the symbol is already linked into the executable** |
+| `external 'alg_trunc' in 'libmathffi.so'` | works | dlopens the library at run time, **even when the symbol is already linked into the executable** |
 | `external 'alg_trunc'` | `No foreign symbol 'alg_trunc'.` | resolves from the executable, so the binary is self-contained |
 
 The units keep the `in` clause, because the library's own tests run interpreted
@@ -48,13 +48,13 @@ the interpreter, which was the obvious thing to try.
 
 ## What each mode gives you
 
-**Default.** The binary dlopens `libmathffi.dylib` and `librandomffi.dylib` by
+**Default.** The binary dlopens `libmathffi.so` and `librandomffi.so` by
 bare name, which resolves against the working directory — so the shims are
 copied beside it and it must be run from there. Fine for development, awkward to
 ship.
 
-**`--static`.** One file, and `otool -L` shows it needs only what macOS already
-ships:
+**`--static`.** One file, and for this program `otool -L` shows it needs only
+what macOS already ships:
 
 ```
 /usr/lib/libffi.dylib
@@ -63,6 +63,17 @@ ships:
 
 It runs from anywhere and prints exactly what the interpreter prints. This is the
 mode to ship.
+
+⚠️ **How self-contained depends on which units the program reaches.**
+`statistics.a24` uses `math` and `random`, whose C needs nothing but libc, so
+the list above is the whole of it. A program reaching `graph` or `sound` links
+SDL2, which Homebrew installs and macOS does not ship — measured on a
+`sound`-using binary built the same way, where `otool -L` names
+`libSDL2.dylib`. This got slightly worse when `sound` moved off CoreAudio in
+0.1.5: a framework that shipped with the operating system became a library that
+has to travel with the binary. That is the cost of the unit making a noise on
+more than one operating system, and it is paid at ship time rather than at
+build time.
 
 ## Why the example seeds instead of randomizing
 
@@ -108,6 +119,8 @@ key reader, `piano.a24` found the `Delay` ambiguity between `graph` and `sound`,
 and `jukebox.a24` found that `CloseGraph` was not resetting the mouse.
 
 Which is also the gap worth naming: `check.sh` compiles and compares
-`statistics.a24` alone, so nothing reaching SDL, CoreAudio or termios is ever
-built the two ways and diffed. The `--static` link is the only check that found
-the `alg_file_exists` collision with the compiler's own runtime.
+`statistics.a24` alone, so nothing reaching SDL or termios is ever built the
+two ways and diffed. The `--static` link is the only check that found the
+`alg_file_exists` collision with the compiler's own runtime — and it is the
+check that cannot see whether a `graph` or `sound` program links at all, which
+had to be verified by hand when `sound` moved to SDL2.

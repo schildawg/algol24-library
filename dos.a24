@@ -26,25 +26,25 @@ unit dos;
 ///
 /// Private to this unit, and answered through `DiskFree`.
 private function RawDiskFree (Path : String) : Integer;
-    external 'alg_libdos_disk_free' in 'libdosffi.dylib';
+    external 'alg_libdos_disk_free' in 'libdosffi.so';
 
 /// Total bytes on the filesystem, or -1. Private to this unit.
 private function RawDiskSize (Path : String) : Integer;
-    external 'alg_libdos_disk_size' in 'libdosffi.dylib';
+    external 'alg_libdos_disk_size' in 'libdosffi.so';
 
 /// Copies a variable's value into a buffer and answers its length, or -1 when
 /// the variable is not set. Private to this unit.
 private function RawGetEnv (Name : String, Into : Pointer, Max : Integer) : Integer;
-    external 'alg_libdos_getenv' in 'libdosffi.dylib';
+    external 'alg_libdos_getenv' in 'libdosffi.so';
 
 /// How many entries the environment holds. Private to this unit.
 private function RawEnvCount () : Integer;
-    external 'alg_libdos_env_count' in 'libdosffi.dylib';
+    external 'alg_libdos_env_count' in 'libdosffi.so';
 
 /// Copies entry Index into a buffer and answers its length, or -1 for an
 /// index outside the environment. Private to this unit.
 private function RawEnvAt (Index : Integer, Into : Pointer, Max : Integer) : Integer;
-    external 'alg_libdos_env_at' in 'libdosffi.dylib';
+    external 'alg_libdos_env_at' in 'libdosffi.so';
 
 /// Begins an argument vector, discarding any half-built one.
 ///
@@ -53,15 +53,15 @@ private function RawEnvAt (Index : Integer, Into : Pointer, Max : Integer) : Int
 /// on a separator and no byte is safe -- an argument may contain any byte but
 /// NUL, and NUL cannot cross the boundary as part of a String.
 private procedure RawArgReset ();
-    external 'alg_libdos_arg_reset' in 'libdosffi.dylib';
+    external 'alg_libdos_arg_reset' in 'libdosffi.so';
 
 /// Appends one argument, answering 1 on success. Private to this unit.
 private function RawArgPush (Arg : String) : Integer;
-    external 'alg_libdos_arg_push' in 'libdosffi.dylib';
+    external 'alg_libdos_arg_push' in 'libdosffi.so';
 
 /// Runs Path with the pushed arguments and waits. Private to this unit.
 private function RawSpawn (Path : String) : Integer;
-    external 'alg_libdos_spawn' in 'libdosffi.dylib';
+    external 'alg_libdos_spawn' in 'libdosffi.so';
 
 // -------------------------------------------------------------- disk space
 

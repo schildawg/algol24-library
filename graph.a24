@@ -20,61 +20,125 @@ uses file;
 
 // ------------------------------------------------------------------ SDL --
 //
-// Private. Each declaration copies the C signature exactly, which is the whole
-// of what keeps a foreign call honest -- see DEFECTS.md H-1.
+// Private. These keep SDL's own names, so a call site still reads as the SDL
+// call it is -- but they resolve to thin wrappers in graphffi.c rather than to
+// SDL itself.
+//
+// Two things made that worth doing. The declarations used to name
+// /opt/homebrew/lib/libSDL2.dylib, an absolute path to somebody else's library
+// inside a string literal, which no amount of renaming our own shims could
+// make portable; `sdl2-config` answers that at build time instead. And a
+// hand-copied prototype is unchecked -- [FUN-014], DEFECTS.md H-1 -- where a
+// wrapper is compiled against SDL's real headers, so a wrong signature is a
+// compile error rather than a plausible wrong number.
+//
+// SDL_GetError and SDL_GetWindowTitle are not among them: they answer strings,
+// and are handled by copying rather than lending. See RawSdlError.
 
 function SDL_Init (Flags : Integer) : Integer;
-    external 'SDL_Init' in '/opt/homebrew/lib/libSDL2.dylib';
-function SDL_GetError () : String;
-    external 'SDL_GetError' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_init' in 'libgraphffi.so';
+/// Copies the current SDL error into a buffer and answers its length.
+///
+/// Private to this unit, and reached through `SdlError`. SDL hands its error
+/// back as a pointer into a per-thread static that any later SDL call may
+/// overwrite, and a String returned from C borrows those bytes rather than
+/// copying them -- so this unit asks C to copy. See `DEFECTS.md` H-2.
+private function RawSdlError (Into : Pointer, Max : Integer) : Integer;
+    external 'alg_graph_error' in 'libgraphffi.so';
 function SDL_CreateWindow (Title : String, X : Integer, Y : Integer,
                            W : Integer, H : Integer, Flags : Integer) : Pointer;
-    external 'SDL_CreateWindow' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_create_window' in 'libgraphffi.so';
 procedure SDL_DestroyWindow (Win : Pointer);
-    external 'SDL_DestroyWindow' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_destroy_window' in 'libgraphffi.so';
 function SDL_CreateRenderer (Win : Pointer, Index : Integer, Flags : Integer) : Pointer;
-    external 'SDL_CreateRenderer' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_create_renderer' in 'libgraphffi.so';
 procedure SDL_DestroyRenderer (Ren : Pointer);
-    external 'SDL_DestroyRenderer' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_destroy_renderer' in 'libgraphffi.so';
 function SDL_SetRenderDrawColor (Ren : Pointer, R : Integer, G : Integer,
                                  B : Integer, A : Integer) : Integer;
-    external 'SDL_SetRenderDrawColor' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_set_render_draw_color' in 'libgraphffi.so';
 function SDL_RenderClear (Ren : Pointer) : Integer;
-    external 'SDL_RenderClear' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_render_clear' in 'libgraphffi.so';
 procedure SDL_RenderPresent (Ren : Pointer);
-    external 'SDL_RenderPresent' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_render_present' in 'libgraphffi.so';
 procedure SDL_GetWindowSize (Win : Pointer, W : Pointer, H : Pointer);
-    external 'SDL_GetWindowSize' in '/opt/homebrew/lib/libSDL2.dylib';
-function SDL_GetWindowTitle (Win : Pointer) : String;
-    external 'SDL_GetWindowTitle' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_get_window_size' in 'libgraphffi.so';
+/// Copies a window's title into a buffer and answers its length.
+///
+/// Private to this unit, and reached through `SdlWindowTitle`. A borrowed
+/// String again, on the same terms as `RawSdlError`.
+private function RawSdlWindowTitle (Win : Pointer, Into : Pointer,
+                                    Max : Integer) : Integer;
+    external 'alg_graph_window_title' in 'libgraphffi.so';
 function SDL_GetDesktopDisplayMode (Index : Integer, Mode : Pointer) : Integer;
-    external 'SDL_GetDesktopDisplayMode' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_get_desktop_display_mode' in 'libgraphffi.so';
 procedure SDL_PumpEvents ();
-    external 'SDL_PumpEvents' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_pump_events' in 'libgraphffi.so';
 function SDL_CreateTexture (Ren : Pointer, Format : Integer, Access : Integer,
                             W : Integer, H : Integer) : Pointer;
-    external 'SDL_CreateTexture' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_create_texture' in 'libgraphffi.so';
 procedure SDL_DestroyTexture (Tex : Pointer);
-    external 'SDL_DestroyTexture' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_destroy_texture' in 'libgraphffi.so';
 function SDL_UpdateTexture (Tex : Pointer, Rect : Pointer, Pixels : Pointer,
                             Pitch : Integer) : Integer;
-    external 'SDL_UpdateTexture' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_update_texture' in 'libgraphffi.so';
 function SDL_RenderCopy (Ren : Pointer, Tex : Pointer, Src : Pointer, Dst : Pointer) : Integer;
-    external 'SDL_RenderCopy' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_render_copy' in 'libgraphffi.so';
 function SDL_SetTextureBlendMode (Tex : Pointer, Mode : Integer) : Integer;
-    external 'SDL_SetTextureBlendMode' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_set_texture_blend_mode' in 'libgraphffi.so';
 function SDL_SetHint (Name : String, Value : String) : Integer;
-    external 'SDL_SetHint' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_set_hint' in 'libgraphffi.so';
 function SDL_SetTextureAlphaMod (Tex : Pointer, Alpha : Integer) : Integer;
-    external 'SDL_SetTextureAlphaMod' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_set_texture_alpha_mod' in 'libgraphffi.so';
 function SDL_PollEvent (E : Pointer) : Integer;
-    external 'SDL_PollEvent' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_poll_event' in 'libgraphffi.so';
 function SDL_PushEvent (E : Pointer) : Integer;
-    external 'SDL_PushEvent' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_push_event' in 'libgraphffi.so';
 procedure SDL_StartTextInput ();
-    external 'SDL_StartTextInput' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_start_text_input' in 'libgraphffi.so';
 procedure SDL_Delay (Ms : Integer);
-    external 'SDL_Delay' in '/opt/homebrew/lib/libSDL2.dylib';
+    external 'alg_sdl_delay' in 'libgraphffi.so';
+
+/// The current SDL error, as a String this unit owns.
+///
+/// Private to this unit. Asks C for the length, sizes a buffer to it and
+/// reads it back, so the result survives any later SDL call. The borrowed
+/// form this replaced did not: two call sites in `InitGraph` held it across
+/// further SDL calls -- one across the whole of `CloseGraph` -- so the
+/// message raised could be whatever SDL had written since.
+///
+/// An empty error answers the empty string rather than raising, a failure
+/// SDL declines to explain still being a failure.
+private function SdlError () : String;
+begin
+    var N := RawSdlError (nil, 0);
+
+    if N <= 0 then Exit '';
+
+    // Sized exactly, because `Buffer.Text` refuses a buffer holding a zero
+    // byte and a larger one would fail on its own trailing zeros.
+    var B := Buffer (N);
+
+    RawSdlError (B.Address, N);
+
+    Exit B.Text;
+end
+
+/// A window's title, as a String this unit owns.
+///
+/// Private to this unit, on the same terms as `SdlError`.
+private function SdlWindowTitle (Win : Pointer) : String;
+begin
+    var N := RawSdlWindowTitle (Win, nil, 0);
+
+    if N <= 0 then Exit '';
+
+    var B := Buffer (N);
+
+    RawSdlWindowTitle (Win, B.Address, N);
+
+    Exit B.Text;
+end
 
 /// Aims the C cell-stamper at a framebuffer.
 ///
@@ -82,7 +146,7 @@ procedure SDL_Delay (Ms : Integer);
 /// because a foreign call takes at most eight arguments and the stamp needs
 /// all eight for its own work.
 procedure StampTarget (Pixels : Pointer, W : Integer, H : Integer);
-    external 'alg_stamp_target' in 'libgraphffi.dylib';
+    external 'alg_stamp_target' in 'libgraphffi.so';
 
 /// Stamps one glyph's cell at pixel X, Y into the stamp target.
 ///
@@ -94,7 +158,7 @@ procedure StampTarget (Pixels : Pointer, W : Integer, H : Integer);
 procedure StampCell (X : Integer, Y : Integer, Glyph : Pointer,
                      GW : Integer, GH : Integer,
                      Mode : Integer, Ink : Integer, Back : Integer);
-    external 'alg_stamp_cell' in 'libgraphffi.dylib';
+    external 'alg_stamp_cell' in 'libgraphffi.so';
 
 /// Sets the magnification and quarter turn the next stamps use.
 ///
@@ -103,7 +167,7 @@ procedure StampCell (X : Integer, Y : Integer, Glyph : Pointer,
 /// grid never sets it, so cells stay 1:1 and upright; a viewport sets it
 /// around its own drawing and puts it back.
 procedure StampStyle (Scale : Integer, Rotation : Integer);
-    external 'alg_stamp_style' in 'libgraphffi.dylib';
+    external 'alg_stamp_style' in 'libgraphffi.so';
 
 /// Fills a rectangle of the stamp target with an eight-by-eight pattern.
 ///
@@ -112,7 +176,7 @@ procedure StampStyle (Scale : Integer, Rotation : Integer);
 /// interpreted loop was 7.5 seconds for one 300 by 200 bar.
 procedure FillRect (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
                     Pattern : Pointer, Color : Integer);
-    external 'alg_fill_rect' in 'libgraphffi.dylib';
+    external 'alg_fill_rect' in 'libgraphffi.so';
 
 /// Fills a disc sector of the stamp target with an eight-by-eight pattern.
 ///
@@ -125,7 +189,7 @@ procedure FillRect (X1 : Integer, Y1 : Integer, X2 : Integer, Y2 : Integer,
 procedure FillSector (CX : Integer, CY : Integer, XRadius : Integer,
                       YRadius : Integer, StartAngle : Integer, Sweep : Integer,
                       Pattern : Pointer, Color : Integer);
-    external 'alg_fill_sector' in 'libgraphffi.dylib';
+    external 'alg_fill_sector' in 'libgraphffi.so';
 
 /// Fills the whole stamp target with one raw pixel value.
 ///
@@ -134,7 +198,7 @@ procedure FillSector (CX : Integer, CY : Integer, XRadius : Integer,
 /// painted. Clearing is the opposite act and its natural value is a fully
 /// transparent zero, so this takes the pixel as written.
 procedure ClearTarget (Value : Integer);
-    external 'alg_clear_target' in 'libgraphffi.dylib';
+    external 'alg_clear_target' in 'libgraphffi.so';
 
 /// Fills the region around a seed of the stamp target, stopping at a border.
 ///
@@ -145,13 +209,13 @@ procedure ClearTarget (Value : Integer);
 /// reachable from the seed without crossing the border color.
 procedure Flood (X : Integer, Y : Integer, Border : Integer,
                  Pattern : Pointer, Color : Integer);
-    external 'alg_flood_fill' in 'libgraphffi.dylib';
+    external 'alg_flood_fill' in 'libgraphffi.so';
 
 /// Scrolls the stamp target up by DY pixel rows, filling the vacated band.
 ///
 /// Private to this unit.
 procedure ScrollTarget (DY : Integer, Fill : Integer);
-    external 'alg_scroll_up' in 'libgraphffi.dylib';
+    external 'alg_scroll_up' in 'libgraphffi.so';
 
 /// Sets the next stamps' magnification as a ratio per axis, and their turn.
 ///
@@ -159,7 +223,7 @@ procedure ScrollTarget (DY : Integer, Fill : Integer);
 /// squeeze as well as magnify, where a whole number can only magnify.
 procedure StampRatio (NumX : Integer, DenX : Integer, NumY : Integer,
                       DenY : Integer, Rotation : Integer);
-    external 'alg_stamp_ratio' in 'libgraphffi.dylib';
+    external 'alg_stamp_ratio' in 'libgraphffi.so';
 
 /// The bitwise exclusive or of two pixel words.
 ///
@@ -167,7 +231,7 @@ procedure StampRatio (NumX : Integer, DenX : Integer, NumY : Integer,
 /// `and` and `or` are logical, answering an operand rather than combining
 /// bits -- so this is a genuine gap rather than a shortcut.
 function XorWords (A : Integer, B : Integer) : Integer;
-    external 'alg_xor' in 'libgraphffi.dylib';
+    external 'alg_xor' in 'libgraphffi.so';
 
 /// Copies a rectangle of the stamp target into a caller's buffer.
 ///
@@ -176,7 +240,7 @@ function XorWords (A : Integer, B : Integer) : Integer;
 /// surface reads transparent zeros there rather than out of bounds.
 procedure GrabImage (Dst : Pointer, X1 : Integer, Y1 : Integer, X2 : Integer,
                      Y2 : Integer);
-    external 'alg_get_image' in 'libgraphffi.dylib';
+    external 'alg_get_image' in 'libgraphffi.so';
 
 /// Draws a caller's buffer onto the stamp target, combining as Mode says.
 ///
@@ -184,7 +248,7 @@ procedure GrabImage (Dst : Pointer, X1 : Integer, Y1 : Integer, X2 : Integer,
 /// what makes XorPut restore what was beneath when written twice.
 procedure DrawImage (Src : Pointer, W : Integer, H : Integer, X : Integer,
                      Y : Integer, Mode : Integer);
-    external 'alg_put_image' in 'libgraphffi.dylib';
+    external 'alg_put_image' in 'libgraphffi.so';
 
 /// Moves a band of the stamp target within itself, filling what it vacates.
 ///
@@ -194,7 +258,7 @@ procedure DrawImage (Src : Pointer, W : Integer, H : Integer, X : Integer,
 /// head.
 procedure ScrollBand (Top : Integer, Bottom : Integer, DY : Integer,
                       Fill : Integer);
-    external 'alg_scroll_band' in 'libgraphffi.dylib';
+    external 'alg_scroll_band' in 'libgraphffi.so';
 
 /// Decodes hex text in groups of Group digits, one four-byte word per group,
 /// into Out. Answers how many words were written.
@@ -205,7 +269,7 @@ procedure ScrollBand (Top : Integer, Bottom : Integer, DY : Integer,
 /// trailing partial group is ignored, both matching the decoding this
 /// replaced.
 function UnhexWords (Hex : String, Group : Integer, Out : Pointer) : Integer;
-    external 'alg_unhex_words' in 'libgraphffi.dylib';
+    external 'alg_unhex_words' in 'libgraphffi.so';
 
 const SDL_INIT_VIDEO             := 32;
 const WINDOWPOS_CENTERED         := 805240832;
@@ -517,7 +581,7 @@ begin
     if VideoReady then Exit;
 
     if SDL_Init (SDL_INIT_VIDEO) <> 0 then
-        raise 'Graph could not start: ' + SDL_GetError ();
+        raise 'Graph could not start: ' + SdlError ();
 
     // The text grid is a logical surface scaled to the window; nearest-
     // neighbor scaling would decimate its antialiasing, linear keeps it.
@@ -1023,13 +1087,13 @@ begin
     SdlWin := SDL_CreateWindow (Title, WINDOWPOS_CENTERED, WINDOWPOS_CENTERED,
                                 Width, Height, Flags);
 
-    if SdlWin = nil then raise 'InitGraph: ' + SDL_GetError ();
+    if SdlWin = nil then raise 'InitGraph: ' + SdlError ();
 
     Renderer := SDL_CreateRenderer (SdlWin, -1, 0);
 
     if Renderer = nil then
     begin
-        var Message := SDL_GetError ();
+        var Message := SdlError ();
 
         SDL_DestroyWindow (SdlWin);
         SdlWin := nil;
@@ -1053,7 +1117,7 @@ begin
 
     if Texture = nil then
     begin
-        var Reason := SDL_GetError ();
+        var Reason := SdlError ();
 
         CloseGraph ();
 
@@ -1205,7 +1269,7 @@ begin
     var Mode := Buffer (32);
 
     if SDL_GetDesktopDisplayMode (0, Mode.Address) <> 0 then
-        raise 'ScreenWidth: ' + SDL_GetError ();
+        raise 'ScreenWidth: ' + SdlError ();
 
     Exit Mode.GetInt (4);
 end
@@ -1226,7 +1290,7 @@ begin
     var Mode := Buffer (32);
 
     if SDL_GetDesktopDisplayMode (0, Mode.Address) <> 0 then
-        raise 'ScreenHeight: ' + SDL_GetError ();
+        raise 'ScreenHeight: ' + SdlError ();
 
     Exit Mode.GetInt (8);
 end
@@ -2327,8 +2391,8 @@ begin
         BTex := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING,
                                    PxW, PxH);
 
-        if Tex = nil then raise 'Graph: ' + SDL_GetError ();
-        if BTex = nil then raise 'Graph: ' + SDL_GetError ();
+        if Tex = nil then raise 'Graph: ' + SdlError ();
+        if BTex = nil then raise 'Graph: ' + SdlError ();
 
         SDL_SetTextureBlendMode (Tex, BLENDMODE_BLEND);
         SDL_SetTextureBlendMode (BTex, BLENDMODE_BLEND);
@@ -2944,7 +3008,7 @@ begin
 
         Tex := SDL_CreateTexture (Renderer, PIXELFORMAT_ARGB, TEXTURE_STREAMING, W, H);
 
-        if Tex = nil then raise 'Graph: ' + SDL_GetError ();
+        if Tex = nil then raise 'Graph: ' + SdlError ();
 
         SDL_SetTextureBlendMode (Tex, BLENDMODE_BLEND);
 
@@ -5732,7 +5796,7 @@ begin
 
     InitGraph (100, 100, 'Algol-24 ✓', False);
 
-    AssertEqual ('Algol-24 ✓', SDL_GetWindowTitle (SdlWin));
+    AssertEqual ('Algol-24 ✓', SdlWindowTitle (SdlWin));
 
     CloseGraph ();
 end

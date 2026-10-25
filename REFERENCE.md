@@ -5040,10 +5040,21 @@ procedure CloseSound   ();
 Neither Turbo Pascal's nor BASIC's — a sound effect from a file, mixed under
 whatever else is sounding.
 
-CoreAudio decodes **WAV, AIFF, CAF, MP3 and M4A**, which is more than SDL2
-reads without SDL_mixer. The file is decoded **once, up front**, so playing it
-later costs only the mixing — which is what a sound effect needs and why this
-is not done per play.
+⚠️ **WAV only.** The unit plays through SDL2, which carries one decoder,
+where the CoreAudio backend it replaced read AIFF, CAF, MP3 and M4A as well
+through the system's codecs. That breadth was the price of working on one
+operating system alone, and the trade was made the other way deliberately;
+SDL2_mixer would buy it back at the cost of a second dependency and is not
+here.
+
+Any WAV is read whatever its rate, width or channel count, and converted once
+to the mixer's own format — float32 mono at 44100 — so a 22050 Hz 16-bit
+stereo recording loads as readily as one that already matches.
+
+The file is decoded **once, up front**, so playing it later costs only the
+mixing, which is what a sound effect needs and why this is not done per play.
+Decoding asks nothing of the audio device, so it works under `ALG_SOUND=dummy`
+and before anything has made a noise.
 
 ⚠️ **`PlaySound` returns at once.** The effect plays while the program carries
 on, which is the whole point of one; `SoundLength` says how long it will take
@@ -5077,11 +5088,12 @@ audio, is longer than ten minutes, or when sixty-four are already loaded; and
 ```algol24
 uses sound;
 
-// Whatever CoreAudio can read: WAV, AIFF, CAF, MP3, M4A. Decoded once, up
-// front, so playing it later costs only the mixing.
-var Ping := LoadSound ('/System/Library/Sounds/Ping.aiff');
+// A WAV, decoded once up front, so playing it later costs only the mixing.
+// beep.wav ships with the library: 300 ms at 22050 Hz in 16-bit mono, which
+// is not the mixer's format -- so loading it converts.
+var Ping := LoadSound ('beep.wav');
 
-System.WriteLn ('length:   ', SoundLength (Ping) > 200, ' (a real decode)');
+System.WriteLn ('length:   ', SoundLength (Ping), ' ms (a real decode)');
 System.WriteLn ('sounding: ', SoundPlaying (Ping));
 
 // Returns at once -- a sound effect plays while the program carries on, which
@@ -5104,7 +5116,7 @@ CloseSound ();
 ```
 
 ```console
-length:   true (a real decode)
+length:   300 ms (a real decode)
 sounding: false
 started:  false (audible: false)
 freed:    SoundLength wants a sound from LoadSound.
@@ -6289,8 +6301,11 @@ function RandomReal () : Double;
 Zero may be answered and one never is.
 
 The generator has 48 bits, so the result carries 48 bits of entropy rather than
-the 53 a Double could hold. That is `drand48` itself, declared directly — its C
-signature is exactly the shape wanted, so nothing wraps it.
+the 53 a Double could hold. That is `drand48`, carried in the library's own C
+rather than taken from the host's: POSIX specifies the algorithm exactly, so
+owning it changes no stream — measured bit-identical against the platform's own
+over four thousand draws — and it is what lets the unit work where libc has no
+`drand48` at all. A seed answers the same sequence on every platform.
 
 Scale it for a range: `Low + RandomReal () * (High - Low)` lands in `[Low,
 High)`. For a whole number use [`RandomInteger`](#randominteger) rather than

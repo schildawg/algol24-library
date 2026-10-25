@@ -108,7 +108,7 @@ Three reasons behind that, in order of weight:
   `Pos`, `Length`, `Ord`, `Char` and `Buffer`; nothing proposed below needs more
   than those. That makes `strings` the second unit after `testing` with no
   `*ffi.c`, and so **the first unit that is portable with no work** — no
-  `.dylib` in a declaration, nothing for a per-platform build to rewrite.
+  library name in a declaration at all, where every other unit carries one.
 - **No state.** Like `math`, `uses strings` has no consequences and its tests
   can assert exact values.
 

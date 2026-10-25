@@ -17,7 +17,7 @@
 #
 # THE C HALF IS THE AWKWARD PART, AND THE TWO MODES DIFFER ONLY THERE
 #
-# A declaration written `external 'alg_trunc' in 'libmathffi.dylib'` dlopens
+# A declaration written `external 'alg_trunc' in 'libmathffi.so'` dlopens
 # that library at run time -- even when the same symbol is already linked into
 # the executable, which was measured rather than assumed. Written without the
 # `in` clause the symbol is looked for in the running program instead, so
@@ -44,10 +44,6 @@ case "${1:-}" in
     *)        echo "usage: examples/build.sh [--static]" >&2; exit 2 ;;
 esac
 
-case "$(uname -s)" in
-    Darwin) SO=dylib ;;
-    *)      SO=so ;;
-esac
 
 test -f examples/statistics.a24 || {
     echo 'examples/build.sh: run me from the repository root' >&2
@@ -67,18 +63,17 @@ if [ "$STATIC" = yes ]; then
     cp ./*.a24 examples/statistics.a24 "$SRC"
 
     # Drop the library clause so the symbols resolve from the executable.
-    sed -i.bak "s/ in 'lib[a-z]*ffi\.$SO'//g" "$SRC"/*.a24
+    sed -i.bak "s/ in 'lib[a-z]*ffi\.so'//g" "$SRC"/*.a24
     rm -f "$SRC"/*.bak
 
     mkdir -p "$SRC/emitted"
     ( cd "$SRC" && algc --compile --out=emitted statistics.a24 ) > /dev/null
 
-    # soundffi.c reaches CoreAudio, so a self-contained binary that links the
-    # library's C has to name those frameworks too.
-    case "$(uname -s)" in
-        Darwin) AUDIO="-framework AudioToolbox -framework AudioUnit -framework CoreFoundation" ;;
-        *)      AUDIO="" ;;
-    esac
+    # soundffi.c and graphffi.c both reach SDL2, so a self-contained binary
+    # that links the library's C needs SDL's headers and library too. Since 0.1.5
+    # that is SDL rather than CoreAudio -- the framework existed on macOS
+    # alone, and this unit is meant to make a noise anywhere.
+    AUDIO=$(sdl2-config --cflags --libs)
 
     # shellcheck disable=SC2086
     $CC $CFLAGS -DALG_FFI -o "$OUT/statistics" \
@@ -94,7 +89,7 @@ else
 
     # dlopen resolves a bare library name against the working directory, so the
     # shims have to sit beside the binary and it has to be run from there.
-    cp ./*ffi."$SO" "$OUT"
+    cp ./*ffi.so "$OUT"
 
-    echo "$OUT/statistics  (run it from $OUT, which holds the .$SO shims)"
+    echo "$OUT/statistics  (run it from $OUT, which holds the .so shims)"
 fi
