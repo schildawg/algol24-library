@@ -3,14 +3,12 @@
 //
 //     algc examples/window.a24
 //
-// The event loop is the demo's own, declared here the way any program may --
-// the graph unit does not carry input yet, and a window with no loop closes
-// the moment the program ends.
+// A window with no wait closes the moment the program ends, so the demo ends
+// on `ReadKey ()`, which answers the close button as KeyClose. This file once
+// polled SDL's events itself and declared their numbers; input arriving in the
+// unit retired both.
 
 uses graph;
-
-const EVENT_QUIT    := 256;
-const EVENT_KEYDOWN := 768;
 
 begin
     InitGraph (640, 480, 'Algol-24 graph', False);

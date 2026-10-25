@@ -18,8 +18,9 @@ Three kinds of thing, and the distinction matters:
 
 ### L-4 — a warning goes to stdout, where it mixes with the program's output
 
-**Status:** open, reported 2026-09-04. The narrow remainder of L-2, and much
-less pressing now that the common case does not warn at all.
+**Status:** open, reported 2026-09-04. Re-verified unchanged against 0.1.5 on
+2026-10-24, where it acquired a second and likelier trigger — see below. No
+longer the narrow remainder it was.
 
 An overload the compiler cannot settle statically still warns — correctly,
 since [ERR-010]'s dynamic selection really does happen when argument *types*
@@ -39,8 +40,65 @@ here it matters concretely: this repository's `check-reference.py` and
 legitimately ambiguous overload anywhere in a unit would break them — and
 would corrupt the output of any program that pipes or diffs its own.
 
-No longer blocks anything the library wants, since the Pascal-style aliases
-are arity-distinct and now silent.
+#### 0.1.5 gave it a second trigger, and this one the library will meet
+
+Extension functions [FUN-015] brought a new warning with them: where a member
+hides an extension that is visible, [ERR-010] names the class that took it.
+That diagnostic is the right one to have — it closes the silent capture a class
+could otherwise perform by adding a member in a later version — and it is
+written to **stdout**, the same way:
+
+```console
+$ algc e2.a24 2>/dev/null
+[WARN] e2.a24:19: 'Size' is a member of Box, so the extension of that name is not reached.
+99
+```
+
+Nothing on stderr, measured the same way as the overload warning above.
+
+**How much likelier, measured.** Narrower than it first looked. The check is
+**receiver-type aware**, not name-only: a `Contains` extension declared on
+`String` does not disturb `Map.Contains`, and prints nothing.
+
+```algol24
+extension function Contains (S : String, What : String) : Boolean;
+…
+WriteLn (M.Contains ('k'));          // a Map -- silent
+WriteLn ('hello'.Contains ('ell'));
+```
+```console
+true
+true
+```
+
+So the collision has to be on the *same* receiver type — an extension on
+`String` against a member of `String`, not against any member anywhere. That is
+a much smaller target than the first reading of [EXP-022] suggested, and it is
+why `strings` could take `Trim`, `Upper`, `Lower`, `Repeat`, `Split` and `Join`
+without provoking anything: none is a member of `String` or of `List`, and all
+91 class member names across the library were checked against the six.
+
+It remains worse than the original trigger, because the original needs a
+program to declare two same-arity overloads of one name — which this library
+does not do at all — where this one needs only a name a future version of some
+class might add as a method. That is exactly the capture the diagnostic exists
+to announce, so the diagnostic is right and only its stream is wrong.
+
+It bites this repository twice over, because `check-reference.py` and
+`examples/check.sh` both compare a program's output byte for byte. A reference
+example that happened to collide would not merely look untidy; it would fail
+the suite, and the failure would read as a wrong answer rather than as a
+diagnostic on the wrong stream.
+
+The library's defence: keep an extension's name clear of the members of its own
+receiver type, and audit rather than discover. Done for `strings` and recorded
+in `PLAN-STRINGS.md`; a consumer importing `strings` beside `graph`, and using
+`List`, `Map` and `Buffer` members throughout, prints only its own output.
+
+That is a defence against a symptom, which is why the entry stays open. A
+diagnostic belongs on stderr, and until it is there, every program built on an
+extension-exporting unit carries the risk that a later version of some class
+starts narrating into its output.
 
 ---
 

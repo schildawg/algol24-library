@@ -1,8 +1,77 @@
 # Proposal: Extension Functions
 
 **From:** the `algol24-library` project, as a user of the language
-**Status:** proposal, for the language project to accept, refuse or reshape
+**Status:** **accepted and shipped in 0.1.5**, as [FUN-015], [EXP-022] and
+[MOD-015]. Verified here against `algc 0.1.5` on 2026-10-24; what was measured
+is below. Kept as written, because the record of what was asked for and why is
+worth more than a document edited to look like the answer.
 **Concerns:** call syntax only — no change to types, scoping or semantics
+
+---
+
+## Outcome
+
+Accepted essentially as proposed. The declaration is `extension` before
+`function` or `procedure`, both call forms work, members win, and visibility is
+the non-transitive `uses` rule. Three things are worth recording beyond that.
+
+**`extension` is not a keyword.** [LEX-011] recognizes it by its position
+before `function` or `procedure`, so `var extension := 8;` still compiles. The
+proposal did not ask for that and it is the better answer — a library may not
+take an identifier away from its users.
+
+**The spec added a diagnostic the proposal did not ask for.** Where a member
+hides an extension that is visible, [ERR-010] warns and names the class that
+took it:
+
+```console
+[WARN] e2.a24:19: 'Size' is a member of Box, so the extension of that name is
+not reached.
+```
+
+That closes the one silent failure the proposal's resolution order allowed — a
+class adding a member in a later version quietly capturing every call site.
+
+⚠️ **The new warning is written to stdout, which is L-4.** Measured: nothing at
+all arrives on stderr. So the defect this repository already carries now has a
+second and likelier trigger, and it bears directly on a `strings` unit — a name
+this library exports as an extension that collides with any class member
+anywhere in a program will print a line into that program's output. See
+`DEFECTS.md`.
+
+### The open questions, as answered
+
+1. **Must the receiver have a written type?** Yes — `An extension's receiver
+   must have a written type.` [FUN-015] gives the reason the question guessed
+   at: a gradual type says nothing about the value, so the extension would be a
+   member of everything and no diagnostic could name what the call reached
+   through. A declaration with no parameters at all is refused too: `An
+   extension must declare a receiver.` The library's untyped first-parameter
+   routines, `MoveTo (Surface, …)` and `SetPalette (Surface, …)`, stay as they
+   are, exactly as the question anticipated.
+
+2. **May extensions overload each other?** Yes, and selection is unchanged
+   [EXP-013]. Measured on two `Joined` extensions over a `List`: `L.Joined ()`
+   answered `1,2,3` and `L.Joined (' - ')` answered `1 - 2 - 3`, with no
+   warning — arity settles it statically, which is the 0.1.4 behavior applied
+   after the rewrite.
+
+3. **Is the receiver evaluated once?** Yes, stated in [EXP-022]:
+   `Next ().Trim ()` calls `Next` once.
+
+4. **Should a zero-argument extension be reachable without parentheses?** It is
+   not a property, and `x.f` without parentheses answers the subprogram bound
+   to that receiver rather than calling it — which is what reading a method off
+   an instance already does [FUN-011]. Measured: `var F := 21.Doubled;` then
+   `F ()` answered `42`.
+
+5. **Extensions on primitives and on classes alike?** Alike, and deliberately:
+   "nothing about the permission depends on what the receiver is." Measured on
+   `String` and `Integer`.
+
+**And one refusal worth having.** `extension` is rejected on a method, a
+constructor, a nested subprogram and a `property`: `'extension' applies only to
+a top-level subprogram.`
 
 ---
 

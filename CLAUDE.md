@@ -205,6 +205,35 @@ it, and diff.
 
 Learned here, by use:
 
+- ⚠️ **An extension's visibility is per-file and non-transitive, so every
+  consumer must say `uses` of the unit itself.** Since 0.1.5 a top-level
+  subprogram marked `extension` may also be called on its first parameter —
+  `Trim (S)` and `S.Trim ()` both, always [FUN-015]. But [MOD-015] finds one
+  only among the extensions visible in the file being compiled, so a unit that
+  `uses strings` internally does **not** give *its* importers `S.Trim ()`.
+  Measured: a program importing a unit that imports the extension reaches the
+  ordinary function fine and answers `Undefined property 'Upper'.` for the
+  method spelling. This is the same non-transitivity that made `crt` duplicate
+  `graph`'s constants, and it applies to method syntax too.
+- ⚠️ **A member of the name always wins, and the warning that says so goes to
+  stdout.** `x.f` resolves to a member first [EXP-022] and reaches an extension
+  only where the program was an error before, so nothing already written can
+  change meaning. Where a member hides a visible extension the compiler warns
+  and names the class — onto **stdout**, which is `DEFECTS.md` L-4. Any
+  extension this library exports must therefore be named clear of the member
+  names on its own classes, or a consumer's output gains a line it did not
+  print.
+- ⚠️ **Extensions do not remove the surface-first aliases.** The 59 delegates
+  in `graph` and `crt` go the other way — they give a *method* a free-function
+  spelling, `Line (V, …)` for `V.Line (…)` — where `extension` gives a function
+  a method spelling. `ViewPort` already has a `Line` member, so step 1 of
+  [EXP-022] answers it; there is nothing for an extension to add. The aliases
+  stay hand-written.
+- An extension's receiver must have a **written type**, and a declaration with
+  no parameters at all is refused. `extension` is also refused on a method, a
+  constructor, a nested subprogram and a `property`. It is **not** a keyword
+  [LEX-011] — `var extension := 8;` still compiles.
+
 - ⚠️ **A type-preserving routine must be written untyped, and that costs the
   caller something.** `Abs`, `Sqr`, `Min` and `Max` take their result type from
   their argument, which falls out of the arithmetic rather than being arranged.
@@ -274,8 +303,15 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `testing` | `AssertNear` | 9 | complete |
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
-| `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 367 | complete |
+| `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 298 | complete |
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
+| `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 14 | complete |
+| `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
+| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, no C at all | 27 | complete |
+
+The Tests column is the unit's own `test` blocks, 478 in all. `./test.sh`
+reports what `--test` can reach instead, imports included, so it prints 385
+for `graph` (its 298, plus `math`'s 69 and `testing`'s 9) and 92 for `sound`.
 
 ⚠️ **`graph` has a design document, `DESIGN.md`, and it governs.** The unit is
 one world — celled text on a grid at Order 0, Canvas objects above and below
@@ -306,8 +342,6 @@ alike — `(1, 1)` is home, `GotoXY (TextCols (), TextRows ())` the far corner,
 `GetMaxX ()` the width itself — while the language's strings stay 0-based;
 the seam is `Text[Col - 1]`, at the memory boundary. `examples/ide.a24` is
 the acceptance piece — the Turbo C++ screen rebuilt from the vocabulary.
-| `sound` | `Sound`, `NoSound`, `SetVolume`, `Delay`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 13 | complete |
-| `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
 
 ⚠️ **`file` owns its primitive rather than using the core's `TextFile`.**
 That class exists for the compiler and is being pared to what the compiler
@@ -315,6 +349,24 @@ needs; the library reads exactly one file -- a glyph file, in
 `InstallUserFont` -- and now does it through `file`. Nothing in the core is
 needed for file I/O: C can take a path as a String and answer a count, which
 is all `fileffi.c` uses.
+
+⚠️ **`strings` needs 0.1.5, and so therefore does the whole library.** It is
+the first unit to use `extension` [FUN-015], which 0.1.4 cannot parse. Before
+it there was no version floor at all; now `./test.sh` fails on anything older.
+
+`strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
+so the only one besides it that is portable as written — nothing for a
+per-platform build to rewrite. `Upper` and `Lower` are **ASCII only** and leave
+every other code point alone, because Unicode case mapping is a table rather
+than a rule and is not even character-to-character (`ß` uppercases to `SS`).
+That limitation is asserted rather than merely documented: a test checks
+`Upper ('café')` answers `CAFé`. `Repeat` takes a `String` and a Char is
+accepted where one is declared, which is what makes `Repeat ('-', 40)` the
+call it exists for. `Split` keeps the empty pieces, which is what makes
+`Join (Split (S, By), By)` answer `S` for every input — a test asserts the
+round trip. The private whitespace helper uses the language's `private`
+[MOD-006], which no other unit here does yet; `crt`'s `ByteAt` says "private
+to this unit" in a comment and is in fact exported.
 
 ⚠️ **`alg_` is the runtime's prefix, and a common noun after it will
 collide.** `fileffi.c` first used `alg_file_exists`, which the compiler's own

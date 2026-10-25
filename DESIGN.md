@@ -344,10 +344,17 @@ Nothing below is designed yet; nothing above blocks any of it.
   `0xFF000000 | color` today and would need an index path, `GetPixel` becomes
   ambiguous between index and color, and transparency needs a reserved entry.
   A fork in the surface model, and priced accordingly.
-- **The rest of the drawing vocabulary** — `Bar`, `Circle`, `Ellipse`, `Arc`,
-  `PieSlice`, `FloodFill`, `GetImage`/`PutImage`. The pen arrived with
-  `Line`; these join it on the ViewPort, and the fill styles are the open
-  question they bring.
+- ~~The rest of the drawing vocabulary~~ — arrived, all of it, each verb a
+  ViewPort method and a surface-first alias: `Bar`, `Bar3D`, `Circle`,
+  `Ellipse`, `FillEllipse`, `Arc`, `PieSlice`, `Sector`, `DrawPoly`,
+  `FillPoly`, `FloodFill` with `GetPixel`, and `GetImage`/`PutImage` with
+  `ImageSize`. The fill styles were indeed the open question they brought,
+  and the answer is `SetFillStyle`/`SetFillPattern` over the thirteen
+  patterns, read back by `GetFillSettings` and `GetFillPattern`. What the
+  figures taught: a fill long enough to matter is a run, which is what
+  `graphffi.c` is for — `FillPoly` computes its scanlines in Algol-24 and
+  hands C the spans — and `FloodFill` is the one figure that reads the
+  surface back.
 - **CJK vertical writing**, as above.
 - ~~`Blink`~~ — arrived early, because the clock it waited on was the
   language's own `clock ()` [RT-012] all along. The spelling is Turbo
