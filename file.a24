@@ -34,7 +34,8 @@
 ///
 /// Where streaming should sit is a design question rather than a gap:
 /// every modern runtime makes the stream the primitive and the whole-file
-/// read the sugar on top, and this unit has it the other way round.
+/// read the sugar on top, and this unit has it the other way round. See
+/// `SKETCH-STREAMING.md`.
 ///
 /// Paths resolve against the working directory, as every data file here does.
 unit file;

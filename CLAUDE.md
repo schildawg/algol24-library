@@ -613,8 +613,8 @@ objection to streaming was that it "needs a way to hand back a line without
 handing back a borrowed pointer"; that pattern is now used three times here
 (`ReadAll`, `dos.GetEnv`, `graph`'s SDL error reader), so the obstacle is
 gone. Every other runtime makes the stream the primitive and the whole-file
-read the sugar; this unit has it the other way round, which is a design
-question still open.
+read the sugar; this unit has it the other way round. `SKETCH-STREAMING.md`
+has the surface, unbuilt and awaiting method names.
 
 ⚠️ **A Buffer must be sized exactly to become Text.** `Buffer.Text` refuses a
 buffer holding a zero byte, so a buffer larger than its contents fails on its
