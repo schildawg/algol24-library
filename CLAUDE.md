@@ -205,6 +205,22 @@ it, and diff.
 
 Learned here, by use:
 
+- ⚠️ **There are no bitwise operators, and `and`/`or` conceal that rather than
+  provide it.** They test truthiness and yield an *operand* [EXP-010], so
+  `6 and 3` is **3** where bitwise would be 2, and `6 or 3` is **6** where it
+  would be 7 — a plausible wrong number, not an error. Every other spelling is
+  absent too: `&`, `|`, `^` and `~` are not even lexed, and `xor`, `shl`, `shr`
+  and `bitand` are parse errors or undefined names. Bit work here is `div`,
+  `mod` and a multiplier, which is what `crt`'s `ByteAt` does, or an `external`
+  into C, which is what `graph`'s `XorWords` does. A pure Algol-24 exclusive or
+  costs 0.7 ms a call and is unusable in a pixel loop. See `DEFECTS.md` H-3,
+  and `PROPOSAL-BITWISE-OPERATORS.md` for the ask.
+- ⚠️ **`div` truncates toward zero, so it is not a shift.** `-7 div 2` is `-3`,
+  where an arithmetic right shift would floor to `-4`. The two agree only when
+  the bits shifted out are zero, so a byte picked out of a negative word has to
+  be brought into range first — which is what the `+ 4294967296` in `graph` and
+  `crt` is doing.
+
 - ⚠️ **An extension's visibility is per-file and non-transitive, so every
   consumer must say `uses` of the unit itself.** Since 0.1.5 a top-level
   subprogram marked `extension` may also be called on its first parameter —
@@ -308,8 +324,10 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 14 | complete |
 | `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
 | `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 47 | complete |
+| `time` | `Now`, `UtcNow`, `At`, `UtcAt` answering a `DateTime` with `Text`; `UtcOffset`, `IsDaylightSaving`; `timeffi.c` is C89 `localtime_r`. `GetDate`/`GetTime`'s four `var` parameters become one returned object; `SetDate`/`SetTime` are absent, needing root | 9 | complete |
+| `dos` | `DiskFree`, `DiskSize` by path rather than drive number and unbounded rather than `LongInt`; `GetEnv`, `HasEnv`, `Environment` answering a List, `EnvName`/`EnvValue`; `Exec` through `posix_spawn` with an argument List and **no shell**; `dosffi.c` is POSIX, not C99 | 13 | complete |
 
-The Tests column is the unit's own `test` blocks, 498 in all. `./test.sh`
+The Tests column is the unit's own `test` blocks, 520 in all. `./test.sh`
 reports what `--test` can reach instead, imports included, so it prints 385
 for `graph` (its 298, plus `math`'s 69 and `testing`'s 9) and 92 for `sound`.
 
@@ -350,6 +368,38 @@ needs; the library reads exactly one file -- a glyph file, in
 needed for file I/O: C can take a path as a String and answer a count, which
 is all `fileffi.c` uses.
 
+⚠️ **`time` and `dos` split Turbo Pascal's `Dos` unit, and four of its members
+are gone deliberately.** `SetDate` and `SetTime` need root on every system this
+runs on, so their honest doc comment would read "raises unless you are root".
+`GetCBreak` and `SetCBreak` controlled a DOS flag with no equivalent -- the
+question they really asked, whether Ctrl-C interrupts the program or arrives as
+a key, is termios' `ISIG` and so `crt`'s business if it is anyone's. The
+calendar went to `time` because it is its own subject; `dos` keeps what the host
+offers beyond files. `PROPOSAL-BITWISE-OPERATORS.md` records the rest of that
+analysis.
+
+`time` notes: the gap is the **time zone**, not the arithmetic -- leap years are
+a closed rule a program could hand-roll, and the zone lives in the host's
+database and changes by legislation. So `UtcOffset` takes a moment rather than
+answering a constant, a zone observing daylight saving having two. The seven
+calendar fields come back from **one** C call into a caller-owned Buffer, not
+seven, or they could straddle a tick and report the hour from before midnight
+with the minute from after. `timeffi.c` is C89 throughout, so this unit is as
+portable as the C gets.
+
+`dos` notes: ⚠️ **`Exec` does not go through a shell**, which is the whole
+point of it taking a `List` rather than a command line -- an argument holding a
+space, a quote or a semicolon arrives whole and cannot become syntax. The cost
+is that there is no `PATH` search, no globbing and no redirection, so `Path`
+must be `'/bin/echo'` and not `'echo'`. The argument vector is built in C one
+argument per call rather than packed here, because packing needs a separator
+and no byte is safe: an argument may hold any byte but NUL, and NUL cannot
+cross the boundary inside a String. A status above 255 is a signal, 128 plus
+its number, which is unambiguous because an exit code cannot reach that far.
+`dosffi.c` is **POSIX rather than C99** -- `statvfs` and `posix_spawn` -- so
+unlike `file` it does not build anywhere; Windows would need
+`GetDiskFreeSpaceEx` and `CreateProcess` behind the same three functions.
+
 ⚠️ **`strings` needs 0.1.5, and so therefore does the whole library.** It is
 the first unit to use `extension` [FUN-015], which 0.1.4 cannot parse. Before
 it there was no version floor at all; now `./test.sh` fails on anything older.
@@ -374,6 +424,17 @@ order is **not** Turbo Pascal's — the string inserted into comes first, becaus
 an extension's receiver must. The private whitespace helper uses the language's `private`
 [MOD-006], which no other unit here does yet; `crt`'s `ByteAt` says "private
 to this unit" in a comment and is in fact exported.
+
+⚠️ **The units do not `uses strings`, and that is decided rather than
+pending.** Adopting it inside `graph`, `crt` or `sound` would tidy their
+internals and buy their consumers nothing — extension visibility is per-file
+and non-transitive [MOD-015], so a unit importing `strings` does not pass
+`S.Trim ()` to anyone importing *it* — while adding an inter-unit dependency
+that moves every `--test` count. Three things would reopen it: a
+consumer-visible benefit, a reason the dependency earns its cost, or a unit
+whose own code cannot be stated clearly without it. Tidier internals alone is
+not one of them, so do not make that change as cleanup. `PLAN-STRINGS.md`
+carries the reasoning.
 
 ⚠️ **`alg_` is the runtime's prefix, and a common noun after it will
 collide.** `fileffi.c` first used `alg_file_exists`, which the compiler's own

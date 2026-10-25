@@ -160,6 +160,66 @@ one, and `this.Ping` names the method.
 
 ## Hazards
 
+### H-3 — `and` and `or` look like bitwise operators and are not
+
+**Status:** hazard, not a defect. Recorded 2026-10-24. Specified by [EXP-010],
+checked before being written up here.
+
+The language has **no bitwise operations of any kind**, and the two operators
+that look like they would do the job quietly do something else. `and` and `or`
+test truthiness and yield an *operand* rather than a Boolean, so the obvious
+thing a reader writes compiles and answers a plausible wrong number:
+
+```algol24
+WriteLn (6 and 3);     // 3   -- bitwise would be 2
+WriteLn (6 or 3);      // 6   -- bitwise would be 7
+```
+
+Nothing is wrong here. [EXP-010] says both operators test truthiness, and
+`conformance/0048-logical-operators.a24` asserts the operand-yielding result in
+terms. The hazard is that the *absence* of bitwise operators is concealed by the
+presence of two operators wearing their names — so the failure is a wrong number
+rather than `Undefined`.
+
+**And every other spelling is absent**, which is what makes the trap worth
+recording rather than merely noting. Measured on 0.1.5:
+
+| Written | Result |
+| --- | --- |
+| `6 & 3`, `6 \| 3`, `6 ^ 3`, `~0` | `Error: Unexpected character` — not lexed |
+| `1 << 4`, `256 >> 4` | `Expect expression!` |
+| `6 xor 3`, `6 band 3`, `6 bitxor 3` | parse errors |
+| `Xor (6, 3)`, `Shl (1, 4)` | `Undefined variable` |
+
+The word "bitwise" does not appear in the specification.
+
+#### How the library defends against it
+
+1. **Reach for C, and say so.** `graph` declares
+   `XorWords … external 'alg_xor'` with a doc block naming the gap. That is the
+   right shape for a gap the language does not offer — an `external`, without
+   ceremony.
+2. **Know that the C answer is narrow.** `alg_xor` is
+   `(int64_t)(int32_t)((uint32_t) a ^ (uint32_t) b)` — a **32-bit** operation
+   declared as `(Integer, Integer) : Integer`. Correct for a pixel word, wrong
+   for an Integer, and the declaration cannot say which. Deliberate narrowing
+   rather than H-1's accident, but it means the helper must stay private to the
+   unit that needs that width.
+3. **Do not write a general `bits` unit.** A pure Algol-24 exclusive or is
+   writable and costs 0.7 ms per call — 13.94 s for 20,000 of them, measured —
+   so it would be unusable in the pixel loop that wants it most, and a
+   foreign one would carry `alg_xor`'s width problem into a public surface.
+4. **Arithmetic, where the quantity is small.** `crt`'s `ByteAt` picks a byte
+   with `div` and `mod`, and both units split colors into channels the same
+   way. Correct, slow, and duplicated — which is the cost this hazard actually
+   imposes.
+
+**This one has a proposal rather than only a defence.**
+`PROPOSAL-BITWISE-OPERATORS.md` asks the language project for the six
+operations over the unbounded Integer, where they can be total in a way no
+library can manage: infinite two's complement needs no width, so `not 0` is
+`-1` and `1 shl 70` grows by [EXP-007] rather than wrapping.
+
 ### H-2 — a String returned from C borrows the bytes, and does not copy them
 
 **Status:** hazard, not a defect. Recorded 2026-09-05 while building `file`.

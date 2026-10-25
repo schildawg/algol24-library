@@ -31,6 +31,8 @@ built.
 | `sound` | tones, BASIC's `Play`, and sampled sounds mixed sixteen at a time |
 | `file` | whole-file reads and writes, and the questions to ask about a path |
 | `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert` and `Replace`, each callable either as a function or on its first argument |
+| `time` | the calendar, which `clock ()` stops short of — and the time zone, which a program cannot work out |
+| `dos` | disk space, the environment, and running a program without a shell |
 | `testing` | `AssertNear`, for results whose exact bits are not guaranteed |
 
 `REFERENCE.md` documents every routine and constant, after the pattern of Turbo
