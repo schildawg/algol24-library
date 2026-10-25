@@ -66,8 +66,12 @@ were decided, and the record of why is worth having.
   the live terminal, and a terminal under 26 columns made the title-bar count
   negative. Two counts in each IDE are now clamped, which says what to draw
   instead of leaving it to the routine.
-- **Whether `graph`, `crt` and `sound` adopt it internally**, which buys their
-  consumers nothing. Unchanged recommendation: decide per unit, later.
+- ~~Whether `graph`, `crt` and `sound` adopt it internally~~ — **decided: not
+  yet**, 2026-10-24, on the reasoning under the second decision below. The cost
+  is real and the benefit does not reach a consumer, so there is nothing to buy
+  with it today. Revisit only if a unit's own code grows a string problem it
+  cannot state clearly without `strings`, and treat the question as reopened by
+  that evidence rather than by the unit existing.
 - **The inside of `sound`'s `NumberAt` and `DigitsAt`**, which a general digit
   scanner would simplify but not replace.
 
@@ -185,8 +189,12 @@ spelling. So adopting it internally buys those units tidier code and buys their
 consumers nothing — and adds an inter-unit dependency that moves every
 `--test` count again.
 
-**Recommendation: ship `strings` standing alone first.** Decide adoption as a
-separate pass, per unit, after the unit exists and is documented.
+**Decided, 2026-10-24: `strings` stands alone and the units do not adopt it.**
+Shipping it first was the recommendation; not adopting it afterwards is now the
+answer rather than a deferral, and these are the three things that would have
+to change to reopen it — a consumer-visible benefit, a reason the inter-unit
+dependency is worth its cost, or a unit whose own code cannot be stated clearly
+without it. Tidier internals alone is not one of them.
 
 ---
 

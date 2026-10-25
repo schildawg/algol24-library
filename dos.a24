@@ -1,0 +1,441 @@
+/// What the host offers a program beyond files: disk space, the environment,
+/// and running another program.
+///
+/// The name is Turbo Pascal's `Dos` unit, kept as the homage the rest of the
+/// library's names are. Nothing in here is DOS-specific, and four of that
+/// unit's members are deliberately absent: `SetDate` and `SetTime` need root
+/// on every system this runs on, and `GetCBreak` and `SetCBreak` controlled a
+/// flag that has no equivalent -- the question they really asked, whether
+/// Ctrl-C interrupts the program or arrives as a key, is a terminal's business
+/// and so `crt`'s if it is anyone's. `GetDate` and `GetTime` live in `time`,
+/// the calendar being its own subject.
+///
+/// Where Turbo Pascal's members are re-derived rather than ported, the reason
+/// is on the member. `DiskFree` taking a path rather than a drive number and
+/// `Exec` taking an argument list rather than a command line are both such
+/// cases.
+///
+/// This unit's C is POSIX rather than C99, so unlike `file` it does not build
+/// anywhere: macOS, Linux and the BSDs, with Windows needing
+/// `GetDiskFreeSpaceEx` and `CreateProcess` behind the same three functions.
+unit dos;
+
+// ------------------------------------------------------------- the C behind
+
+/// Bytes available to an unprivileged caller, or -1.
+///
+/// Private to this unit, and answered through `DiskFree`.
+private function RawDiskFree (Path : String) : Integer;
+    external 'alg_libdos_disk_free' in 'libdosffi.dylib';
+
+/// Total bytes on the filesystem, or -1. Private to this unit.
+private function RawDiskSize (Path : String) : Integer;
+    external 'alg_libdos_disk_size' in 'libdosffi.dylib';
+
+/// Copies a variable's value into a buffer and answers its length, or -1 when
+/// the variable is not set. Private to this unit.
+private function RawGetEnv (Name : String, Into : Pointer, Max : Integer) : Integer;
+    external 'alg_libdos_getenv' in 'libdosffi.dylib';
+
+/// How many entries the environment holds. Private to this unit.
+private function RawEnvCount () : Integer;
+    external 'alg_libdos_env_count' in 'libdosffi.dylib';
+
+/// Copies entry Index into a buffer and answers its length, or -1 for an
+/// index outside the environment. Private to this unit.
+private function RawEnvAt (Index : Integer, Into : Pointer, Max : Integer) : Integer;
+    external 'alg_libdos_env_at' in 'libdosffi.dylib';
+
+/// Begins an argument vector, discarding any half-built one.
+///
+/// Private to this unit. The vector is built in C one argument at a time
+/// rather than packed into a buffer here, because packing would mean agreeing
+/// on a separator and no byte is safe -- an argument may contain any byte but
+/// NUL, and NUL cannot cross the boundary as part of a String.
+private procedure RawArgReset ();
+    external 'alg_libdos_arg_reset' in 'libdosffi.dylib';
+
+/// Appends one argument, answering 1 on success. Private to this unit.
+private function RawArgPush (Arg : String) : Integer;
+    external 'alg_libdos_arg_push' in 'libdosffi.dylib';
+
+/// Runs Path with the pushed arguments and waits. Private to this unit.
+private function RawSpawn (Path : String) : Integer;
+    external 'alg_libdos_spawn' in 'libdosffi.dylib';
+
+// -------------------------------------------------------------- disk space
+
+/// The bytes available on the filesystem holding Path.
+///
+/// What an unprivileged program may actually write, not what the superuser
+/// could: the reserved blocks a filesystem keeps back are excluded, because
+/// a program asking "may I write this" is not asking about them.
+///
+/// Turbo Pascal's `DiskFree` took a drive number, which has no meaning here,
+/// and answered a `LongInt`, which went wrong above 2 GB. A path is the
+/// portable question and an Algol-24 Integer is unbounded, so neither limit
+/// is inherited: this answers the true figure for a filesystem of any size.
+///
+/// Path may name any file or directory on the filesystem, not only its root.
+/// `DiskFree ('.')` asks about the one the program is running on.
+///
+/// # Raises
+/// `DiskFree: cannot read '<path>'.` where the filesystem could not be asked,
+/// which a path that does not exist will provoke.
+///
+/// # Examples
+/// `DiskFree And DiskSize Answer A Plausible Pair`
+function DiskFree (Path : String) : Integer;
+begin
+    var N := RawDiskFree (Path);
+
+    if N < 0 then raise 'DiskFree: cannot read ''' + Path + '''.';
+
+    Exit N;
+end
+
+/// The total bytes on the filesystem holding Path.
+///
+/// Every block, the reserved ones included, which is what a size is. So
+/// `DiskSize` is always at least `DiskFree` and usually larger by more than
+/// what is stored, the difference being the reserve.
+///
+/// # Raises
+/// `DiskSize: cannot read '<path>'.` where the filesystem could not be asked.
+///
+/// # Examples
+/// `DiskFree And DiskSize Answer A Plausible Pair`
+function DiskSize (Path : String) : Integer;
+begin
+    var N := RawDiskSize (Path);
+
+    if N < 0 then raise 'DiskSize: cannot read ''' + Path + '''.';
+
+    Exit N;
+end
+
+// ------------------------------------------------------------- environment
+
+/// Whether a variable is set, however empty its value.
+///
+/// Worth asking separately, because a variable set to the empty string and a
+/// variable not set at all both answer `''` from `GetEnv` and mean different
+/// things -- `ALG_SOUND=` is a request this library would honour and no
+/// `ALG_SOUND` at all is not.
+///
+/// # Raises
+/// Nothing. Asking about a variable that is not there is the question.
+///
+/// # Examples
+/// `HasEnv Separates An Empty Value From An Absent One`
+function HasEnv (Name : String) : Boolean;
+begin
+    Exit RawGetEnv (Name, nil, 0) >= 0;
+end
+
+/// A variable's value, or the empty string where it is not set.
+///
+/// Answers `''` for an unset variable rather than raising, which is what makes
+/// `GetEnv ('EDITOR')` usable without asking first; `HasEnv` is there for the
+/// cases that need the distinction.
+///
+/// The value is copied out of the host's environment block rather than
+/// pointed at. A foreign function here never answers a pointer -- a String
+/// returned from C borrows the bytes and a later call could corrupt it, which
+/// `DEFECTS.md` H-2 records -- so this asks the length, sizes a buffer to it
+/// and reads it back.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `GetEnv Reads A Variable The Test Run Sets`
+function GetEnv (Name : String) : String;
+begin
+    var N := RawGetEnv (Name, nil, 0);
+
+    if N <= 0 then Exit '';
+
+    // Sized exactly to the value, because `Buffer.Text` refuses a buffer
+    // holding a zero byte -- a larger one would fail on its own trailing
+    // zeros rather than answer a truncated String.
+    var B := Buffer (N);
+
+    RawGetEnv (Name, B.Address, N);
+
+    Exit B.Text;
+end
+
+/// Every environment entry, as a List of `NAME=VALUE` strings.
+///
+/// One List rather than Turbo Pascal's `EnvCount` and `EnvStr` pair, which
+/// were two members expressing one sequence because DOS Pascal had no list
+/// type. This language has one.
+///
+/// The entries keep the host's own `NAME=VALUE` form, which `strings.Split`
+/// takes apart -- and note the split must be on the **first** `=` only, a
+/// value being allowed to contain more. `GetEnv` is the way to read one by
+/// name and does not go through this.
+///
+/// The order is the host's and means nothing. A name may in principle appear
+/// twice, in which case `GetEnv` answers whichever the host prefers.
+///
+/// # Raises
+/// Nothing. An environment of no entries answers an empty List.
+///
+/// # Examples
+/// `Environment Lists Entries In NAME Equals VALUE Form`
+function Environment () : List;
+begin
+    var Out   := List ();
+    var Count := RawEnvCount ();
+
+    for var I := 0; I < Count; I := I + 1 do
+    begin
+        var N := RawEnvAt (I, nil, 0);
+
+        if N > 0 then
+        begin
+            var B := Buffer (N);
+
+            RawEnvAt (I, B.Address, N);
+
+            Out.Add (B.Text);
+        end
+    end
+
+    Exit Out;
+end
+
+/// The name half of a `NAME=VALUE` entry.
+///
+/// Splits on the first `=` only, a value being allowed to contain more. An
+/// entry with no `=` at all answers the whole of it, the host having offered
+/// no value to separate.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `EnvName And EnvValue Split On The First Equals Only`
+function EnvName (Entry : String) : String;
+begin
+    var At := Pos (Entry, '=');
+
+    if At < 0 then Exit Entry;
+
+    Exit Copy (Entry, 0, At);
+end
+
+/// The value half of a `NAME=VALUE` entry.
+///
+/// Splits on the first `=` only, so a value containing `=` comes back whole.
+/// An entry with no `=` answers the empty string.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `EnvName And EnvValue Split On The First Equals Only`
+function EnvValue (Entry : String) : String;
+begin
+    var At := Pos (Entry, '=');
+
+    if At < 0 then Exit '';
+
+    Exit Copy (Entry, At + 1, Length (Entry));
+end
+
+// --------------------------------------------------------- running a program
+
+/// Runs a program with the given arguments and answers its exit status.
+///
+/// No shell. The arguments go to the program as a vector, so one containing a
+/// space, a quote, a semicolon or a newline arrives as a single argument and
+/// cannot become syntax. Turbo Pascal's `Exec` took a command *line*, which is
+/// where that hazard lives, and C's `system` would reintroduce it; neither is
+/// what this does. A path built from a user's input is therefore safe here in
+/// a way it would not be through a shell -- though a path chosen by a user is
+/// still a program of their choosing, which is a different question.
+///
+/// Because there is no shell there is also no `PATH` search, no globbing and
+/// no redirection. Path must name the program, `'/bin/echo'` rather than
+/// `'echo'`. That is the cost of the safety and it is the right side of the
+/// trade for a library.
+///
+/// Args holds the arguments after the program's own name; the program sees
+/// Path as its `argv[0]`, as it expects. The environment is inherited. The
+/// call waits for the program to finish.
+///
+/// The status is the program's own exit code, or 128 plus the signal number
+/// where it was killed -- the shell's convention, and unambiguous because an
+/// exit code cannot exceed 255. A program that could not be started at all
+/// raises instead, a command that never ran not being a command that failed.
+///
+/// # Raises
+/// `Exec: cannot run '<path>'.` where the program could not be started, and
+/// `Exec: too many arguments.` beyond the 1023 the argument vector holds.
+///
+/// # Examples
+/// `Exec Runs A Program And Answers Its Status`
+function Exec (Path : String, Args : List) : Integer;
+begin
+    RawArgReset ();
+
+    for var A in Args do
+        if RawArgPush (Str (A)) = 0 then
+        begin
+            RawArgReset ();
+
+            raise 'Exec: too many arguments.';
+        end
+
+    var Status := RawSpawn (Path);
+
+    if Status < 0 then raise 'Exec: cannot run ''' + Path + '''.';
+
+    Exit Status;
+end
+
+// ---------------------------------------------------------------------- tests
+
+/// The pair has to be consistent, and neither can be asserted exactly -- a
+/// disk's free space changes between one call and the next.
+test 'DiskFree And DiskSize Answer A Plausible Pair';
+begin
+    var Free := DiskFree ('.');
+    var Size := DiskSize ('.');
+
+    AssertTrue (Size > 0);
+    AssertTrue (Free >= 0);
+    AssertTrue (Free <= Size);
+
+    // A filesystem is a whole number of blocks, and no block size in use is
+    // smaller than 512 bytes.
+    AssertEqual (0, Size mod 512);
+end
+
+/// Any path on the filesystem answers for the whole of it, not only a root.
+test 'DiskFree Takes Any Path On The Filesystem';
+begin
+    AssertEqual (DiskSize ('.'), DiskSize ('./dos.a24'));
+end
+
+test 'DiskFree Refuses A Path That Is Not There';
+begin
+    var Raised := False;
+
+    try DiskFree ('/no/such/path/anywhere'); except Raised := True; end
+    AssertTrue (Raised);
+
+    Raised := False;
+    try DiskSize ('/no/such/path/anywhere'); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+/// `./test.sh` sets ALG_SOUND=dummy, so there is one variable whose value is
+/// known inside a test run. `PATH` is the other thing every host has.
+test 'GetEnv Reads A Variable The Test Run Sets';
+begin
+    AssertTrue (Length (GetEnv ('PATH')) > 0);
+    AssertTrue (HasEnv ('PATH'));
+end
+
+test 'GetEnv Answers Empty For A Variable That Is Not Set';
+begin
+    AssertEqual ('', GetEnv ('ALG_NO_SUCH_VARIABLE_ANYWHERE'));
+end
+
+/// The distinction GetEnv alone cannot express.
+test 'HasEnv Separates An Empty Value From An Absent One';
+begin
+    AssertTrue (not HasEnv ('ALG_NO_SUCH_VARIABLE_ANYWHERE'));
+    AssertTrue (HasEnv ('PATH'));
+end
+
+test 'Environment Lists Entries In NAME Equals VALUE Form';
+begin
+    var E := Environment ();
+
+    AssertTrue (E.Length > 0);
+
+    // Every entry a host offers has a name, and PATH is among them.
+    var FoundPath := False;
+
+    for var Entry in E do
+    begin
+        AssertTrue (Length (EnvName (Str (Entry))) > 0);
+
+        if EnvName (Str (Entry)) = 'PATH' then FoundPath := True;
+    end
+
+    AssertTrue (FoundPath);
+end
+
+/// The split is on the first `=` only, which a value containing one would
+/// otherwise break.
+test 'EnvName And EnvValue Split On The First Equals Only';
+begin
+    AssertEqual (Str ('A'), EnvName ('A=b=c'));
+    AssertEqual ('b=c', EnvValue ('A=b=c'));
+
+    AssertEqual (Str ('A'), EnvName ('A='));
+    AssertEqual ('', EnvValue ('A='));
+
+    AssertEqual ('bare', EnvName ('bare'));
+    AssertEqual ('', EnvValue ('bare'));
+end
+
+/// And what Environment answers must agree with what GetEnv answers for the
+/// same name, or one of the two is reading the wrong block.
+test 'Environment Agrees With GetEnv';
+begin
+    for var Entry in Environment () do
+        AssertEqual (GetEnv (EnvName (Str (Entry))), EnvValue (Str (Entry)));
+end
+
+/// `/usr/bin/true` and `/usr/bin/false` exist on every system this builds on
+/// and do nothing but answer a status, which is exactly what is being tested.
+test 'Exec Runs A Program And Answers Its Status';
+begin
+    AssertEqual (0, Exec ('/usr/bin/true', List ()));
+    AssertTrue (Exec ('/usr/bin/false', List ()) <> 0);
+end
+
+/// The arguments have to arrive, which a program that reports them can show.
+test 'Exec Passes Its Arguments To The Program';
+begin
+    var Args := List ();
+
+    Args.Add ('-c');
+    Args.Add ('[ "$1" = "a b" ] && [ "$2" = "c;d" ]');
+    Args.Add ('sh');
+    Args.Add ('a b');
+    Args.Add ('c;d');
+
+    // A space and a semicolon in one argument each. Through a shell these
+    // would have become two arguments and a command separator; through a
+    // vector they arrive whole, which is what the test asserts.
+    AssertEqual (0, Exec ('/bin/sh', Args));
+end
+
+test 'Exec Refuses A Program That Is Not There';
+begin
+    var Raised := False;
+
+    try Exec ('/no/such/program/anywhere', List ()); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+/// A program killed by a signal is distinguishable from one that exited,
+/// because an exit code cannot exceed 255.
+test 'Exec Reports A Signal As 128 Plus Its Number';
+begin
+    var Args := List ();
+
+    Args.Add ('-c');
+    Args.Add ('kill -TERM $$');
+
+    AssertEqual (143, Exec ('/bin/sh', Args));      // 128 + SIGTERM
+end

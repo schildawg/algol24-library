@@ -20,6 +20,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ArcCoords`](#arccoords) | class | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
 | [`AssertNear`](#assertnear) | procedure | `testing` |
+| [`At` `UtcAt`](#at) | functions | `time` |
 | [`Bar`](#bar) | procedure, alias | `graph` |
 | [`Bar3D`](#bar3d) | procedure, alias | `graph` |
 | [`Blink`](#blink) | constant | `graph` and `crt` |
@@ -33,14 +34,18 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Black` … `White`](#colors) | constants | `graph` and `crt` |
 | [`Cos`](#cos) | function | `math` |
 | [`Crt`](#crt) | unit | `crt` |
+| [`DateTime`](#datetime) | class | `time` |
 | [`Delay`](#delay) | procedure | `crt` and `graph` |
 | [`Delete`](#delete) | extension function | `strings` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
+| [`DiskFree` `DiskSize`](#diskfree) | functions | `dos` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`EnableMouse`](#enablemouse) | procedures and functions | `graph` and `crt` |
 | [`Event`](#event) | class | `graph` and `crt` |
 | [`EventKinds`](#eventkinds) | constants | `graph` and `crt` |
+| [`Environment` `EnvName` `EnvValue`](#environment) | functions | `dos` |
+| [`Exec`](#exec) | function | `dos` |
 | [`Exp`](#exp) | function | `math` |
 | [`FillEllipse`](#fillellipse) | procedure, alias | `graph` |
 | [`FillPoly`](#fillpoly) | procedure, alias | `graph` |
@@ -51,6 +56,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`GetArcCoords`](#getarccoords) | function, alias | `graph` |
 | [`GetAspectRatio`](#getaspectratio) | function | `graph` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
+| [`GetEnv` `HasEnv`](#getenv) | functions | `dos` |
 | [`GetFillPattern`](#getfillpattern) | function, alias | `graph` |
 | [`GetFillSettings` `GetLineSettings`](#getfillsettings) | functions, aliases | `graph` |
 | [`GetImage` `PutImage`](#getimage) | function and procedure, aliases | `graph` |
@@ -71,6 +77,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Insert`](#insert) | extension function | `strings` |
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
 | [`Int`](#int) | function | `math` |
+| [`IsDaylightSaving`](#isdaylightsaving) | function | `time` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
 | [`IsTerminal`](#isterminal) | function | `crt` |
@@ -90,6 +97,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`MoveTo`](#moveto) | procedure, alias | `graph` and `crt` |
 | [`NaN`](#nan) | constant | `math` |
 | [`NormVideo`](#normvideo) | procedure | `graph` and `crt` |
+| [`Now` `UtcNow`](#now) | functions | `time` |
 | [`Odd`](#odd) | function | `math` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
@@ -146,6 +154,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Trim`](#trim) | extension function | `strings` |
 | [`Trunc`](#trunc) | function | `math` |
 | [`Upper`](#upper) | extension function | `strings` |
+| [`UtcOffset`](#utcoffset) | function | `time` |
 | [`ViewPort`](#viewport) | class | `graph` |
 | [`WhereX`](#wherex) | function | `graph` and `crt` |
 | [`WhereY`](#wherey) | function | `graph` and `crt` |
@@ -510,6 +519,68 @@ end
 
 ```console
 [INFO] Test: A measurement lands where it should .................... [ PASS ]
+```
+
+---
+
+## At
+
+*functions* — unit `time`
+
+**Function**
+
+Return the moment a given epoch names, as a [`DateTime`](#datetime).
+
+**Declaration**
+
+```algol24
+function At (Epoch : Double) : DateTime;
+function UtcAt (Epoch : Double) : DateTime;
+```
+
+**Remarks**
+
+What makes `clock ()` usable. The language hands out seconds since the epoch as
+a Double and stops there; these read that number as a date. A moment recorded
+earlier, or one arrived at by arithmetic, goes through here.
+
+`At` reads it in the host's own time zone and `UtcAt` without a zone. Both
+answer the same instant — the `Epoch` field is identical — and only the
+calendar fields differ.
+
+A local reading is by definition the UTC reading of the instant shifted by the
+zone's offset, so `At (E).Text ()` and
+`UtcAt (E + UtcOffset (E)).Text ()` always agree. That identity is how the unit
+tests itself in a way that holds in every zone.
+
+Raises `time: the host could not break down that moment.` for an epoch outside
+the host's representable range, which a value far beyond the year 9999 reaches.
+
+**See also**
+
+[`Now`](#now), [`DateTime`](#datetime), [`UtcOffset`](#utcoffset)
+
+**Example**
+
+```algol24
+uses time;
+
+// A fixed epoch, so the answer is the same on every host.
+var M := UtcAt (1234567890.0);
+
+WriteLn (M.Year, '-', M.Month, '-', M.Day);
+WriteLn (M.Hour, ':', M.Minute, ':', M.Second);
+WriteLn (M.Text ());
+
+// The fraction the calendar fields discard is still on the object.
+WriteLn (UtcAt (1234567890.75).Epoch);
+```
+
+```console
+2009-2-13
+23:31:30
+2009-02-13 23:31:30
+1.23456789075E9
 ```
 
 ---
@@ -1363,6 +1434,81 @@ See [`InitCrt`](#initcrt).
 
 ---
 
+## DateTime
+
+*class* — unit `time`
+
+**Function**
+
+A broken-down moment, as the host's calendar reads it.
+
+**Declaration**
+
+```algol24
+class DateTime;
+var
+    Year      : Integer;
+    Month     : Integer;
+    Day       : Integer;
+    Hour      : Integer;
+    Minute    : Integer;
+    Second    : Integer;
+    DayOfWeek : Integer;
+    Epoch     : Double;
+
+function Text () : String;
+```
+
+**Remarks**
+
+Answered by [`Now`](#now) and [`At`](#at) rather than constructed by a caller,
+and a snapshot rather than a live reading: a value held on to stays at the
+instant it came from.
+
+`Month` runs 1 to 12 and `Day` 1 to 31, where C's `struct tm` counts months
+from zero — the seam is inside the unit and the field reads the way a date is
+written. `DayOfWeek` is 0 for Sunday. `Second` may read 60 in a leap second.
+
+`Epoch` is the Double the moment came from, so the fraction of a second the
+other fields discard is still reachable, and two moments can be compared or
+subtracted without going through the calendar.
+
+`Text` renders `YYYY-MM-DD HH:MM:SS`, zero-padded — ISO 8601's extended format
+with a space rather than a `T`. The zone is deliberately not shown: a
+`DateTime` does not know whether `Now` or `UtcNow` made it, and a string
+claiming a zone it cannot verify would be worse than one that says nothing.
+
+This replaces Turbo Pascal's `GetDate` and `GetTime`, which wrote into four
+`var` parameters each. This language has none to write into — a scalar argument
+is unchanged on return — so a returned object is the answer, as
+[`ArcCoords`](#arccoords) already is.
+
+**See also**
+
+[`Now`](#now), [`At`](#at), [`UtcOffset`](#utcoffset)
+
+**Example**
+
+```algol24
+uses time;
+
+var M := UtcAt (0.0);
+
+WriteLn (M.Text ());
+WriteLn (M.Year, ' ', M.Month, ' ', M.Day, ' ', M.DayOfWeek);
+
+// 1 January 1970 was a Thursday, and DayOfWeek counts Sunday as zero.
+WriteLn (M.DayOfWeek = 4);
+```
+
+```console
+1970-01-01 00:00:00
+1970 1 1 4
+true
+```
+
+---
+
 ## Delay
 
 *procedure* — unit `crt` and `graph`
@@ -1617,6 +1763,66 @@ written: true true true false
 deleted: true true false false
 inserted:false true true false
 cursor at 1, 1
+```
+
+---
+
+## DiskFree
+
+*functions* — unit `dos`
+
+**Function**
+
+Return the free and total bytes on the filesystem holding a path.
+
+**Declaration**
+
+```algol24
+function DiskFree (Path : String) : Integer;
+function DiskSize (Path : String) : Integer;
+```
+
+**Remarks**
+
+`DiskFree` answers what an unprivileged program may actually write, excluding
+the blocks a filesystem reserves — a program asking "may I write this" is not
+asking about those. `DiskSize` counts every block, reserved ones included,
+which is what a size is. So `DiskFree` is never more than `DiskSize` and is
+usually less by more than what is stored.
+
+⚠️ **Neither takes a drive number.** Turbo Pascal's `DiskFree` took one, which
+has no meaning here, and answered a `LongInt`, so it went wrong above 2 GB. A
+path is the portable question, and an Algol-24 Integer is unbounded — so these
+answer the true figure for a filesystem of any size.
+
+`Path` may name any file or directory on the filesystem, not only its root;
+`DiskFree ('.')` asks about the one the program is running on.
+
+Raises `DiskFree: cannot read '<path>'.` or `DiskSize: cannot read '<path>'.`
+where the filesystem could not be asked, which a path that is not there
+provokes.
+
+**See also**
+
+[`FileSize`](#readall), [`Exec`](#exec)
+
+**Example**
+
+```algol24
+uses dos;
+
+// The figures are the host's, so only what is always true is printed.
+WriteLn (DiskSize ('.') > 0);
+WriteLn (DiskFree ('.') <= DiskSize ('.'));
+
+// Any path on the filesystem answers for the whole of it.
+WriteLn (DiskSize ('.') = DiskSize ('./dos.a24'));
+```
+
+```console
+true
+true
+true
 ```
 
 ---
@@ -1991,6 +2197,142 @@ something wants it.
 
 See [`ReadEvent`](#readevent).
 
+
+---
+
+## Environment
+
+*functions* — unit `dos`
+
+**Function**
+
+Return every environment entry as a List, and split one into its name and
+value.
+
+**Declaration**
+
+```algol24
+function Environment () : List;
+function EnvName (Entry : String) : String;
+function EnvValue (Entry : String) : String;
+```
+
+**Remarks**
+
+One List rather than Turbo Pascal's `EnvCount` and `EnvStr` pair, which were
+two members expressing one sequence because DOS Pascal had no list type. This
+language has one.
+
+The entries keep the host's own `NAME=VALUE` form. `EnvName` and `EnvValue`
+split on the **first** `=` only, a value being allowed to contain more —
+`EnvValue ('ARGS=-c a=b')` is `-c a=b`. An entry with no `=` at all answers the
+whole of it as the name and the empty string as the value.
+
+The order is the host's and means nothing. A name may in principle appear
+twice, in which case [`GetEnv`](#getenv) answers whichever the host prefers.
+Reading one variable by name goes through `GetEnv` and not through here.
+
+None of the three raises; an environment of no entries answers an empty List.
+
+**See also**
+
+[`GetEnv`](#getenv), [`Split`](#split)
+
+**Example**
+
+```algol24
+uses dos;
+
+// The NAME=VALUE form, split on the first equals only.
+WriteLn (EnvName ('TERM=xterm-256color'));
+WriteLn (EnvValue ('TERM=xterm-256color'));
+WriteLn (EnvValue ('ARGS=-c a=b'));
+
+// Every host sets PATH, whatever it holds.
+var Found := False;
+
+for var Entry in Environment () do
+    if EnvName (Str (Entry)) = 'PATH' then Found := True;
+
+WriteLn (Found);
+```
+
+```console
+TERM
+xterm-256color
+-c a=b
+true
+```
+
+---
+
+## Exec
+
+*function* — unit `dos`
+
+**Function**
+
+Runs a program with the given arguments and returns its exit status.
+
+**Declaration**
+
+```algol24
+function Exec (Path : String, Args : List) : Integer;
+```
+
+**Remarks**
+
+⚠️ **No shell, and the argument list is why.** The arguments reach the program
+as a vector, so one containing a space, a quote, a semicolon or a newline
+arrives as a single argument and cannot become syntax. Turbo Pascal's `Exec`
+took a command *line*, which is where that hazard lives, and C's `system` would
+reintroduce it.
+
+Because there is no shell there is also **no `PATH` search, no globbing and no
+redirection**. `Path` must name the program — `'/bin/echo'`, not `'echo'`. That
+is the cost of the safety, and the right side of the trade for a library.
+
+`Args` holds the arguments after the program's own name; the program sees
+`Path` as its `argv[0]`, as it expects. The environment is inherited, and the
+call waits for the program to finish.
+
+The status is the program's own exit code, or 128 plus the signal number where
+it was killed — the shell's convention, and unambiguous because an exit code
+cannot exceed 255. A program that could not be *started* raises instead, since
+a command that never ran is not a command that failed.
+
+Raises `Exec: cannot run '<path>'.` where the program could not be started, and
+`Exec: too many arguments.` beyond the 1023 the vector holds.
+
+**See also**
+
+[`Environment`](#environment), [`DiskFree`](#diskfree)
+
+**Example**
+
+```algol24
+uses dos;
+
+// No shell: the arguments reach the program as a vector.
+var Args := List ();
+
+Args.Add ('one');
+Args.Add ('two words');
+Args.Add ('semi;colon');
+
+WriteLn (Exec ('/bin/echo', Args));
+
+// The exit status is the program's own.
+WriteLn (Exec ('/usr/bin/true', List ()));
+WriteLn (Exec ('/usr/bin/false', List ()));
+```
+
+```console
+one two words semi;colon
+0
+0
+1
+```
 
 ---
 
@@ -2704,6 +3046,65 @@ has gone.
 **Example**
 
 See [`SetColor`](#setcolor), which sets it and reads it back.
+
+---
+
+## GetEnv
+
+*functions* — unit `dos`
+
+**Function**
+
+Return an environment variable's value, and whether it is set at all.
+
+**Declaration**
+
+```algol24
+function GetEnv (Name : String) : String;
+function HasEnv (Name : String) : Boolean;
+```
+
+**Remarks**
+
+`GetEnv` answers `''` for a variable that is not set rather than raising, which
+is what makes `GetEnv ('EDITOR')` usable without asking first.
+
+`HasEnv` exists because that conflates two things: a variable set to the empty
+string and a variable not set at all both read as `''`, and they mean different
+things — `ALG_SOUND=` is a request this library would honour, and no
+`ALG_SOUND` at all is not.
+
+The value is **copied** out of the host's environment rather than pointed at.
+No foreign function in this library answers a pointer, because a String
+returned from C borrows the bytes and a later call could corrupt it — see
+`DEFECTS.md` H-2 — so this asks the length, sizes a buffer to it, and reads it
+back.
+
+Neither raises.
+
+**See also**
+
+[`Environment`](#environment), [`Exec`](#exec)
+
+**Example**
+
+```algol24
+uses dos;
+
+// A name no host sets, so the answer is the same everywhere -- and the two
+// questions differ: an unset variable reads as empty, and HasEnv says why.
+WriteLn ('[' + GetEnv ('ALG_NO_SUCH_VARIABLE') + ']');
+WriteLn (HasEnv ('ALG_NO_SUCH_VARIABLE'));
+
+// PATH is set on every host, whatever it holds.
+WriteLn (HasEnv ('PATH'));
+```
+
+```console
+[]
+false
+true
+```
 
 ---
 
@@ -3992,6 +4393,55 @@ WriteLn (Int (1.0E300));
 
 ---
 
+## IsDaylightSaving
+
+*function* — unit `time`
+
+**Function**
+
+Returns whether the host says daylight saving was in force at a given moment.
+
+**Declaration**
+
+```algol24
+function IsDaylightSaving (Epoch : Double) : Boolean;
+```
+
+**Remarks**
+
+Takes a moment rather than answering a constant, for the same reason
+[`UtcOffset`](#utcoffset) does: whether saving applies is a fact about a date.
+
+Never raises. A zone that does not observe daylight saving and a zone that
+could not be read both answer False — the host can report "unknown", and that
+is folded into False rather than invented into a third state the unit would
+have to carry.
+
+**See also**
+
+[`UtcOffset`](#utcoffset), [`At`](#at)
+
+**Example**
+
+```algol24
+uses time;
+
+// Which answer is right depends on the host's zone, so what is printed is the
+// thing that is true everywhere: it is a Boolean for any moment.
+var Winter := IsDaylightSaving (1704067200.0);
+var Summer := IsDaylightSaving (1719792000.0);
+
+WriteLn (Winter = True or Winter = False);
+WriteLn (Summer = True or Summer = False);
+```
+
+```console
+true
+true
+```
+
+---
+
 ## IsInfinite
 
 *function* — unit `math`
@@ -4983,6 +5433,68 @@ touches the background.
 **Example**
 
 See [`HighVideo`](#highvideo).
+
+---
+
+## Now
+
+*functions* — unit `time`
+
+**Function**
+
+Return the moment now, as a [`DateTime`](#datetime).
+
+**Declaration**
+
+```algol24
+function Now () : DateTime;
+function UtcNow () : DateTime;
+```
+
+**Remarks**
+
+`Now` reads the clock in the host's own time zone and `UtcNow` without a zone.
+Both are [`At` and `UtcAt`](#at) applied to `clock ()`.
+
+One call answering one object, where Turbo Pascal's `Dos` unit had `GetDate`
+and `GetTime`. That split was an artifact of two separate DOS interrupts, and
+asking twice has a real hazard: the fields could straddle a tick, answering the
+hour from before midnight and the minute from after. The seven fields here come
+from one reading.
+
+`SetDate` and `SetTime` have no counterpart in this library. Setting the host
+clock needs root on every system this runs on, so the honest remark for them
+would be that they always fail.
+
+Raises `time: the host could not break down that moment.`, which no working
+host provokes.
+
+**See also**
+
+[`At`](#at), [`DateTime`](#datetime), [`UtcOffset`](#utcoffset)
+
+**Example**
+
+```algol24
+uses time;
+
+// Now cannot print a fixed answer, so this shows its shape instead.
+var M := Now ();
+
+WriteLn (Length (M.Text ()));
+WriteLn (M.Year >= 2026);
+WriteLn (M.Month >= 1 and M.Month <= 12);
+
+// Both readings are one instant, so their Epoch is identical.
+WriteLn (Now ().Epoch <= UtcNow ().Epoch);
+```
+
+```console
+19
+true
+true
+true
+```
 
 ---
 
@@ -8557,6 +9069,65 @@ HELLO
 MIXED CASE 123
 CAFé
 TRIMMED FIRST
+```
+
+---
+
+## UtcOffset
+
+*function* — unit `time`
+
+**Function**
+
+Returns the host's offset from UTC in seconds at a given moment.
+
+**Declaration**
+
+```algol24
+function UtcOffset (Epoch : Double) : Integer;
+```
+
+**Remarks**
+
+Positive east of Greenwich.
+
+⚠️ **It takes a moment because the offset is not a constant.** A zone
+observing daylight saving has two, and which applies depends on the date.
+Asking at the wrong instant is the usual way zone arithmetic goes wrong, so
+there is no argument-free form to reach for.
+
+This is the one thing in the unit a program could not work out for itself. Leap
+years are a closed rule and the calendar arithmetic could be hand-rolled; the
+zone lives in the host's database and changes by legislation.
+
+Never raises. A host on UTC and a host whose zone could not be read both answer
+zero.
+
+**See also**
+
+[`IsDaylightSaving`](#isdaylightsaving), [`At`](#at), [`Now`](#now)
+
+**Example**
+
+```algol24
+uses time;
+
+// The offset is a fact about the host, so only what is true everywhere is
+// printed: every real zone is a whole number of minutes from UTC, and none
+// is further than fourteen hours.
+WriteLn (UtcOffset (0.0) mod 60);
+WriteLn (UtcOffset (0.0) >= 0 - 50400 and UtcOffset (0.0) <= 50400);
+
+// And a local reading is the UTC reading of the shifted instant.
+var E := 1234567890.0;
+
+WriteLn (At (E).Text () = UtcAt (E + UtcOffset (E)).Text ());
+```
+
+```console
+0
+true
+true
 ```
 
 ---

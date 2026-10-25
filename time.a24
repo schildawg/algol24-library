@@ -1,0 +1,355 @@
+/// The calendar, which the language stops short of.
+///
+/// `clock ()` answers the seconds since the epoch as a Double and nothing
+/// turns that into a year. The arithmetic could be hand-rolled, leap years
+/// being a closed rule, but the time zone could not: it lives in the host's
+/// database and changes by legislation. That is what this unit is for.
+///
+/// One `Now` answering one object, where Turbo Pascal's `Dos` unit had
+/// `GetDate` and `GetTime` writing into four `var` parameters each. The split
+/// was an artifact of two separate DOS interrupts rather than a distinction
+/// worth keeping, and this language has no `var` parameters to write into --
+/// a scalar argument is unchanged on return. A returned object is the house
+/// answer to that, as `GetArcCoords` and `GetFillSettings` already are.
+///
+/// `SetDate` and `SetTime` are deliberately absent. Setting the host clock
+/// needs root on every system this runs on, so the honest doc comment for
+/// them would read "raises unless you are root".
+unit time;
+
+/// A broken-down moment, as the host's calendar reads it.
+///
+/// Answered by `Now` and `UtcNow` rather than constructed by a caller, and a
+/// snapshot rather than a live reading: a value held on to stays at the
+/// instant it came from.
+///
+/// `Month` runs 1 to 12 and `Day` 1 to 31, where C's `struct tm` counts
+/// months from zero -- the seam is in the C and the field reads the way a
+/// date is written. `DayOfWeek` is 0 for Sunday, which is Turbo Pascal's
+/// convention and C's alike. `Second` may read 60 in a leap second.
+///
+/// `Epoch` is the Double the moment was taken from, so the fraction of a
+/// second the other fields discard is still reachable, and so two moments can
+/// be compared or subtracted without going through the calendar.
+class DateTime;
+var
+    Year      : Integer;
+    Month     : Integer;
+    Day       : Integer;
+    Hour      : Integer;
+    Minute    : Integer;
+    Second    : Integer;
+    DayOfWeek : Integer;
+    Epoch     : Double;
+
+begin
+    constructor Init (Year : Integer, Month : Integer, Day : Integer,
+                      Hour : Integer, Minute : Integer, Second : Integer,
+                      DayOfWeek : Integer, Epoch : Double);
+    begin
+        // The parameters shadow the fields, as ArcCoords' do, so they can be
+        // named for what they are and reached through `this`.
+        this.Year      := Year;
+        this.Month     := Month;
+        this.Day       := Day;
+        this.Hour      := Hour;
+        this.Minute    := Minute;
+        this.Second    := Second;
+        this.DayOfWeek := DayOfWeek;
+        this.Epoch     := Epoch;
+    end
+
+    /// The moment as `YYYY-MM-DD HH:MM:SS`, zero-padded throughout.
+    ///
+    /// ISO 8601's date and time with a space between them rather than a `T`,
+    /// which is what the standard's own "extended format" permits and what
+    /// reads better in a log. The zone is not shown: a `DateTime` does not
+    /// know which of `Now` and `UtcNow` made it, and a string claiming a zone
+    /// it cannot verify would be worse than one that says nothing.
+    ///
+    /// # Examples
+    /// `A DateTime Renders As ISO 8601`
+    function Text () : String;
+    begin
+        Exit Pad (Year, 4) + '-' + Pad (Month, 2) + '-' + Pad (Day, 2) + ' '
+           + Pad (Hour, 2) + ':' + Pad (Minute, 2) + ':' + Pad (Second, 2);
+    end
+end
+
+/// N written right-aligned in Width digits, padded with zeros.
+///
+/// Private to this unit. A negative N is written with its sign and no padding
+/// rather than being truncated, which only a year before 1 AD could produce
+/// and which should look wrong rather than look plausible.
+private function Pad (N : Integer, Width : Integer) : String;
+begin
+    if N < 0 then Exit Str (N);
+
+    var Out := Str (N);
+
+    while Length (Out) < Width do Out := '0' + Out;
+
+    Exit Out;
+end
+
+/// Fills the seven calendar fields from an epoch, into a caller's buffer.
+///
+/// Private to this unit. Answers 1 on success and 0 where the host could not
+/// convert the time, which a value outside its representable range can
+/// provoke. The buffer holds seven int32 words in the order the DateTime
+/// constructor takes them, and the two have to agree.
+private function RawFields (Epoch : Double, Local : Integer, Into : Pointer,
+                            Max : Integer) : Integer;
+    external 'alg_libtime_fields' in 'libtimeffi.dylib';
+
+/// The host's offset from UTC in seconds at the given moment.
+///
+/// Private to this unit, and answered through `UtcOffset`.
+private function RawOffset (Epoch : Double) : Integer;
+    external 'alg_libtime_utc_offset' in 'libtimeffi.dylib';
+
+/// Whether the host says daylight saving is in force at the given moment.
+///
+/// Private to this unit, and answered through `IsDaylightSaving`.
+private function RawIsDst (Epoch : Double) : Integer;
+    external 'alg_libtime_is_dst' in 'libtimeffi.dylib';
+
+/// A DateTime for the given epoch, local or UTC.
+///
+/// Private to this unit. The seven words come back in one call rather than
+/// seven, so the fields cannot straddle a tick: asking the host seven times
+/// could answer 23:59:59 for the hour and 00 for the minute.
+private function Moment (Epoch : Double, Local : Integer) : DateTime;
+begin
+    var B := Buffer (28);
+
+    if RawFields (Epoch, Local, B.Address, 28) = 0 then
+        raise 'time: the host could not break down that moment.';
+
+    Exit DateTime (B.GetInt (0),  B.GetInt (4),  B.GetInt (8),  B.GetInt (12),
+                   B.GetInt (16), B.GetInt (20), B.GetInt (24), Epoch);
+end
+
+// ------------------------------------------------------------------- reading
+
+/// The moment now, in the host's own time zone.
+///
+/// # Raises
+/// `time: the host could not break down that moment.` where the host's
+/// calendar cannot represent the clock's answer, which no working host does.
+///
+/// # Examples
+/// `Now Answers A Moment In A Plausible Range`
+function Now () : DateTime;
+begin
+    Exit Moment (clock (), 1);
+end
+
+/// The moment now, in UTC.
+///
+/// The same instant `Now` answers, read without the zone. Its `Epoch` is
+/// identical; only the seven calendar fields differ, and only where the host
+/// is not itself on UTC.
+///
+/// # Raises
+/// `time: the host could not break down that moment.`
+///
+/// # Examples
+/// `UtcNow And Now Describe One Instant`
+function UtcNow () : DateTime;
+begin
+    Exit Moment (clock (), 0);
+end
+
+/// The moment a given epoch names, in the host's own time zone.
+///
+/// What makes `clock ()` usable: the language hands out seconds since the
+/// epoch and this is what reads them as a date. A moment recorded earlier,
+/// a file's timestamp, or an instant arrived at by arithmetic all go through
+/// here.
+///
+/// # Raises
+/// `time: the host could not break down that moment.` for an epoch outside
+/// the host's range, which a value far beyond the year 9999 will reach.
+///
+/// # Examples
+/// `At Reads An Epoch As A Date`
+function At (Epoch : Double) : DateTime;
+begin
+    Exit Moment (Epoch, 1);
+end
+
+/// The moment a given epoch names, in UTC.
+///
+/// # Raises
+/// `time: the host could not break down that moment.`
+///
+/// # Examples
+/// `At Reads An Epoch As A Date`
+function UtcAt (Epoch : Double) : DateTime;
+begin
+    Exit Moment (Epoch, 0);
+end
+
+// -------------------------------------------------------------------- zone
+
+/// The host's offset from UTC in seconds at the given moment, positive east
+/// of Greenwich.
+///
+/// Takes a moment rather than answering a constant, because the offset is not
+/// one: a zone observing daylight saving has two, and which applies depends
+/// on the date. Asking at the wrong instant is the usual way this goes wrong.
+///
+/// # Raises
+/// Nothing. A host on UTC, and a host whose zone could not be read, both
+/// answer zero.
+///
+/// # Examples
+/// `UtcOffset Agrees With The Difference Between The Two Readings`
+function UtcOffset (Epoch : Double) : Integer;
+begin
+    Exit RawOffset (Epoch);
+end
+
+/// Whether the host says daylight saving is in force at the given moment.
+///
+/// # Raises
+/// Nothing. A zone that does not observe it, and a zone that could not be
+/// read, both answer False.
+///
+/// # Examples
+/// `IsDaylightSaving Answers A Boolean For Any Moment`
+function IsDaylightSaving (Epoch : Double) : Boolean;
+begin
+    Exit RawIsDst (Epoch) = 1;
+end
+
+// ---------------------------------------------------------------------- tests
+
+/// The epoch itself, which every host can represent and which is the one
+/// moment with a known answer. Read as UTC so no zone enters into it.
+test 'UtcAt Reads The Epoch Itself Exactly';
+begin
+    var M := UtcAt (0.0);
+
+    AssertEqual (1970, M.Year);
+    AssertEqual (1, M.Month);
+    AssertEqual (1, M.Day);
+    AssertEqual (0, M.Hour);
+    AssertEqual (0, M.Minute);
+    AssertEqual (0, M.Second);
+    AssertEqual (4, M.DayOfWeek);        // 1 January 1970 was a Thursday
+end
+
+/// A known instant well away from the epoch, so an off-by-one in the month or
+/// the year base would show. 1234567890 is 13 February 2009, 23:31:30 UTC --
+/// a timestamp famous enough to be checkable by hand.
+test 'At Reads An Epoch As A Date';
+begin
+    var M := UtcAt (1234567890.0);
+
+    AssertEqual (2009, M.Year);
+    AssertEqual (2, M.Month);
+    AssertEqual (13, M.Day);
+    AssertEqual (23, M.Hour);
+    AssertEqual (31, M.Minute);
+    AssertEqual (30, M.Second);
+    AssertEqual (5, M.DayOfWeek);        // a Friday
+end
+
+/// The month must be 1-based and the year not 1900-based, which is where the
+/// C seam is. A leap day is the sharpest case for the first.
+test 'Months Count From One And Years Are Whole';
+begin
+    var Leap := UtcAt (1709164800.0);    // 29 February 2024, 00:00:00 UTC
+
+    AssertEqual (2024, Leap.Year);
+    AssertEqual (2, Leap.Month);
+    AssertEqual (29, Leap.Day);
+
+    var Dec := UtcAt (1735689599.0);     // 31 December 2024, 23:59:59 UTC
+
+    AssertEqual (12, Dec.Month);
+    AssertEqual (31, Dec.Day);
+    AssertEqual (23, Dec.Hour);
+    AssertEqual (59, Dec.Second);
+end
+
+test 'A DateTime Renders As ISO 8601';
+begin
+    AssertEqual ('1970-01-01 00:00:00', UtcAt (0.0).Text ());
+    AssertEqual ('2009-02-13 23:31:30', UtcAt (1234567890.0).Text ());
+    AssertEqual ('2024-02-29 00:00:00', UtcAt (1709164800.0).Text ());
+end
+
+/// The fraction of a second the calendar fields discard is still reachable,
+/// which is why Epoch is a field.
+test 'A Moment Keeps The Epoch It Came From';
+begin
+    var M := UtcAt (1234567890.75);
+
+    AssertEqual (1234567890.75, M.Epoch);
+    AssertEqual (30, M.Second);
+end
+
+/// Now cannot be asserted exactly, so it is asserted to be a date rather than
+/// a wrong number. The lower bound is when this unit was written.
+test 'Now Answers A Moment In A Plausible Range';
+begin
+    var M := Now ();
+
+    AssertTrue (M.Year >= 2026);
+    AssertTrue (M.Month >= 1 and M.Month <= 12);
+    AssertTrue (M.Day >= 1 and M.Day <= 31);
+    AssertTrue (M.Hour >= 0 and M.Hour <= 23);
+    AssertTrue (M.Minute >= 0 and M.Minute <= 59);
+    AssertTrue (M.Second >= 0 and M.Second <= 60);
+    AssertTrue (M.DayOfWeek >= 0 and M.DayOfWeek <= 6);
+end
+
+/// Both readings are of one instant, so their Epoch agrees exactly however
+/// far apart their calendar fields are.
+test 'UtcNow And Now Describe One Instant';
+begin
+    var L := At (1234567890.0);
+    var U := UtcAt (1234567890.0);
+
+    AssertEqual (L.Epoch, U.Epoch);
+
+    // A local reading is the UTC reading of the instant shifted by the zone's
+    // offset, which is what "local" means. Asserted as an identity rather than
+    // by arithmetic on the fields, so it holds in every zone rather than only
+    // in one whose date happens to agree with UTC's.
+    var Shifted := UtcAt (1234567890.0 + UtcOffset (1234567890.0));
+
+    AssertEqual (L.Year, Shifted.Year);
+    AssertEqual (L.Month, Shifted.Month);
+    AssertEqual (L.Day, Shifted.Day);
+    AssertEqual (L.Hour, Shifted.Hour);
+    AssertEqual (L.Minute, Shifted.Minute);
+    AssertEqual (L.Second, Shifted.Second);
+    AssertEqual (L.DayOfWeek, Shifted.DayOfWeek);
+end
+
+/// The offset is a fact about an instant, not a constant, so it is asserted
+/// as a range rather than a value -- a test naming one zone would fail
+/// everywhere else.
+test 'UtcOffset Agrees With The Difference Between The Two Readings';
+begin
+    var Offset := UtcOffset (0.0);
+
+    // No zone on earth is further than 14 hours from UTC.
+    AssertTrue (Offset >= 0 - 50400 and Offset <= 50400);
+
+    // And it is a whole number of minutes, every real zone being one.
+    AssertEqual (0, Offset mod 60);
+end
+
+test 'IsDaylightSaving Answers A Boolean For Any Moment';
+begin
+    var Winter := IsDaylightSaving (1704067200.0);   // 1 January 2024 UTC
+    var Summer := IsDaylightSaving (1719792000.0);   // 1 July 2024 UTC
+
+    AssertTrue (Winter = True or Winter = False);
+    AssertTrue (Summer = True or Summer = False);
+end
