@@ -1,8 +1,8 @@
 # Plan: the `strings` unit
 
 **Status:** **built**, 2026-10-24. `strings.a24` carries `Trim`, `Upper`,
-`Lower`, `Repeat`, `Split` and `Join` — the four named plus the case pair — with
-27 tests and six `REFERENCE.md` entries. Written against `algc 0.1.5`, which
+`Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert` and `Replace` — with 47
+tests and nine `REFERENCE.md` entries. Written against `algc 0.1.5`, which
 brought the extension functions `PROPOSAL-EXTENSION-FUNCTIONS.md` asked for.
 
 Everything measured below was measured by running the language, not by reading
@@ -12,8 +12,9 @@ were decided, and the record of why is worth having.
 ### What shipped, against what this planned
 
 - **The name is `strings`**, as argued below.
-- **Six methods, not four.** `Trim`, `Repeat`, `Split` and `Join` were named;
-  `Upper` and `Lower` came with the ASCII decision below.
+- **Nine methods, not four.** `Trim`, `Repeat`, `Split` and `Join` were named;
+  `Upper` and `Lower` came with the ASCII decision below; `Delete`, `Insert`
+  and `Replace` were added afterwards, on the finding below.
 - **No C**, as planned, so the unit is portable as written.
 - **ASCII-only case**, with everything else unchanged — the recommendation
   below, taken. It is asserted and not merely documented: a test checks
@@ -27,12 +28,44 @@ were decided, and the record of why is worth having.
   consumer importing `strings` beside `graph` prints only its own output.
 - **IndexOf and Substring were not written**, the core's `Pos` and `Copy`
   already answering them.
+- **`Concat` with varargs was considered and refused.** The argument for it is
+  that chained `+` builds intermediates and goes quadratic. Measured, it does
+  not: `+` is linear through 160,000 appends (0.31 s, 0.60 s, 1.19 s at 40k,
+  80k and 160k) and marginally faster than `Buffer` at every size. And varargs
+  could not have helped regardless — a varargs call fixes its count where it is
+  written, so it never serves a loop, which is the only place accumulation cost
+  could appear. With `+` for a few, `Join (L, '')` for a collection, `Buffer`
+  for incremental and `Repeat` for one piece repeated, a fifth spelling adds no
+  capability.
+- **`Delete`, `Insert` and `Replace` were added**, and `Delete`'s case was
+  stronger than it looked. `Copy` is asymmetric at the edges — an over-long
+  *count* clamps, but a *start* past the end raises:
+
+  ```console
+  Copy ('abcdef', 3, 99)  ->  def
+  Copy ('abcdef', 6, 3)   ->  ''
+  Copy ('abcdef', 7, 3)   ->  Copy failed: Start 7 out of range 0..6.
+  ```
+
+  So the one-liner a reader would write instead,
+  `Copy (S, 0, From) + Copy (S, From + Count, Length (S))`, raises on exactly
+  the common "cut to the end with a generous count" call. That is a gap in the
+  core rather than a re-spelling of it, which is the test this unit applies.
+  `Insert` is `Delete`'s inverse and total in the same way; its argument order
+  departs from Turbo Pascal's because an extension's receiver must come first.
+  `Replace` changes every occurrence and never rescans its own replacement.
 
 ### Still open
 
-- **Retiring `Fill` ×3** from `examples/ide.a24`, `examples/ide-crt.a24` and
-  `examples/surfaces.a24` in favour of `Repeat`. Deliberately a separate pass,
-  for the reason given under the second decision below.
+- ~~Retiring `Fill` ×3~~ — done. All three copies are gone and the twenty call
+  sites say `Repeat`. The substitution was proved rather than assumed:
+  `Repeat` agrees with the old `Fill` for every character the examples pass at
+  every count from 0 to 40, and differs only on a negative count, where `Fill`
+  quietly answered the empty string and `Repeat` raises. That difference was
+  reachable — both IDEs derive a width from `TextCols ()`, which under `crt` is
+  the live terminal, and a terminal under 26 columns made the title-bar count
+  negative. Two counts in each IDE are now clamped, which says what to draw
+  instead of leaving it to the routine.
 - **Whether `graph`, `crt` and `sound` adopt it internally**, which buys their
   consumers nothing. Unchanged recommendation: decide per unit, later.
 - **The inside of `sound`'s `NumberAt` and `DigitsAt`**, which a general digit

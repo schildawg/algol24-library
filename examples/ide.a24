@@ -8,23 +8,13 @@
 
 uses graph;
 uses math;
-
-/// N copies of Ch, joined.
-function Fill (Ch : Char, N : Integer) : String;
-begin
-    var B := Buffer ();
-
-    for var I := 0; I < N; I := I + 1 do
-        B.Append (Ch);
-
-    Exit B.Text;
-end
+uses strings;
 
 /// Frames a window's own cells and titles it.
 procedure Frame (W, Title : String);
 begin
     W.GotoXY (1, 1);
-    W.Write ('╔' + Fill ('═', W.Cols - 2) + '╗');
+    W.Write ('╔' + Repeat ('═', W.Cols - 2) + '╗');
 
     for var R := 2; R < W.Rows; R := R + 1 do
     begin
@@ -35,7 +25,7 @@ begin
     end
 
     W.GotoXY (1, W.Rows);
-    W.Write ('╚' + Fill ('═', W.Cols - 2) + '╝');
+    W.Write ('╚' + Repeat ('═', W.Cols - 2) + '╝');
 
     W.GotoXY (3, 1);
     W.TextColor (Yellow);
@@ -77,7 +67,7 @@ begin
     // ------------------------------------------------------- the menu bar --
     TextBackground (LightGray);
     GotoXY (1, 1);
-    Write (Fill (' ', Cols - 1));
+    Write (Repeat (' ', Cols - 1));
     GotoXY (2, 1);
     TextColor (Red);
     Write ('≡');
@@ -94,6 +84,13 @@ begin
 
     var Title := ' NONAME00.CPP ';
     var Inner := Cols - 12 - Length (Title);   // between '╔═[■]' and '1═[↕]═╗'
+
+    // Cols is the live terminal, so a window narrowed below the fixed ends
+    // makes this negative. Repeat refuses a negative count where the hand-
+    // rolled Fill quietly answered nothing, so the clamp says what to draw
+    // rather than leaving it to the routine.
+    if Inner < 0 then Inner := 0;
+
     var Side  := Inner div 2;
 
     GotoXY (1, 2);
@@ -101,7 +98,7 @@ begin
     TextColor (LightGreen);
     Write ('■');
     TextColor (White);
-    Write (']' + Fill ('═', Side) + Title + Fill ('═', Inner - Side) + '1═[');
+    Write (']' + Repeat ('═', Side) + Title + Repeat ('═', Inner - Side) + '1═[');
     TextColor (LightGreen);
     Write ('↕');
     TextColor (White);
@@ -124,12 +121,14 @@ begin
 
     var HBar := Cols - 17;                     // between the fixed ends
 
+    if HBar < 0 then HBar := 0;
+
     GotoXY (1, Bottom);
-    Write ('╚═ 1:1 ' + Fill ('═', 4));
+    Write ('╚═ 1:1 ' + Repeat ('═', 4));
     TextColor (Cyan);
-    Write ('◄' + Fill ('▒', HBar) + '►');
+    Write ('◄' + Repeat ('▒', HBar) + '►');
     TextColor (White);
-    Write (Fill ('═', 2) + '╝');
+    Write (Repeat ('═', 2) + '╝');
 
     // The editing cursor, waiting at the top of the empty file -- blinking,
     // which is the whole reason it reads as a cursor and not a brick.
@@ -305,7 +304,7 @@ begin
     // ----------------------------------------------------- the status line --
     TextBackground (LightGray);
     GotoXY (1, Rows);
-    Write (Fill (' ', Cols - 1));
+    Write (Repeat (' ', Cols - 1));
     GotoXY (2, Rows);
 
     for var Pair in [['F1', 'Help'], ['F2', 'Save'], ['F3', 'Open'],

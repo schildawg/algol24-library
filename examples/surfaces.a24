@@ -8,23 +8,13 @@
 
 uses graph;
 uses math;
-
-/// N copies of Ch, joined.
-function Fill (Ch : Char, N : Integer) : String;
-begin
-    var B := Buffer ();
-
-    for var I := 0; I < N; I := I + 1 do
-        B.Append (Ch);
-
-    Exit B.Text;
-end
+uses strings;
 
 /// Frames a window's own cells and titles it.
 procedure Frame (W, Title : String);
 begin
     W.GotoXY (1, 1);
-    W.Write ('╔' + Fill ('═', W.Cols - 2) + '╗');
+    W.Write ('╔' + Repeat ('═', W.Cols - 2) + '╗');
 
     for var R := 2; R < W.Rows; R := R + 1 do
     begin
@@ -35,7 +25,7 @@ begin
     end
 
     W.GotoXY (1, W.Rows);
-    W.Write ('╚' + Fill ('═', W.Cols - 2) + '╝');
+    W.Write ('╚' + Repeat ('═', W.Cols - 2) + '╝');
 
     W.GotoXY (3, 1);
     W.Write (' ' + Title + ' ');

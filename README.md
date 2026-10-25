@@ -30,7 +30,7 @@ built.
 | `crt` | the same text mode on a terminal, composited in memory and painted by difference |
 | `sound` | tones, BASIC's `Play`, and sampled sounds mixed sixteen at a time |
 | `file` | whole-file reads and writes, and the questions to ask about a path |
-| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split` and `Join`, each callable either as a function or on its first argument |
+| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert` and `Replace`, each callable either as a function or on its first argument |
 | `testing` | `AssertNear`, for results whose exact bits are not guaranteed |
 
 `REFERENCE.md` documents every routine and constant, after the pattern of Turbo
@@ -80,8 +80,8 @@ its glyph files, the keys, the figures and their fills, the arc convention, the
 stacked surfaces, a piano that plays Ode to Joy and a jukebox driven by the
 mouse. Two are acceptance pieces: `examples/ide.a24` rebuilds the Turbo C++
 screen out of `graph`'s vocabulary, and `examples/ide-crt.a24` is the same
-screen on a terminal with three lines changed. `examples/README.md` catalogues
-them.
+screen on a terminal, sharing the celled half almost verbatim and dropping the
+two drawn panels, `crt` having no pixels. `examples/README.md` catalogues them.
 
 ## Turbo Pascal
 
