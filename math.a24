@@ -187,19 +187,19 @@ function ArcTan (X : Double) : Double; external 'atan';
 /// handles the rest. The implementation is in `mathffi.c` because libm's
 /// `trunc` returns a Double, and a foreign declaration must name a C function
 /// whose real signature is the one wanted.
-function TruncTo64 (X : Double) : Integer; external 'alg_trunc' in 'libmathffi.dylib';
+function TruncTo64 (X : Double) : Integer; external 'alg_trunc' in 'libmathffi.so';
 
 /// The integral mantissa of a finite Double, below 2^53 in magnitude.
 ///
 /// Private to this unit. With `FloatExponent` it gives the exact decomposition
 /// `X = Mantissa * 2^Exponent`, which is how a value too large for a 64-bit
 /// conversion is still answered exactly.
-function FloatMantissa (X : Double) : Integer; external 'alg_float_mantissa' in 'libmathffi.dylib';
+function FloatMantissa (X : Double) : Integer; external 'alg_float_mantissa' in 'libmathffi.so';
 
 /// The exponent matching `FloatMantissa`.
 ///
 /// Private to this unit.
-function FloatExponent (X : Double) : Integer; external 'alg_float_exponent' in 'libmathffi.dylib';
+function FloatExponent (X : Double) : Integer; external 'alg_float_exponent' in 'libmathffi.so';
 
 /// Two raised to N, as an exact Integer, for N of zero or more.
 ///

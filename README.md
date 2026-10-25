@@ -28,7 +28,7 @@ built.
 | `random` | a seedable generator, kept apart from `math` because it has state |
 | `graph` | a windowed screen: celled text on a grid, Windows and ViewPorts stacked around it, the drawing vocabulary, the keyboard and the mouse |
 | `crt` | the same text mode on a terminal, composited in memory and painted by difference |
-| `sound` | tones, BASIC's `Play`, and sampled sounds mixed sixteen at a time |
+| `sound` | tones, BASIC's `Play`, and WAV effects mixed sixteen at a time, over SDL2 |
 | `file` | whole-file reads and writes, and the questions to ask about a path |
 | `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert` and `Replace`, each callable either as a function or on its first argument |
 | `time` | the calendar, which `clock ()` stops short of — and the time zone, which a program cannot work out |
@@ -43,7 +43,7 @@ is what it printed.
 ## Building and testing
 
 Needs `algc` **0.1.5 or newer** on the path (`brew install algol24`), a C
-compiler, and SDL2 for `graph` (`brew install sdl2`). The version floor is
+compiler, and SDL2 for `graph` and `sound` (`brew install sdl2`). The version floor is
 `strings`, which uses extension functions that an earlier compiler cannot
 parse. The test run opens no windows and makes no noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`
 draws nowhere and `sound` computes every note and plays none of them.
@@ -52,7 +52,7 @@ draws nowhere and `sound` computes every note and plays none of them.
 ./test.sh                 # every unit, the reference examples, and the example app
 ./test.sh math.a24        # one unit
 
-./build.sh                # the library's own C -> lib*ffi.dylib
+./build.sh                # the library's own C -> lib*ffi.so (every platform)
 ./check-reference.py      # every REFERENCE.md example, against its stated output
 ```
 

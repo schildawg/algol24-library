@@ -100,19 +100,19 @@ end
 /// constructor takes them, and the two have to agree.
 private function RawFields (Epoch : Double, Local : Integer, Into : Pointer,
                             Max : Integer) : Integer;
-    external 'alg_libtime_fields' in 'libtimeffi.dylib';
+    external 'alg_libtime_fields' in 'libtimeffi.so';
 
 /// The host's offset from UTC in seconds at the given moment.
 ///
 /// Private to this unit, and answered through `UtcOffset`.
 private function RawOffset (Epoch : Double) : Integer;
-    external 'alg_libtime_utc_offset' in 'libtimeffi.dylib';
+    external 'alg_libtime_utc_offset' in 'libtimeffi.so';
 
 /// Whether the host says daylight saving is in force at the given moment.
 ///
 /// Private to this unit, and answered through `IsDaylightSaving`.
 private function RawIsDst (Epoch : Double) : Integer;
-    external 'alg_libtime_is_dst' in 'libtimeffi.dylib';
+    external 'alg_libtime_is_dst' in 'libtimeffi.so';
 
 /// A DateTime for the given epoch, local or UTC.
 ///

@@ -11,6 +11,239 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include <SDL.h>
+
+/* ------------------------------------------------- the strings SDL lends -- */
+
+/* NO FUNCTION HERE ANSWERS A POINTER, which is why these two exist.
+ *
+ * SDL_GetError and SDL_GetWindowTitle both hand back a `const char *` into
+ * SDL's own storage. A String returned from C BORROWS those bytes rather than
+ * copying them -- DEFECTS.md H-2 -- and SDL's error string in particular is a
+ * per-thread static that any later SDL call may overwrite. The unit used to
+ * declare both as answering a String directly, and two of its call sites held
+ * the result across further SDL calls, one of them across the whole of
+ * CloseGraph: a diagnostic that could be rubbish by the time it was raised,
+ * and at the worst possible moment.
+ *
+ * These copy into a caller-owned buffer and answer a length, the discipline
+ * fileffi.c and dosffi.c already keep.
+ */
+
+/* Copies the current SDL error into a caller's buffer and answers its length.
+ *
+ * Answers the length even when the buffer is too small to hold it, writing
+ * nothing in that case, so a caller can size and retry. The unit asks the
+ * length first.
+ */
+int64_t alg_graph_error (void *out, int64_t max)
+{
+    const char *msg = SDL_GetError ();
+
+    if (msg == NULL) return 0;
+
+    size_t len = strlen (msg);
+
+    if (out != NULL && max >= (int64_t) len)
+        memcpy (out, msg, len);
+
+    return (int64_t) len;
+}
+
+/* The same, for a window's title. Answers 0 for a null window rather than
+ * asking SDL about it. */
+int64_t alg_graph_window_title (void *win, void *out, int64_t max)
+{
+    if (win == NULL) return 0;
+
+    const char *title = SDL_GetWindowTitle ((SDL_Window *) win);
+
+    if (title == NULL) return 0;
+
+    size_t len = strlen (title);
+
+    if (out != NULL && max >= (int64_t) len)
+        memcpy (out, title, len);
+
+    return (int64_t) len;
+}
+
+/* ----------------------------------------------- SDL, through this file -- */
+
+/* The unit used to declare SDL's own entry points directly, naming
+ * /opt/homebrew/lib/libSDL2.dylib in each of twenty-four `external` clauses.
+ * That worked and cost two things.
+ *
+ * It was macOS-only, and not for a reason the library could fix by renaming
+ * its own shims: an `in` clause takes a string literal, and that literal was
+ * an absolute path to somebody else's library. SDL is /usr/lib/<triple>/
+ * libSDL2-2.0.so.0 on Debian, /usr/lib64/... on Fedora, elsewhere again on
+ * Alpine and MSYS2. Declaring SDL from C instead moves the question to build
+ * time, where `sdl2-config` already answers it.
+ *
+ * And every one of those declarations was unchecked. [FUN-014] says a
+ * mismatched foreign signature is undefined behavior -- DEFECTS.md H-1 -- so
+ * twenty-four hand-copied prototypes were twenty-four chances at a plausible
+ * wrong number. These wrappers are compiled against SDL's real headers, so a
+ * wrong signature is a compile error here instead.
+ *
+ * They are deliberately thin. Nothing below decides anything; the unit still
+ * says which window, which texture, what colour and when. DESIGN.md asks that
+ * this file carry transcoding and blitting rather than logic, and a
+ * passthrough carries neither.
+ *
+ * Pointers cross as void *, which is what the unit's `Pointer` already is.
+ * SDL_GetError and SDL_GetWindowTitle are NOT here -- they answer strings, and
+ * so are handled above by copying rather than lending.
+ */
+
+int64_t alg_sdl_init (int64_t flags)
+{
+    return SDL_Init ((Uint32) flags);
+}
+
+void *alg_sdl_create_window (const char *title, int64_t x, int64_t y,
+                             int64_t w, int64_t h, int64_t flags)
+{
+    return SDL_CreateWindow (title == NULL ? "" : title,
+                             (int) x, (int) y, (int) w, (int) h,
+                             (Uint32) flags);
+}
+
+void alg_sdl_destroy_window (void *win)
+{
+    if (win != NULL) SDL_DestroyWindow ((SDL_Window *) win);
+}
+
+void *alg_sdl_create_renderer (void *win, int64_t index, int64_t flags)
+{
+    if (win == NULL) return NULL;
+
+    return SDL_CreateRenderer ((SDL_Window *) win, (int) index, (Uint32) flags);
+}
+
+void alg_sdl_destroy_renderer (void *ren)
+{
+    if (ren != NULL) SDL_DestroyRenderer ((SDL_Renderer *) ren);
+}
+
+int64_t alg_sdl_set_render_draw_color (void *ren, int64_t r, int64_t g,
+                                       int64_t b, int64_t a)
+{
+    if (ren == NULL) return -1;
+
+    return SDL_SetRenderDrawColor ((SDL_Renderer *) ren, (Uint8) r, (Uint8) g,
+                                   (Uint8) b, (Uint8) a);
+}
+
+int64_t alg_sdl_render_clear (void *ren)
+{
+    if (ren == NULL) return -1;
+
+    return SDL_RenderClear ((SDL_Renderer *) ren);
+}
+
+void alg_sdl_render_present (void *ren)
+{
+    if (ren != NULL) SDL_RenderPresent ((SDL_Renderer *) ren);
+}
+
+/* SDL answers through two out-pointers, and the unit passes two one-int
+ * buffers because a Pointer there cannot be offset. */
+void alg_sdl_get_window_size (void *win, void *w, void *h)
+{
+    if (win == NULL) return;
+
+    SDL_GetWindowSize ((SDL_Window *) win, (int *) w, (int *) h);
+}
+
+int64_t alg_sdl_get_desktop_display_mode (int64_t index, void *mode)
+{
+    if (mode == NULL) return -1;
+
+    return SDL_GetDesktopDisplayMode ((int) index, (SDL_DisplayMode *) mode);
+}
+
+void alg_sdl_pump_events (void)
+{
+    SDL_PumpEvents ();
+}
+
+void *alg_sdl_create_texture (void *ren, int64_t format, int64_t access,
+                              int64_t w, int64_t h)
+{
+    if (ren == NULL) return NULL;
+
+    return SDL_CreateTexture ((SDL_Renderer *) ren, (Uint32) format,
+                              (int) access, (int) w, (int) h);
+}
+
+void alg_sdl_destroy_texture (void *tex)
+{
+    if (tex != NULL) SDL_DestroyTexture ((SDL_Texture *) tex);
+}
+
+int64_t alg_sdl_update_texture (void *tex, void *rect, void *pixels,
+                                int64_t pitch)
+{
+    if (tex == NULL) return -1;
+
+    return SDL_UpdateTexture ((SDL_Texture *) tex, (const SDL_Rect *) rect,
+                              pixels, (int) pitch);
+}
+
+int64_t alg_sdl_render_copy (void *ren, void *tex, void *src, void *dst)
+{
+    if (ren == NULL) return -1;
+
+    return SDL_RenderCopy ((SDL_Renderer *) ren, (SDL_Texture *) tex,
+                           (const SDL_Rect *) src, (const SDL_Rect *) dst);
+}
+
+int64_t alg_sdl_set_texture_blend_mode (void *tex, int64_t mode)
+{
+    if (tex == NULL) return -1;
+
+    return SDL_SetTextureBlendMode ((SDL_Texture *) tex, (SDL_BlendMode) mode);
+}
+
+int64_t alg_sdl_set_texture_alpha_mod (void *tex, int64_t alpha)
+{
+    if (tex == NULL) return -1;
+
+    return SDL_SetTextureAlphaMod ((SDL_Texture *) tex, (Uint8) alpha);
+}
+
+int64_t alg_sdl_set_hint (const char *name, const char *value)
+{
+    if (name == NULL || value == NULL) return 0;
+
+    return SDL_SetHint (name, value);
+}
+
+int64_t alg_sdl_poll_event (void *e)
+{
+    return SDL_PollEvent ((SDL_Event *) e);
+}
+
+int64_t alg_sdl_push_event (void *e)
+{
+    if (e == NULL) return -1;
+
+    return SDL_PushEvent ((SDL_Event *) e);
+}
+
+void alg_sdl_start_text_input (void)
+{
+    SDL_StartTextInput ();
+}
+
+void alg_sdl_delay (int64_t ms)
+{
+    SDL_Delay (ms > 0 ? (Uint32) ms : 0);
+}
 
 static int hex_value (char c)
 {

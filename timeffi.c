@@ -1,3 +1,18 @@
+/* POSIX and XSI declarations are hidden under a strict -std=c11 on glibc and
+ * musl, where Apple's headers expose them whatever the standard asked for.
+ * Measured: without this, Linux cannot see localtime_r and gmtime_r.
+ *
+ * _XOPEN_SOURCE 700 implies POSIX.1-2008 and turns on XSI, which is where the
+ * drand48 family lives. On macOS asking for it makes Apple's headers STRICTER
+ * and would hide their own additions -- _NSGetEnviron and TIOCGWINSZ among
+ * them -- so _DARWIN_C_SOURCE puts those back. Both lines must precede every
+ * include.
+ */
+#define _XOPEN_SOURCE 700
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
+
 /* timeffi.c -- the calendar, which the language does not carry.
  *
  * `clock ()` [RT-012] answers the seconds since the epoch as a Double, and
@@ -21,6 +36,30 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+
+/* Windows has no localtime_r or gmtime_r. It has localtime_s and gmtime_s,
+ * which do the same job with the arguments the other way round and an
+ * errno_t instead of a pointer -- so they are wrapped into the POSIX shape
+ * rather than branching at all four call sites.
+ */
+#ifdef _WIN32
+
+static struct tm *alg_localtime_r (const time_t *when, struct tm *into)
+{
+    return localtime_s (into, when) == 0 ? into : NULL;
+}
+
+static struct tm *alg_gmtime_r (const time_t *when, struct tm *into)
+{
+    return gmtime_s (into, when) == 0 ? into : NULL;
+}
+
+#else
+
+#define alg_localtime_r localtime_r
+#define alg_gmtime_r    gmtime_r
+
+#endif
 
 /* The seven fields of a broken-down time, into a caller's buffer.
  *
@@ -54,8 +93,8 @@ int64_t alg_libtime_fields (double epoch, int64_t local, void *out, int64_t max)
     time_t when = (time_t) epoch;
 
     struct tm parts;
-    struct tm *got = local ? localtime_r (&when, &parts)
-                           : gmtime_r (&when, &parts);
+    struct tm *got = local ? alg_localtime_r (&when, &parts)
+                           : alg_gmtime_r (&when, &parts);
 
     if (got == NULL)
         return 0;
@@ -93,9 +132,9 @@ int64_t alg_libtime_utc_offset (double epoch)
     struct tm utc;
     struct tm loc;
 
-    if (gmtime_r (&when, &utc) == NULL)
+    if (alg_gmtime_r (&when, &utc) == NULL)
         return 0;
-    if (localtime_r (&when, &loc) == NULL)
+    if (alg_localtime_r (&when, &loc) == NULL)
         return 0;
 
     /* mktime reads the local zone, so feeding it the UTC breakdown answers the
@@ -123,7 +162,7 @@ int64_t alg_libtime_is_dst (double epoch)
 
     struct tm parts;
 
-    if (localtime_r (&when, &parts) == NULL)
+    if (alg_localtime_r (&when, &parts) == NULL)
         return 0;
 
     return parts.tm_isdst > 0 ? 1 : 0;

@@ -1,47 +1,54 @@
-/* soundffi.c -- the noise the language cannot make.
+/* soundffi.c -- a square wave and a sample mixer, over SDL2's audio device.
  *
- * CoreAudio rather than SDL, deliberately.  `crt` is a terminal unit and owes
- * nothing to a window system; making it depend on SDL merely to beep would be
- * the wrong trade.  CoreAudio is a system framework -- present on every Mac,
- * nothing to install -- so all three units can share this one backend and
- * `crt` keeps its promise.
+ * SDL2 rather than CoreAudio, and the trade is deliberate: CoreAudio is a
+ * macOS framework and exists nowhere else, so the unit it backed could only
+ * ever have made a noise on one operating system. SDL2 is a dependency this
+ * library already has -- `graph` declares it directly -- and it carries audio
+ * on macOS, Linux, Windows and Android alike.
  *
- * That does bind this file to macOS, where SDL would have been portable. It is
- * a smaller loss than it looks: `graph` already names
- * /opt/homebrew/lib/libSDL2.dylib literally, so a Linux port needs work here
- * either way.  It also buys something -- ExtAudioFile decodes WAV, AIFF, CAF,
- * MP3 and M4A, where SDL2 alone reads WAV and nothing else.
+ * SDL_INIT_AUDIO opens no window and needs no display server, so a console
+ * program that beeps does not acquire a window system by asking for sound. It
+ * does acquire SDL, which is the whole of what this change costs.
  *
- * The split is the house one.  This file makes a square wave, mixes some
- * decoded samples into it, and stops.  Which note, how long, what a dotted
- * quaver is worth at 120 beats a minute -- all of that is the unit's, in
- * Algol-24, where it can be read and tested.
+ * WHAT IT COST: file formats. CoreAudio's ExtAudioFile read WAV, AIFF, CAF,
+ * MP3 and M4A through the system's codecs. SDL2 carries one decoder,
+ * SDL_LoadWAV, so this reads WAV and nothing else. SDL2_mixer would bring the
+ * others back at the price of a second dependency; it is not here.
  *
- * Every function is total: called before the device is open, after it is
- * closed, or with a handle that was never valid, each answers something
- * defined rather than failing.
+ * The internal format is float32, mono, 44100, and the device is asked for
+ * exactly that with no conversion allowed -- so the mixer below writes
+ * straight into SDL's buffer and never resamples. A file is converted to that
+ * format once, at load, by SDL's own converter.
+ *
+ * ALG_SOUND=dummy computes everything and plays nothing, which is what lets
+ * the library's tests run without filling the room -- the same bargain
+ * SDL_VIDEODRIVER=dummy strikes for `graph`. Under it no device is opened and
+ * `alg_sound_play` answers 0, but a file still DECODES: loading asks nothing
+ * of the device, which is what keeps `LoadSound` testable with no audio
+ * hardware at all.
  */
 
-#include <AudioToolbox/AudioToolbox.h>
-#include <AudioUnit/AudioUnit.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define RATE      44100.0
+#include <SDL.h>
+
+#define RATE      44100
 #define MAX_CLIPS 64
 #define MAX_VOICE 16
+#define MAX_FRAMES (RATE * 600)          /* ten minutes is plenty */
 
 /* ----------------------------------------------------------- the state -- */
 
 typedef struct { float *pcm; int64_t frames; } Clip;
 typedef struct { int64_t clip; int64_t at; double gain; int active; } Voice;
 
-static AudioUnit unit;
-static int       opened = 0;
-static int       silent = -1;      /* -1 until the environment is consulted */
+static SDL_AudioDeviceID device;
+static int               opened = 0;
+static int               silent = -1;   /* -1 until the environment is read */
 
-/* The tone.  Written from the calling thread and read from the audio thread;
+/* The tone. Written from the calling thread and read from the audio thread;
  * both are scalars a store makes visible whole, and a note starting a
  * fraction of a buffer early or late is not something an ear can hear. */
 static volatile double tone_hz  = 0.0;
@@ -51,12 +58,7 @@ static double          tone_ph  = 0.0;
 static Clip  clips[MAX_CLIPS];
 static Voice voices[MAX_VOICE];
 
-/* Whether to open the device at all.
- *
- * ALG_SOUND=dummy computes everything and plays nothing, which is what lets
- * the library's own tests run without filling the room -- the same bargain
- * SDL_VIDEODRIVER=dummy strikes for `graph`.
- */
+/* Whether to open the device at all. */
 static int is_silent (void)
 {
     if (silent < 0)
@@ -69,26 +71,50 @@ static int is_silent (void)
     return silent;
 }
 
-/* ---------------------------------------------------------- the render -- */
-
-static OSStatus render (void *ref, AudioUnitRenderActionFlags *flags,
-                        const AudioTimeStamp *stamp, UInt32 bus,
-                        UInt32 frames, AudioBufferList *io)
+/* Holds the audio thread off the voice table, or does nothing when no device
+ * was opened.
+ *
+ * SDL gives this and CoreAudio had no easy equivalent, so the port closes a
+ * real race the old backend only hoped about: `alg_sound_free` deactivated a
+ * voice and then freed its samples, with nothing to stop the mixer reading
+ * the old pointer in between.
+ */
+static void hold (void)
 {
-    (void) ref; (void) flags; (void) stamp; (void) bus;
+    if (opened) SDL_LockAudioDevice (device);
+}
 
-    float *out = (float *) io->mBuffers[0].mData;
+static void release (void)
+{
+    if (opened) SDL_UnlockAudioDevice (device);
+}
+
+/* ------------------------------------------------------------- the mix -- */
+
+/* Adds the tone and every voice into SDL's buffer. Runs on SDL's audio
+ * thread.
+ *
+ * `len` is bytes and the format is float32 mono, so the frame count is a
+ * quarter of it. The device is opened with no conversion allowed, which is
+ * what makes that division safe.
+ */
+static void mix (void *ref, Uint8 *stream, int len)
+{
+    (void) ref;
+
+    float *out    = (float *) stream;
+    int    frames = len / (int) sizeof (float);
 
     double hz   = tone_hz;
     double amp  = tone_amp;
-    double step = hz / RATE;
+    double step = hz / (double) RATE;
 
-    for (UInt32 i = 0; i < frames; i++)
+    for (int i = 0; i < frames; i++)
     {
         double s = 0.0;
 
         /* A square wave, which is what a PC speaker made and what Sound has
-         * always meant.  Half the cycle up, half down. */
+         * always meant. Half the cycle up, half down. */
         if (hz > 0.0)
         {
             s += (tone_ph < 0.5 ? amp : -amp);
@@ -116,54 +142,49 @@ static OSStatus render (void *ref, AudioUnitRenderActionFlags *flags,
 
         out[i] = (float) s;
     }
-
-    return noErr;
 }
 
 /* Opens the device, once, on the first sound anything asks for.
  *
  * Lazy so that a program which never makes a noise never touches the audio
  * hardware -- which matters for a TUI, and for a test run.
+ *
+ * The device is asked for float32 mono at 44100 with `allowed_changes` of
+ * zero, so SDL either gives exactly that or fails. Letting SDL substitute a
+ * format would put a conversion between the mixer and the speaker, and the
+ * mixer's whole job is to have already done that work.
  */
 static int ensure_open (void)
 {
     if (opened) return 1;
     if (is_silent ()) return 0;
 
-    AudioComponentDescription want = {0};
+    if (SDL_InitSubSystem (SDL_INIT_AUDIO) != 0) return 0;
 
-    want.componentType         = kAudioUnitType_Output;
-    want.componentSubType      = kAudioUnitSubType_DefaultOutput;
-    want.componentManufacturer = kAudioUnitManufacturer_Apple;
+    SDL_AudioSpec want;
+    SDL_AudioSpec got;
 
-    AudioComponent comp = AudioComponentFindNext (NULL, &want);
+    SDL_zero (want);
+    SDL_zero (got);
 
-    if (comp == NULL) return 0;
-    if (AudioComponentInstanceNew (comp, &unit) != noErr) return 0;
+    want.freq     = RATE;
+    want.format   = AUDIO_F32SYS;
+    want.channels = 1;
+    want.samples  = 1024;
+    want.callback = mix;
 
-    AudioStreamBasicDescription fmt = {0};
+    device = SDL_OpenAudioDevice (NULL, 0, &want, &got, 0);
 
-    fmt.mSampleRate       = RATE;
-    fmt.mFormatID         = kAudioFormatLinearPCM;
-    fmt.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-    fmt.mChannelsPerFrame = 1;
-    fmt.mBitsPerChannel   = 32;
-    fmt.mBytesPerFrame    = 4;
-    fmt.mFramesPerPacket  = 1;
-    fmt.mBytesPerPacket   = 4;
+    if (device == 0)
+    {
+        SDL_QuitSubSystem (SDL_INIT_AUDIO);
 
-    AudioUnitSetProperty (unit, kAudioUnitProperty_StreamFormat,
-                          kAudioUnitScope_Input, 0, &fmt, sizeof fmt);
-
-    AURenderCallbackStruct cb = { render, NULL };
-
-    AudioUnitSetProperty (unit, kAudioUnitProperty_SetRenderCallback,
-                          kAudioUnitScope_Input, 0, &cb, sizeof cb);
-
-    if (AudioUnitInitialize (unit) != noErr) return 0;
-    if (AudioOutputUnitStart (unit) != noErr) return 0;
+        return 0;
+    }
 
     opened = 1;
+
+    SDL_PauseAudioDevice (device, 0);
 
     return 1;
 }
@@ -173,7 +194,7 @@ static int ensure_open (void)
 /* Whether anything will actually be heard.
  *
  * False under ALG_SOUND=dummy, and false where no output device could be
- * opened at all.  The units report it so a program can say so rather than
+ * opened at all. The units report it so a program can say so rather than
  * appearing to work.
  */
 int64_t alg_sound_audible (void)
@@ -192,7 +213,7 @@ void alg_sound_tone (int64_t hz)
     tone_hz = (double) hz;
 }
 
-/* Stops the tone.  The samples carry on, a sound effect not being a note. */
+/* Stops the tone. The samples carry on, a sound effect not being a note. */
 void alg_sound_off (void)
 {
     tone_hz = 0.0;
@@ -207,11 +228,15 @@ void alg_sound_volume (int64_t level)
     tone_amp = (double) level / 255.0 * 0.7;
 }
 
-/* Decodes an audio file into memory and answers a handle, or -1.
+/* Decodes a WAV file into memory and answers a handle, or -1.
  *
- * Whatever CoreAudio can read: WAV, AIFF, CAF, MP3, M4A.  Decoded once, up
- * front, to float PCM at the mixer's own rate -- so playing it later costs
+ * WAV only, SDL2 carrying one decoder. Decoded once, up front, into the
+ * mixer's own format -- float32 mono at 44100 -- so playing it later costs
  * nothing but the mixing, which is what a sound effect needs.
+ *
+ * Asks nothing of the device, so this works under ALG_SOUND=dummy and before
+ * anything has made a noise. That is deliberate: it keeps a decode testable
+ * on a machine with no audio hardware.
  */
 int64_t alg_sound_load (const char *path)
 {
@@ -224,81 +249,68 @@ int64_t alg_sound_load (const char *path)
 
     if (slot < 0) return -1;
 
-    CFURLRef url = CFURLCreateFromFileSystemRepresentation (
-        NULL, (const UInt8 *) path, (CFIndex) strlen (path), false);
+    SDL_AudioSpec spec;
+    Uint8        *raw = NULL;
+    Uint32        len = 0;
 
-    if (url == NULL) return -1;
+    if (SDL_LoadWAV (path, &spec, &raw, &len) == NULL) return -1;
 
-    ExtAudioFileRef f  = NULL;
-    OSStatus        st = ExtAudioFileOpenURL (url, &f);
+    /* Into the mixer's one format, whatever the file's was. */
+    SDL_AudioCVT cvt;
 
-    CFRelease (url);
+    int needed = SDL_BuildAudioCVT (&cvt, spec.format, spec.channels, spec.freq,
+                                    AUDIO_F32SYS, 1, RATE);
 
-    if (st != noErr) return -1;
+    if (needed < 0) { SDL_FreeWAV (raw); return -1; }
 
-    AudioStreamBasicDescription want = {0};
+    float  *pcm   = NULL;
+    int64_t frames = 0;
 
-    want.mSampleRate       = RATE;
-    want.mFormatID         = kAudioFormatLinearPCM;
-    want.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-    want.mChannelsPerFrame = 1;
-    want.mBitsPerChannel   = 32;
-    want.mBytesPerFrame    = 4;
-    want.mFramesPerPacket  = 1;
-    want.mBytesPerPacket   = 4;
-
-    if (ExtAudioFileSetProperty (f, kExtAudioFileProperty_ClientDataFormat,
-                                 sizeof want, &want) != noErr)
+    if (needed == 0)
     {
-        ExtAudioFileDispose (f);
+        /* Already the mixer's format, so the bytes are the samples. */
+        frames = (int64_t) (len / sizeof (float));
 
-        return -1;
+        if (frames <= 0 || frames > MAX_FRAMES) { SDL_FreeWAV (raw); return -1; }
+
+        pcm = (float *) calloc ((size_t) frames, sizeof (float));
+
+        if (pcm == NULL) { SDL_FreeWAV (raw); return -1; }
+
+        memcpy (pcm, raw, (size_t) frames * sizeof (float));
+
+        SDL_FreeWAV (raw);
     }
-
-    SInt64 total = 0;
-    UInt32 sz    = sizeof total;
-
-    ExtAudioFileGetProperty (f, kExtAudioFileProperty_FileLengthFrames,
-                             &sz, &total);
-
-    if (total <= 0 || total > 44100 * 600)      /* ten minutes is plenty */
+    else
     {
-        ExtAudioFileDispose (f);
+        cvt.len = (int) len;
+        cvt.buf = (Uint8 *) SDL_malloc ((size_t) cvt.len * (size_t) cvt.len_mult);
 
-        return -1;
+        if (cvt.buf == NULL) { SDL_FreeWAV (raw); return -1; }
+
+        memcpy (cvt.buf, raw, len);
+
+        SDL_FreeWAV (raw);
+
+        if (SDL_ConvertAudio (&cvt) != 0) { SDL_free (cvt.buf); return -1; }
+
+        frames = (int64_t) ((size_t) cvt.len_cvt / sizeof (float));
+
+        if (frames <= 0 || frames > MAX_FRAMES) { SDL_free (cvt.buf); return -1; }
+
+        /* Copied out of SDL's allocation into ours, so that one free () in
+         * alg_sound_free serves every clip however it arrived. */
+        pcm = (float *) calloc ((size_t) frames, sizeof (float));
+
+        if (pcm == NULL) { SDL_free (cvt.buf); return -1; }
+
+        memcpy (pcm, cvt.buf, (size_t) frames * sizeof (float));
+
+        SDL_free (cvt.buf);
     }
-
-    float *pcm = (float *) calloc ((size_t) total, sizeof (float));
-
-    if (pcm == NULL) { ExtAudioFileDispose (f); return -1; }
-
-    int64_t got = 0;
-
-    while (got < total)
-    {
-        UInt32 want_frames = (UInt32) (total - got);
-
-        AudioBufferList list;
-
-        list.mNumberBuffers              = 1;
-        list.mBuffers[0].mNumberChannels = 1;
-        list.mBuffers[0].mDataByteSize   = (UInt32) (want_frames * 4);
-        list.mBuffers[0].mData           = pcm + got;
-
-        UInt32 read = want_frames;
-
-        if (ExtAudioFileRead (f, &read, &list) != noErr) break;
-        if (read == 0) break;
-
-        got += read;
-    }
-
-    ExtAudioFileDispose (f);
-
-    if (got <= 0) { free (pcm); return -1; }
 
     clips[slot].pcm    = pcm;
-    clips[slot].frames = got;
+    clips[slot].frames = frames;
 
     return slot;
 }
@@ -331,6 +343,10 @@ int64_t alg_sound_play (int64_t clip, int64_t volume)
     if (volume < 0)   volume = 0;
     if (volume > 255) volume = 255;
 
+    int64_t started = 0;
+
+    hold ();
+
     for (int v = 0; v < MAX_VOICE; v++)
         if (!voices[v].active)
         {
@@ -339,10 +355,14 @@ int64_t alg_sound_play (int64_t clip, int64_t volume)
             voices[v].gain   = (double) volume / 255.0;
             voices[v].active = 1;
 
-            return 1;
+            started = 1;
+
+            break;
         }
 
-    return 0;
+    release ();
+
+    return started;
 }
 
 /* Whether any voice is still playing that sound. */
@@ -357,17 +377,23 @@ int64_t alg_sound_playing (int64_t clip)
 /* Silences every sound effect, leaving the tone alone. */
 void alg_sound_hush (void)
 {
+    hold ();
+
     for (int v = 0; v < MAX_VOICE; v++) voices[v].active = 0;
+
+    release ();
 }
 
 /* Forgets a loaded sound and gives its memory back.
  *
- * Any voice playing it is stopped first, or the mixer would read freed
- * memory a frame later.
+ * Any voice playing it is stopped first, under the lock, so the mixer cannot
+ * be part way through reading the samples as they go.
  */
 void alg_sound_free (int64_t clip)
 {
     if (clip < 0 || clip >= MAX_CLIPS || clips[clip].pcm == NULL) return;
+
+    hold ();
 
     for (int v = 0; v < MAX_VOICE; v++)
         if (voices[v].clip == clip) voices[v].active = 0;
@@ -376,6 +402,8 @@ void alg_sound_free (int64_t clip)
 
     clips[clip].pcm    = NULL;
     clips[clip].frames = 0;
+
+    release ();
 }
 
 /* Stops everything and closes the device.
@@ -387,6 +415,8 @@ void alg_sound_close (void)
     alg_sound_off ();
     alg_sound_hush ();
 
+    hold ();
+
     for (int i = 0; i < MAX_CLIPS; i++)
         if (clips[i].pcm != NULL)
         {
@@ -396,12 +426,14 @@ void alg_sound_close (void)
             clips[i].frames = 0;
         }
 
+    release ();
+
     if (!opened) return;
 
-    AudioOutputUnitStop (unit);
-    AudioUnitUninitialize (unit);
-    AudioComponentInstanceDispose (unit);
+    SDL_CloseAudioDevice (device);
+    SDL_QuitSubSystem (SDL_INIT_AUDIO);
 
+    device  = 0;
     opened  = 0;
     tone_ph = 0.0;
 }

@@ -61,7 +61,7 @@ def main():
     work = tempfile.mkdtemp()
     try:
         for name in os.listdir(ROOT):
-            if name.endswith(('.a24', '.hex')) or '.dylib' in name or name.endswith('.so'):
+            if name.endswith(('.a24', '.hex', '.wav')) or '.dylib' in name or name.endswith('.so'):
                 shutil.copy(os.path.join(ROOT, name), work)
 
         failed = 0

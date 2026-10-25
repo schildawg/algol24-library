@@ -6,8 +6,8 @@
 /// language for anything, which is the same bargain `math` and `sound` strike.
 ///
 /// It is also the library's first foreign code that builds anywhere.
-/// `soundffi.c` is CoreAudio and macOS alone; `crtffi.c` is POSIX and rules
-/// out Windows. Nothing here is worse than `fopen`.
+/// `soundffi.c` and `graphffi.c` want SDL2; `crtffi.c` and `dosffi.c` are
+/// POSIX and rule out Windows. Nothing here is worse than `fopen`.
 ///
 /// Whole files, deliberately. `ReadAll` and `ReadLines` bring a file into
 /// memory and `WriteAll` sends one out; there is no open handle to hold, no
@@ -24,20 +24,20 @@ unit file;
 ///
 /// Private to this unit; `Exists` is what a caller asks.
 function RawExists (Path : String) : Integer;
-    external 'alg_libfile_exists' in 'libfileffi.dylib';
+    external 'alg_libfile_exists' in 'libfileffi.so';
 
 /// Whether a path is a directory.
 ///
 /// Private to this unit.
 function RawIsDir (Path : String) : Integer;
-    external 'alg_libfile_isdir' in 'libfileffi.dylib';
+    external 'alg_libfile_isdir' in 'libfileffi.so';
 
 /// How many bytes a file holds, or -1 if it is not a readable file.
 ///
 /// Private to this unit, and called before every read so the buffer can be
 /// sized exactly -- a Buffer with trailing zeros has no Text.
 function RawSize (Path : String) : Integer;
-    external 'alg_libfile_size' in 'libfileffi.dylib';
+    external 'alg_libfile_size' in 'libfileffi.so';
 
 /// Reads a file into a buffer this unit owns, answering the byte count.
 ///
@@ -45,26 +45,26 @@ function RawSize (Path : String) : Integer;
 /// String made from a C pointer BORROWS those bytes rather than copying them,
 /// so a function reusing one buffer would corrupt a String still in hand.
 function RawRead (Path : String, Into : Pointer, Max : Integer) : Integer;
-    external 'alg_libfile_read' in 'libfileffi.dylib';
+    external 'alg_libfile_read' in 'libfileffi.so';
 
 /// Writes text to a file, replacing it or adding to the end.
 ///
 /// Private to this unit. Going this way there is no lifetime question: the
 /// String's bytes are used during the call and not kept.
 function RawWrite (Path : String, Text : String, Append : Integer) : Integer;
-    external 'alg_libfile_write' in 'libfileffi.dylib';
+    external 'alg_libfile_write' in 'libfileffi.so';
 
 /// Removes a file.
 ///
 /// Private to this unit.
 function RawErase (Path : String) : Integer;
-    external 'alg_libfile_erase' in 'libfileffi.dylib';
+    external 'alg_libfile_erase' in 'libfileffi.so';
 
 /// Renames or moves a file.
 ///
 /// Private to this unit.
 function RawRename (From : String, To : String) : Integer;
-    external 'alg_libfile_rename' in 'libfileffi.dylib';
+    external 'alg_libfile_rename' in 'libfileffi.so';
 
 /// Copies a file a block at a time.
 ///
@@ -72,7 +72,7 @@ function RawRename (From : String, To : String) : Integer;
 /// that would hold a whole file in memory to move it -- which matters exactly
 /// when the file is large.
 function RawCopy (From : String, To : String) : Integer;
-    external 'alg_libfile_copy' in 'libfileffi.dylib';
+    external 'alg_libfile_copy' in 'libfileffi.so';
 
 
 /// Whether a path exists, whether it is a file or a directory.

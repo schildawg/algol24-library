@@ -81,7 +81,7 @@ wrong with the arrangement.** Say so rather than pushing through.
 ./test.sh                 # everything: units, reference examples, the example app
 ./test.sh math.a24        # one unit
 
-./build.sh                # the library's own C -> lib*ffi.dylib
+./build.sh                # the library's own C -> lib*ffi.so
 ./check-reference.py      # run every REFERENCE.md example, diff against its output
 examples/build.sh         # the example app; --static for a self-contained binary
 examples/check.sh         # the app must agree interpreted and both ways compiled
@@ -91,7 +91,7 @@ algc math.a24             # run a program
 ```
 
 ⚠️ **Run from the repository root.** `uses` resolves beside the importing file
-and then the working directory, and `external … in 'libmathffi.dylib'` is found
+and then the working directory, and `external … in 'libmathffi.so'` is found
 the same way.
 
 Unit tests are the whole of the testing story. Conformance cases, refusals and
@@ -150,16 +150,34 @@ declaration to fit what libm happens to offer. `Trunc` is the worked case: libm'
 `trunc` returns a `double` and there is no `lltrunc`, so `mathffi.c` supplies
 `alg_trunc` returning an `int64_t`.
 
-- C sources are named `<unit>ffi.c` and build to `lib<unit>ffi.dylib`
-  (`.so` off macOS) — `./build.sh` picks up `./*ffi.c` automatically.
-- Reach them with `external 'alg_thing' in 'libmathffi.dylib'`. Without the
+- C sources are named `<unit>ffi.c` and build to `lib<unit>ffi.so` — **`.so`
+  on every platform, macOS included** — and `./build.sh` picks up `./*ffi.c`
+  automatically.
+- Reach them with `external 'alg_thing' in 'libmathffi.so'`. Without the
   `in` clause the symbol is looked for in the running program, which is `algc`
   itself and will not contain ours.
-- ⚠️ **The library name carries a platform extension**, and `in 'libmathffi'`
-  does **not** resolve — it must be the full file name. That makes the
-  declaration macOS-specific as written.
+- ⚠️ **`.so` everywhere is deliberate, and it is what makes the units
+  portable in place.** `dlopen` reads a file's contents and not its extension
+  — measured: a Mach-O built with `-dynamiclib` and named `libprobeffi.so`
+  loads on macOS and its symbol resolves. Since an `in` clause takes a string
+  literal and cannot ask what host it is on, a `.dylib` spelling would have
+  forced every source to be rewritten per platform, the way
+  `shroom-slots` rewrites its own. One spelling serves macOS, Linux and the
+  BSDs instead. Only `build.sh`'s *flag* differs — `-dynamiclib` against
+  `-shared -fPIC` — so `file lib*.so` says Mach-O here and ELF on Linux.
+- ⚠️ **The name must still be the full file name.** `in 'libmathffi'` does
+  **not** resolve.
+- ⚠️ **POSIX declarations need a feature-test macro, and macOS needs a second
+  one.** Under `-std=c11` glibc and musl hide `nanosleep`, `strdup`,
+  `localtime_r`, `gmtime_r`, `clock_gettime` and the `drand48` family, where
+  Apple's headers expose them whatever the standard asked for — so four of the
+  shims failed to compile on Linux and nothing here would have shown it.
+  `_XOPEN_SOURCE 700` asks for POSIX.1-2008 plus XSI; on macOS that makes the
+  headers *stricter* and hides Apple's own additions, `_NSGetEnviron` and
+  `TIOCGWINSZ` among them, so `_DARWIN_C_SOURCE` has to go back alongside it.
+  Both lines precede every include. `crtffi.c` is the model.
 - ⚠️ **A foreign declaration cannot be written once to serve both processors.**
-  With `in 'lib….dylib'` the interpreter works and a compiled binary dlopens the
+  With `in 'lib….so'` the interpreter works and a compiled binary dlopens the
   library at run time *even when the symbol is linked into it*. Without the `in`
   clause a compiled binary is self-contained and the interpreter cannot resolve
   the symbol at all. `DYLD_INSERT_LIBRARIES` does not bridge it. The units keep
@@ -175,6 +193,110 @@ declaration to fit what libm happens to offer. `Trunc` is the worked case: libm'
   functions, which is why `uses math` has no consequences and its tests can
   assert exact values. `random` is separate for that reason, not for tidiness.
   A test of anything stateful seeds it first, so the suite stays deterministic.
+
+## Portability, and what has actually been measured
+
+Checked on 2026-10-25 by compiling every shim in an Alpine container — gcc,
+musl, `-std=c11 -O2 -Wall -Wextra`:
+
+| | |
+| --- | --- |
+| `crtffi.c` `dosffi.c` `fileffi.c` `mathffi.c` `randomffi.c` `timeffi.c` | compile clean on Linux, **0 warnings** |
+| `soundffi.c` `graphffi.c` | compile clean on Linux against `sdl2-dev`, **0 warnings** — `graphffi.c` including its 22 SDL wrappers |
+| the six POSIX shims again | cross-compile for **Windows** with mingw-w64, **0 warnings** |
+| all ten units | still pass on macOS afterwards |
+
+⚠️ **Four of those six POSIX shims did NOT compile on Linux before this, and
+nothing on macOS would have revealed it.** Apple's headers expose POSIX
+declarations whatever `-std=` asked for; glibc and musl hide them. That is what
+the `_XOPEN_SOURCE` / `_DARWIN_C_SOURCE` preamble is for, and why a portability
+claim about this library should be compiled rather than reasoned about.
+
+**What is NOT verified, and should not be claimed:**
+
+- ⚠️ **No unit has been *run* on Linux**, only compiled. `algc` here is a macOS
+  binary, and building the compiler is outside this repository's remit — so the
+  Algol-24 half of every unit is unexercised off macOS. Compiling the C is the
+  most this project can honestly check by itself.
+- ⚠️ **Windows is not supported and is not close.** `crtffi.c` wants the Win32
+  console API in place of termios and `ioctl`; `dosffi.c` wants
+  `GetDiskFreeSpaceEx` and `CreateProcess` in place of `statvfs` and
+  `posix_spawn`. Both are real backends behind the same function signatures,
+  not a flag.
+- ⚠️ **Windows compiles and has never been run.** Every shim cross-compiles
+  with `x86_64-w64-mingw32-gcc`, 0 warnings, so the `#ifdef _WIN32` branches
+  are at least well-formed against the real Win32 headers. Nothing beyond
+  that is known: no unit has executed on Windows, and the parts most likely
+  to need work on real hardware are `crt`'s virtual-terminal flags and its
+  non-blocking console poll. Treat the Windows branches as a scaffold that
+  compiles, not as support.
+
+### The Windows branches, and what they cost
+
+⚠️ **`crtffi.c` keeps one implementation and a platform layer of six
+primitives**, not scattered `#ifdef`s: `tty_is_terminal`, `tty_size`,
+`tty_raw`, `tty_read_byte`, `tty_sleep_ms` and `tty_write`. Everything above
+them is platform-free. Add a seventh only if a real host forces it.
+
+Three things in that port are worth knowing:
+
+- **`ENABLE_VIRTUAL_TERMINAL_INPUT` is load-bearing.** With it the console
+  translates arrow and function keys into the same ANSI escapes the unit's
+  decoder already reads, so the key reader needs no Windows branch at all.
+  Without it they arrive as Windows key records and nothing decodes them. The
+  output side needs `ENABLE_VIRTUAL_TERMINAL_PROCESSING` for the same reason,
+  and both want Windows 10 1511 or newer.
+- **The console poll must peek, not just count.** A console input queue holds
+  resize, focus and mouse records as well as keys, so asking whether the queue
+  is non-empty and then reading would block on a resize. Non-key records are
+  discarded until a key is at the head.
+- ⚠️ **`Exec` cannot keep its POSIX contract on Windows.** `CreateProcess`
+  takes a command *line* and offers no vector form, which is the exact hazard
+  `Exec` exists to avoid — so `dosffi.c` rebuilds the line with
+  `CommandLineToArgvW`'s quoting rules, doubling backslash runs before a quote
+  so the child reconstructs the arguments that went in. And Windows has no
+  signals, so the documented "128 plus the signal number" has no meaning
+  there: a faulting process answers its NTSTATUS, a large number rather than a
+  small one.
+
+⚠️ **`random` stopped borrowing libc's `drand48`, and that was a Windows
+fix.** The unit declared it with no `in` clause, resolving out of the running
+program — fine wherever libc has the XSI family, impossible on Windows, which
+has none. `randomffi.c` now carries the generator. POSIX specifies the
+algorithm exactly rather than leaving it to an implementation, so this changes
+no stream: measured bit-identical against the platform's own over 4000 draws
+across four seeds, and all five `random` reference examples still print what
+they claimed. A seed now answers the same sequence on every platform, which it
+did not before.
+
+### How `graph` stopped being macOS-bound
+
+It used to declare SDL's own entry points, naming
+`/opt/homebrew/lib/libSDL2.dylib` in twenty-four `external` clauses. Renaming
+our own shims could not fix that: the literal was an absolute path to somebody
+else's library, and SDL is `/usr/lib/<triple>/libSDL2-2.0.so.0` on Debian,
+`/usr/lib64/…` on Fedora, elsewhere again on Alpine and MSYS2.
+
+So `graphffi.c` now carries a thin wrapper per call and the declarations name
+`libgraphffi.so`, with `sdl2-config` resolving SDL at build time — the pattern
+`sound` already used by linking SDL in C rather than declaring it.
+
+⚠️ **The declarations keep SDL's own names**, so a call site still reads as
+the SDL call it is; only where it resolves from changed. Do not rename them to
+match the wrappers.
+
+**It also closed two bugs, which is why this was worth more than portability.**
+
+1. `SDL_GetError` and `SDL_GetWindowTitle` answered a `String` from C, which
+   this file forbids outright — a String returned from C borrows the bytes
+   (H-2). `SDL_GetError` had nine call sites and two held the borrowed pointer
+   across further SDL calls, one across the whole of `CloseGraph`, so the
+   message raised could be whatever SDL had written since. Both now copy into
+   a caller-owned Buffer. **No foreign declaration in this library answers a
+   String any more**, and that is worth keeping true.
+2. Twenty-four hand-copied prototypes were twenty-four unchecked signatures
+   (H-1). A wrapper is compiled against SDL's real headers, so a mismatch is a
+   compile error instead of a plausible wrong number.
 
 ## The Library Reference
 
@@ -305,7 +427,7 @@ nothing about `.a24` and answers `Code language not supported or defined.`
 until mapped, which is what that file does — for the language id *and* the
 file extension, since the second is what works when the Algol-24 extension
 is not loaded. It runs `cd "$workspaceRoot" && algc …`, and the `cd` is not
-decoration: `uses` and `external … in 'lib….dylib'` both resolve against the
+decoration: `uses` and `external … in 'lib….so'` both resolve against the
 working directory, so a demo run from `examples/` finds neither its units nor
 the library's own C without it.
 
@@ -318,10 +440,10 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | --- | --- | --- | --- |
 | `testing` | `AssertNear` | 9 | complete |
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
-| `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` declared directly, seeding via `randomffi.c` | 17 | complete |
+| `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` carried in `randomffi.c` rather than taken from libc, bit-identical and so portable, seeding via `randomffi.c` | 17 | complete |
 | `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 298 | complete |
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
-| `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 14 | complete |
+| `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is SDL2 audio -- a square wave mixed with up to sixteen decoded samples, WAV only | 14 | complete |
 | `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
 | `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 47 | complete |
 | `time` | `Now`, `UtcNow`, `At`, `UtcAt` answering a `DateTime` with `Text`; `UtcOffset`, `IsDaylightSaving`; `timeffi.c` is C89 `localtime_r`. `GetDate`/`GetTime`'s four `var` parameters become one returned object; `SetDate`/`SetTime` are absent, needing root | 9 | complete |
@@ -336,10 +458,10 @@ one world — celled text on a grid at Order 0, Canvas objects above and below
 it — not Turbo Pascal's Crt/Graph split. Read it before adding any `graph`
 method; a method that fights it is wrong until the document says otherwise.
 
-`graph` notes: SDL2 comes from Homebrew (`brew install sdl2`) and every
-declaration names `/opt/homebrew/lib/libSDL2.dylib` literally, because `in`
-takes a string literal — an SDL elsewhere means substituting the path
-throughout. `./test.sh` and `./check-reference.py` set `SDL_VIDEODRIVER=dummy`
+`graph` notes: SDL2 comes from Homebrew (`brew install sdl2`) and is reached
+through wrappers in `graphffi.c` rather than declared, so nothing names SDL's
+own file and an SDL installed elsewhere needs no substituting — `build.sh` asks
+`sdl2-config`. `./test.sh` and `./check-reference.py` set `SDL_VIDEODRIVER=dummy`
 so tests and examples open no real windows; running `algc --test graph.a24`
 directly uses the real display, which is harmless and occasionally worth
 watching. On macOS, fullscreen keeps the menu bar, so a fullscreen window is
@@ -457,12 +579,20 @@ buffer holding a zero byte, so a buffer larger than its contents fails on its
 own trailing zeros rather than answering a truncated String. That is why
 `ReadAll` asks `alg_file_size` first.
 
-⚠️ **Sound is its own unit for a portability reason, and must stay there.**
-`soundffi.c` reaches CoreAudio, which is a system framework on macOS and
-exists nowhere else. `crt` calls only POSIX -- termios, ioctl, nanosleep --
-and would build on Linux tomorrow but for the hardcoded `.dylib`; folding the
-noise into it would narrow that unit to one operating system for the sake of a
-beep. `Delay` is in `crt` and `graph` and deliberately **not** in `sound`: a third
+⚠️ **Sound is its own unit for a portability reason, and must stay there --
+but the reason inverted in 0.1.5.** `soundffi.c` used to reach CoreAudio, a
+macOS framework that exists nowhere else, so the unit could only ever have made
+a noise on one operating system; it now plays through **SDL2**, which carries
+audio on macOS, Linux, Windows and Android alike. The unit still stands apart,
+and the argument is now the other way round: `crt` calls only POSIX -- termios,
+ioctl, nanosleep -- and needs nothing installed, so folding the noise into it
+would make a terminal program acquire SDL for the sake of a beep.
+`SDL_INIT_AUDIO` opens no window and needs no display server, so `sound` asks
+for a library and not a desktop. What the change cost is **file formats**: WAV
+only, where CoreAudio read AIFF, CAF, MP3 and M4A through the system's codecs.
+SDL2_mixer would buy those back at the price of a second dependency and is
+deliberately not here. `Delay` is in `crt` and `graph` and deliberately **not**
+in `sound`: a third
 copy made a bare `Delay` ambiguous in the two combinations worth writing --
 `graph` with `sound` is every game, `crt` with `sound` every console program
 that beeps -- and taxing those with `graph.Delay` to serve a rarer case was the
@@ -481,8 +611,28 @@ that should be in one.
 exactly as long and `LoadSound` still decodes, but `PlaySound` answers False,
 there being no voice to start on a device that was never opened. `Score`
 answers an MML string's notes without sounding them, which is what makes the
-dialect testable. `build.sh` links CoreAudio frameworks for `soundffi.c` only,
-and `examples/build.sh --static` does the same.
+dialect testable. `build.sh` links `sdl2-config --cflags --libs` for
+`soundffi.c` only, and `examples/build.sh --static` does the same -- a build
+script may ask `sdl2-config` where SDL is, where `graph`'s own declarations
+have to hardcode `/opt/homebrew/lib/libSDL2.dylib` because an `in` clause takes
+a string literal.
+
+⚠️ **`sound`'s test fixture is `beep.wav`, which this repository owns.** It
+used to load `/System/Library/Sounds/Ping.aiff` -- both a format SDL2 cannot
+read and a path only macOS has, so the test was itself a portability blocker.
+`beep.wav` is 300 ms of 880 Hz at 22050 Hz in 16-bit mono, chosen so it is
+**not** the mixer's float32 at 44100: loading it therefore exercises SDL's
+conversion rather than a pass-through, and the test asserts the duration
+survives resampling. ⚠️ **`check-reference.py` copies `.wav` as well as `.a24`
+and `.hex`** into its work directory, or the `LoadSound` example cannot find
+it.
+
+⚠️ **A `--static` binary is only as self-contained as its units.** With
+CoreAudio a `sound`-using binary needed nothing extra, the framework shipping
+with the operating system. With SDL2 it links `libSDL2.dylib`, which Homebrew
+installs and macOS does not ship -- measured. `examples/statistics.a24` reaches
+neither `graph` nor `sound`, so its own binary still needs only `libffi` and
+`libSystem`, which is why `examples/check.sh` passing does not prove this.
 
 ⚠️ **`crt` duplicates `graph`'s constants deliberately, and must not be
 refactored to share them.** `uses` is **not transitive**: a program saying
@@ -563,5 +713,5 @@ mouse. All three were correct against every test and wrong in use.
 `examples/README.md`. It is the only check that exercises the whole story rather
 than one unit, so it is the one to run when anything about linking changes.
 
-Build artifacts — `lib*ffi.dylib` and `examples/build/` — are generated and
+Build artifacts — `lib*ffi.so` and `examples/build/` — are generated and
 should not be committed.

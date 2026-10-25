@@ -30,41 +30,41 @@ unit crt;
 /// Private to this unit. Nothing is emitted when it is not, so a piped run
 /// produces its own output and nothing else.
 function CrtIsTty () : Integer;
-    external 'alg_crt_istty' in 'libcrtffi.dylib';
+    external 'alg_crt_istty' in 'libcrtffi.so';
 
 /// The terminal's width in cells, right now.
 ///
 /// Private to this unit, and asked afresh each time rather than cached, which
 /// is how a resize is noticed without a signal handler.
 function CrtCols () : Integer;
-    external 'alg_crt_cols' in 'libcrtffi.dylib';
+    external 'alg_crt_cols' in 'libcrtffi.so';
 
 /// The terminal's height in cells, right now.
 ///
 /// Private to this unit.
 function CrtRows () : Integer;
-    external 'alg_crt_rows' in 'libcrtffi.dylib';
+    external 'alg_crt_rows' in 'libcrtffi.so';
 
 /// Whether the terminal has said it can do 24-bit color.
 ///
 /// Private to this unit. COLORTERM is the only thing that says so reliably;
 /// answering no is never wrong, only duller.
 function CrtTrueColor () : Integer;
-    external 'alg_crt_truecolor' in 'libcrtffi.dylib';
+    external 'alg_crt_truecolor' in 'libcrtffi.so';
 
 /// Puts the terminal into or out of character-at-a-time mode.
 ///
 /// Private to this unit. The old settings are kept in the C so that leaving
 /// restores exactly what was found.
 function CrtRaw (On : Integer) : Integer;
-    external 'alg_crt_raw' in 'libcrtffi.dylib';
+    external 'alg_crt_raw' in 'libcrtffi.so';
 
 /// One byte of input, or -1 when none is waiting.
 ///
 /// Private to this unit, and never blocking -- a blocking read here would
 /// make `KeyPressed` a lie.
 function CrtGetch () : Integer;
-    external 'alg_crt_getch' in 'libcrtffi.dylib';
+    external 'alg_crt_getch' in 'libcrtffi.so';
 
 /// Sleeps for a few milliseconds.
 ///
@@ -72,14 +72,14 @@ function CrtGetch () : Integer;
 /// language has no sleep of its own -- `graph` delays through SDL, and this
 /// unit has no SDL to delay through.
 procedure CrtNap (Millis : Integer);
-    external 'alg_crt_nap' in 'libcrtffi.dylib';
+    external 'alg_crt_nap' in 'libcrtffi.so';
 
 /// Writes bytes to the terminal exactly, with no newline and no buffering.
 ///
 /// Private to this unit. The language's own `Write` cannot do either, and a
 /// screen painter needs both.
 procedure CrtWrite (Text : Pointer);
-    external 'alg_crt_write' in 'libcrtffi.dylib';
+    external 'alg_crt_write' in 'libcrtffi.so';
 
 /// Writes a String to the terminal exactly, with no newline.
 ///
@@ -88,13 +88,13 @@ procedure CrtWrite (Text : Pointer);
 /// scratch buffer arrives as an address. Two spellings of one primitive is
 /// cheaper than making the unit convert between them.
 procedure CrtSend (Text : String);
-    external 'alg_crt_write' in 'libcrtffi.dylib';
+    external 'alg_crt_write' in 'libcrtffi.so';
 
 /// Empties every cell of a screen before the surfaces are laid over it.
 ///
 /// Private to this unit.
 procedure ClearCells (Screen : Pointer, Cells : Integer, Ink : Integer);
-    external 'alg_crt_clear' in 'libcrtffi.dylib';
+    external 'alg_crt_clear' in 'libcrtffi.so';
 
 /// Lays one surface's cells into the screen.
 ///
@@ -103,7 +103,7 @@ procedure ClearCells (Screen : Pointer, Cells : Integer, Ink : Integer);
 procedure BlitCells (Screen : Pointer, SCols : Integer, SRows : Integer,
                      Src : Pointer, WCols : Integer, WRows : Integer,
                      X1 : Integer, Y1 : Integer);
-    external 'alg_crt_blit' in 'libcrtffi.dylib';
+    external 'alg_crt_blit' in 'libcrtffi.so';
 
 /// Turns the cells that differ from the last painted screen into escapes.
 ///
@@ -113,7 +113,7 @@ procedure BlitCells (Screen : Pointer, SCols : Integer, SRows : Integer,
 function PaintCells (Cells : Pointer, Prev : Pointer, Out : Pointer,
                      Cols : Integer, Rows : Integer,
                      TrueColor : Integer) : Integer;
-    external 'alg_crt_paint' in 'libcrtffi.dylib';
+    external 'alg_crt_paint' in 'libcrtffi.so';
 
 
 /// The sixteen colors of a CGA text screen, by their Turbo Pascal names.
