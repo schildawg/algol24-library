@@ -211,6 +211,112 @@ begin
     Exit Out.Text;
 end
 
+// ------------------------------------------------------------------- editing
+
+/// S with Count characters removed, starting at index From.
+///
+/// Total over every index a caller might compute: a From at or past the end
+/// answers S unchanged, and a Count running past the end removes what there
+/// is. That totality is the reason the routine exists, because the obvious
+/// composition is not total -- `Copy (S, 0, From) + Copy (S, From + Count,
+/// Length (S))` raises whenever `From + Count` exceeds the length, `Copy`
+/// clamping an over-long count but refusing a start past the end.
+///
+/// A negative From or Count raises rather than counting back from the end.
+/// No routine in this library reads a negative index that way, and inventing
+/// the convention here would make this the one place it held.
+///
+/// # Raises
+/// `Delete needs a start of zero or more.` for a negative From, and
+/// `Delete needs a count of zero or more.` for a negative Count.
+///
+/// # Examples
+/// `Delete Removes The Characters At The Given Index`
+extension function Delete (S : String, From : Integer, Count : Integer) : String;
+begin
+    if From < 0 then raise 'Delete needs a start of zero or more.';
+    if Count < 0 then raise 'Delete needs a count of zero or more.';
+
+    var Len := Length (S);
+
+    if From >= Len then Exit S;
+
+    var After := From + Count;
+
+    if After > Len then After := Len;
+
+    Exit Copy (S, 0, From) + Copy (S, After, Len - After);
+end
+
+/// S with What inserted so that it begins at index At.
+///
+/// The string inserted *into* comes first, where Turbo Pascal's `Insert` put
+/// the inserted text first. An extension's receiver is its first parameter, so
+/// this order is what makes `S.Insert (' and ', 4)` readable; an order that
+/// could not be called as a method would have been the odder choice.
+///
+/// An At of zero prepends and an At at or past the end appends, so the routine
+/// is total over every index as `Delete` is. Inserting the empty string
+/// answers S unchanged.
+///
+/// # Raises
+/// `Insert needs a position of zero or more.` for a negative At.
+///
+/// # Examples
+/// `Insert Places Its Argument At The Given Index`
+extension function Insert (S : String, What : String, At : Integer) : String;
+begin
+    if At < 0 then raise 'Insert needs a position of zero or more.';
+
+    var Len   := Length (S);
+    var Where := At;
+
+    if Where > Len then Where := Len;
+
+    Exit Copy (S, 0, Where) + What + Copy (S, Where, Len - Where);
+end
+
+/// S with every occurrence of What replaced by With.
+///
+/// Every occurrence rather than the first, which is the commoner need and the
+/// one that cannot be had from the core in a line. Replacing only the first is
+/// `Pos` followed by `Delete` and `Insert`.
+///
+/// The scan never re-reads what it has just written, so a replacement
+/// containing the thing it replaces terminates: `Replace ('aa', 'a', 'aa')`
+/// answers `aaaa` rather than running forever.
+///
+/// An empty What raises, for the same reason `Split`'s does -- there is no
+/// sequence of replacements that would mean it. An empty With is legitimate
+/// and removes every occurrence.
+///
+/// # Raises
+/// `Replace needs something to look for.` for an empty What.
+///
+/// # Examples
+/// `Replace Changes Every Occurrence`
+extension function Replace (S : String, What : String, With : String) : String;
+begin
+    if Length (What) = 0 then raise 'Replace needs something to look for.';
+
+    var Out  := Buffer ();
+    var Rest := S;
+    var At   := Pos (Rest, What);
+
+    while At >= 0 do
+    begin
+        Out.Append (Copy (Rest, 0, At));
+        Out.Append (With);
+
+        Rest := Copy (Rest, At + Length (What), Length (Rest));
+        At   := Pos (Rest, What);
+    end
+
+    Out.Append (Rest);
+
+    Exit Out.Text;
+end
+
 // ---------------------------------------------------------------------- tests
 
 test 'Trim Removes Whitespace From Either End';
@@ -474,4 +580,154 @@ begin
     AssertEqual ('abc', 'abc'.Split (',').Join (','));
     AssertEqual ('', ''.Split (',').Join (','));
     AssertEqual ('a::b', 'a::b'.Split ('::').Join ('::'));
+end
+
+test 'Delete Removes The Characters At The Given Index';
+begin
+    AssertEqual ('abef', Delete ('abcdef', 2, 2));
+    AssertEqual ('def', Delete ('abcdef', 0, 3));
+    AssertEqual ('abcd', Delete ('abcdef', 4, 2));
+    AssertEqual ('', Delete ('abcdef', 0, 6));
+end
+
+/// The totality the routine exists for: the composition it replaces raises on
+/// each of these, Copy refusing a start past the end.
+test 'Delete Is Total Over Any Index Past The End';
+begin
+    AssertEqual ('ab', Delete ('abcdef', 2, 99));
+    AssertEqual ('abcdef', Delete ('abcdef', 6, 2));
+    AssertEqual ('abcdef', Delete ('abcdef', 99, 2));
+    AssertEqual ('', Delete ('', 0, 3));
+    AssertEqual ('', Delete ('', 9, 3));
+end
+
+test 'Delete Of Nothing Answers Its Argument Unchanged';
+begin
+    AssertEqual ('abcdef', Delete ('abcdef', 2, 0));
+    AssertEqual ('abcdef', Delete ('abcdef', 0, 0));
+end
+
+test 'Delete Refuses A Negative Start Or Count';
+begin
+    var Raised := False;
+
+    try Delete ('abcdef', 0 - 1, 2); except Raised := True; end
+    AssertTrue (Raised);
+
+    Raised := False;
+    try Delete ('abcdef', 2, 0 - 1); except Raised := True; end
+    AssertTrue (Raised);
+end
+
+test 'Delete Answers The Same Either Spelling';
+begin
+    AssertEqual (Delete ('abcdef', 2, 2), 'abcdef'.Delete (2, 2));
+    AssertEqual ('abef', 'abcdef'.Delete (2, 2));
+end
+
+test 'Insert Places Its Argument At The Given Index';
+begin
+    AssertEqual ('abXYcdef', Insert ('abcdef', 'XY', 2));
+    AssertEqual ('XYabcdef', Insert ('abcdef', 'XY', 0));
+    AssertEqual ('abcdefXY', Insert ('abcdef', 'XY', 6));
+end
+
+/// Total in the same way Delete is: a position past the end appends.
+test 'Insert At A Position Past The End Appends';
+begin
+    AssertEqual ('abcdefXY', Insert ('abcdef', 'XY', 99));
+    AssertEqual ('XY', Insert ('', 'XY', 0));
+    AssertEqual ('XY', Insert ('', 'XY', 99));
+end
+
+test 'Insert Of Nothing Answers Its Argument Unchanged';
+begin
+    AssertEqual ('abcdef', Insert ('abcdef', '', 3));
+    AssertEqual ('', Insert ('', '', 0));
+end
+
+test 'Insert Refuses A Negative Position';
+begin
+    var Raised := False;
+
+    try Insert ('abcdef', 'XY', 0 - 1); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+test 'Insert Answers The Same Either Spelling';
+begin
+    AssertEqual (Insert ('abcdef', 'XY', 2), 'abcdef'.Insert ('XY', 2));
+    AssertEqual ('abXYcdef', 'abcdef'.Insert ('XY', 2));
+end
+
+/// Delete and Insert are inverses at the same index.
+test 'Insert Undoes Delete At The Same Index';
+begin
+    AssertEqual ('abcdef', 'abcdef'.Delete (2, 2).Insert ('cd', 2));
+    AssertEqual ('abcdef', 'abcdef'.Insert ('XY', 2).Delete (2, 2));
+end
+
+test 'Replace Changes Every Occurrence';
+begin
+    AssertEqual ('a-b-c', Replace ('a,b,c', ',', '-'));
+    AssertEqual ('xbxbx', Replace ('ababa', 'a', 'x'));
+    AssertEqual ('a::b', Replace ('a,b', ',', '::'));
+end
+
+test 'Replace Leaves A String Without The Pattern Alone';
+begin
+    AssertEqual ('abcdef', Replace ('abcdef', 'zz', 'y'));
+    AssertEqual ('', Replace ('', 'a', 'b'));
+end
+
+/// An empty replacement is a deletion of every occurrence.
+test 'Replace With Nothing Removes Every Occurrence';
+begin
+    AssertEqual ('abc', Replace ('a,b,c', ',', ''));
+    AssertEqual ('', Replace (',,,', ',', ''));
+end
+
+/// The scan must not re-read what it wrote, or this would not terminate.
+test 'Replace Does Not Rescan Its Own Replacement';
+begin
+    AssertEqual ('aaaa', Replace ('aa', 'a', 'aa'));
+    AssertEqual ('xaxa', Replace ('aa', 'a', 'xa'));
+    AssertEqual ('aa', Replace ('a', 'a', 'aa'));
+end
+
+test 'Replace Handles Adjacent And Bracketing Occurrences';
+begin
+    AssertEqual ('xx', Replace (',,', ',', 'x'));
+    AssertEqual ('x-x', Replace (',-,', ',', 'x'));
+    AssertEqual ('-x-', Replace ('-,-', ',', 'x'));
+end
+
+/// A pattern of more than one character, which the scan steps over whole.
+test 'Replace Takes A Pattern Of Any Length';
+begin
+    AssertEqual ('a-b-c', Replace ('a::b::c', '::', '-'));
+    AssertEqual ('XY', Replace ('abcd', 'abcd', 'XY'));
+end
+
+test 'Replace Refuses An Empty Pattern';
+begin
+    var Raised := False;
+
+    try Replace ('abc', '', 'x'); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+test 'Replace Answers The Same Either Spelling';
+begin
+    AssertEqual (Replace ('a,b', ',', '-'), 'a,b'.Replace (',', '-'));
+    AssertEqual ('a-b', 'a,b'.Replace (',', '-'));
+end
+
+/// The chain the three were added for.
+test 'Delete Insert And Replace Compose With The Rest';
+begin
+    AssertEqual ('A-B', '  a,b  '.Trim ().Replace (',', '-').Upper ());
+    AssertEqual ('[ab]', 'ab'.Insert ('[', 0).Insert (']', 99));
 end

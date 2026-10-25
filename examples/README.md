@@ -98,7 +98,7 @@ of them want a window and a person:
 | `figures.a24` | the figures, the thirteen fills woven, and what a boundary `FloodFill` does including when it leaks |
 | `surfaces.a24` | the interleave one text plane cannot express — a chart drawn over a window's own text, and a second window dragged over both |
 | `ide.a24` | the acceptance piece: the Turbo C++ screen rebuilt from the vocabulary |
-| `ide-crt.a24` | the same screen on a terminal, three lines changed |
+| `ide-crt.a24` | the same screen on a terminal — the celled half transfers almost verbatim, the two drawn panels cannot, `crt` having no pixels |
 | `piano.a24` | where `graph` meets `sound` — an octave of keys, Ode to Joy, each key lit as it sounds |
 | `jukebox.a24` | where the mouse pays off: each title is a ViewPort, so a click is `E.Surface = Titles[I]` rather than arithmetic |
 

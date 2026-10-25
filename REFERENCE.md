@@ -34,6 +34,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Cos`](#cos) | function | `math` |
 | [`Crt`](#crt) | unit | `crt` |
 | [`Delay`](#delay) | procedure | `crt` and `graph` |
+| [`Delete`](#delete) | extension function | `strings` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
@@ -67,6 +68,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Infinity`](#infinity) | constant | `math` |
 | [`InitCrt`](#initcrt) | procedures | `crt` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
+| [`Insert`](#insert) | extension function | `strings` |
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
 | [`Int`](#int) | function | `math` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
@@ -108,6 +110,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ReadLines`](#readlines) | function and procedure | `file` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Repeat`](#repeat) | extension function | `strings` |
+| [`Replace`](#replace) | extension function | `strings` |
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
@@ -1439,6 +1442,71 @@ and not much more:    true
 zero and negative return at once
 ```
 
+
+---
+
+## Delete
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument with a run of characters removed.
+
+**Declaration**
+
+```algol24
+extension function Delete (S : String, From : Integer, Count : Integer) : String;
+```
+
+**Remarks**
+
+`From` is a 0-based index, as every string index in the language is.
+
+Total over every index a caller might compute: a `From` at or past the end
+answers `S` unchanged, and a `Count` running past the end removes what there
+is. That totality is the reason the routine exists, because the obvious
+composition is **not** total —
+`Copy (S, 0, From) + Copy (S, From + Count, Length (S))` raises whenever
+`From + Count` exceeds the length. `Copy` clamps an over-long count but refuses
+a start past the end, and the asymmetry is easy to miss until a generous count
+meets a short string.
+
+A `Count` of zero answers `S` unchanged. A negative `From` or `Count` raises
+rather than counting back from the end; no routine in the library reads a
+negative index that way.
+
+[`Insert`](#insert) is the inverse at the same index.
+
+Both spellings work: `Delete (S, 2, 2)` and `S.Delete (2, 2)`.
+
+Raises `Delete needs a start of zero or more.` for a negative `From`, and
+`Delete needs a count of zero or more.` for a negative `Count`.
+
+**See also**
+
+[`Insert`](#insert), [`Replace`](#replace), [`Trim`](#trim)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn ('abcdef'.Delete (2, 2));
+WriteLn (Delete ('NONAME00.CPP', 6, 2));
+
+// Total where the obvious composition is not: a count running past the end
+// removes what there is, and a start past the end removes nothing.
+WriteLn ('abcdef'.Delete (4, 99));
+WriteLn ('abcdef'.Delete (99, 2));
+```
+
+```console
+abef
+NONAME.CPP
+abcd
+abcdef
+```
 
 ---
 
@@ -3739,6 +3807,62 @@ CloseGraph ();
 ```console
 640
 480
+```
+
+---
+
+## Insert
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument with another string placed at a given index.
+
+**Declaration**
+
+```algol24
+extension function Insert (S : String, What : String, At : Integer) : String;
+```
+
+**Remarks**
+
+⚠️ **The argument order is not Turbo Pascal's.** That `Insert` took the
+inserted text first and the target second. An extension's receiver is its first
+parameter, so the string being inserted *into* has to come first here — which
+is also the order that makes `S.Insert (' and ', 4)` readable. An order that
+could not be called as a method would have been the odder choice.
+
+`At` is a 0-based index. Zero prepends, and an `At` at or past the end appends,
+so the routine is total over every index as [`Delete`](#delete) is. Inserting
+the empty string answers `S` unchanged.
+
+A negative `At` raises.
+
+Both spellings work: `Insert (S, 'XY', 2)` and `S.Insert ('XY', 2)`.
+
+Raises `Insert needs a position of zero or more.` for a negative `At`.
+
+**See also**
+
+[`Delete`](#delete), [`Replace`](#replace), [`Repeat`](#repeat)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn ('abcdef'.Insert ('--', 3));
+WriteLn (Insert ('2026', '-10-24', 4));
+
+// Zero prepends, and a position past the end appends.
+WriteLn ('center'.Insert ('[', 0).Insert (']', 99));
+```
+
+```console
+abc--def
+2026-10-24
+[center]
 ```
 
 ---
@@ -6119,6 +6243,64 @@ WriteLn ('[' + Repeat ('x', 0) + ']');
 --------------------
 ababab
 []
+```
+
+---
+
+## Replace
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument with every occurrence of one string changed to another.
+
+**Declaration**
+
+```algol24
+extension function Replace (S : String, What : String, With : String) : String;
+```
+
+**Remarks**
+
+Every occurrence rather than the first, which is the commoner need and the one
+the core cannot answer in a line. Replacing only the first is `Pos` followed by
+[`Delete`](#delete) and [`Insert`](#insert).
+
+The scan never re-reads what it has just written, so a replacement containing
+the thing it replaces terminates rather than running forever:
+`Replace ('aa', 'a', 'aa')` answers `aaaa`.
+
+An empty `With` is legitimate and removes every occurrence. An empty `What`
+raises, for the same reason [`Split`](#split)'s does — there is no sequence of
+replacements that would mean it.
+
+Both spellings work: `Replace (S, ',', '-')` and `S.Replace (',', '-')`.
+
+Raises `Replace needs something to look for.` for an empty `What`.
+
+**See also**
+
+[`Delete`](#delete), [`Insert`](#insert), [`Split`](#split)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn ('a,b,c'.Replace (',', ' and '));
+
+// Every occurrence, and an empty replacement removes them all.
+WriteLn ('1,000,000'.Replace (',', ''));
+
+// The replacement is never rescanned, so a pattern inside it terminates.
+WriteLn ('aa'.Replace ('a', 'aa'));
+```
+
+```console
+a and b and c
+1000000
+aaaa
 ```
 
 ---

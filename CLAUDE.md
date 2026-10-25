@@ -307,9 +307,9 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 14 | complete |
 | `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
-| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, no C at all | 27 | complete |
+| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 47 | complete |
 
-The Tests column is the unit's own `test` blocks, 478 in all. `./test.sh`
+The Tests column is the unit's own `test` blocks, 498 in all. `./test.sh`
 reports what `--test` can reach instead, imports included, so it prints 385
 for `graph` (its 298, plus `math`'s 69 and `testing`'s 9) and 92 for `sound`.
 
@@ -364,7 +364,14 @@ That limitation is asserted rather than merely documented: a test checks
 accepted where one is declared, which is what makes `Repeat ('-', 40)` the
 call it exists for. `Split` keeps the empty pieces, which is what makes
 `Join (Split (S, By), By)` answer `S` for every input — a test asserts the
-round trip. The private whitespace helper uses the language's `private`
+round trip. `Delete` and `Insert` exist because the obvious composition is
+**not** total: `Copy` clamps an over-long count but *raises* on a start past
+the end, so `Copy (S, 0, From) + Copy (S, From + Count, Length (S))` fails on
+exactly the common "cut to the end with a generous count" call. `Replace`
+changes every occurrence and never rescans what it wrote, so
+`Replace ('aa', 'a', 'aa')` terminates rather than looping. `Insert`'s argument
+order is **not** Turbo Pascal's — the string inserted into comes first, because
+an extension's receiver must. The private whitespace helper uses the language's `private`
 [MOD-006], which no other unit here does yet; `crt`'s `ByteAt` says "private
 to this unit" in a comment and is in fact exported.
 
@@ -435,8 +442,17 @@ a screen and read the escapes back through `EscapeText ()`. Colors go out as
 24-bit where `COLORTERM` says truecolor, and as the nearest of the 256-color
 cube otherwise. `Blink` is the terminal's own cadence, so there is no
 `SetBlinkRate`. `Alpha` is 0 or visible, a cell holding one character. `ReadKey` naps ten milliseconds between polls through `alg_crt_nap`, so waiting for a key is a wait rather than a spin -- `graph` delays through SDL and this unit has no SDL. ⚠️ **The language's `clock ()` answers SECONDS**, not milliseconds; reading it the other way makes every duration wrong by a thousand.
-`examples/ide-crt.a24` is the acceptance piece — `examples/ide.a24` with three
-lines changed.
+`examples/ide-crt.a24` is the acceptance piece — the same Turbo C++ screen on a
+terminal. Not `examples/ide.a24` with a few lines changed, which this file used
+to claim: the two share their three helpers (`Frame`, `MenuItem`, `StatusKey`)
+and the whole celled half — menu bar, status line, framed windows stacked by
+`Order`, and an event loop that moves one — and then necessarily part company,
+because `crt` has no pixels. `ide.a24`'s two ViewPorts, the line-style panel
+and the plotted graph with axes, have no counterpart here and `ide-crt.a24`
+puts its own windows where they were. Ignoring comments the two differ in some
+180 lines. What the port actually demonstrates is that the **text** vocabulary
+is shared between the units closely enough to transfer almost verbatim, which
+is the interesting half of the claim and survives stating it accurately.
 
 ⚠️ **Language points `crt` and `sound` learned the hard way**: it is
 `Char (65)`, not `Chr`; `#0` is **not a Char**, so NUL cannot be a sentinel;
