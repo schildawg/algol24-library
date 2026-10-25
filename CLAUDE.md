@@ -205,6 +205,35 @@ it, and diff.
 
 Learned here, by use:
 
+- ⚠️ **An extension's visibility is per-file and non-transitive, so every
+  consumer must say `uses` of the unit itself.** Since 0.1.5 a top-level
+  subprogram marked `extension` may also be called on its first parameter —
+  `Trim (S)` and `S.Trim ()` both, always [FUN-015]. But [MOD-015] finds one
+  only among the extensions visible in the file being compiled, so a unit that
+  `uses strings` internally does **not** give *its* importers `S.Trim ()`.
+  Measured: a program importing a unit that imports the extension reaches the
+  ordinary function fine and answers `Undefined property 'Upper'.` for the
+  method spelling. This is the same non-transitivity that made `crt` duplicate
+  `graph`'s constants, and it applies to method syntax too.
+- ⚠️ **A member of the name always wins, and the warning that says so goes to
+  stdout.** `x.f` resolves to a member first [EXP-022] and reaches an extension
+  only where the program was an error before, so nothing already written can
+  change meaning. Where a member hides a visible extension the compiler warns
+  and names the class — onto **stdout**, which is `DEFECTS.md` L-4. Any
+  extension this library exports must therefore be named clear of the member
+  names on its own classes, or a consumer's output gains a line it did not
+  print.
+- ⚠️ **Extensions do not remove the surface-first aliases.** The 59 delegates
+  in `graph` and `crt` go the other way — they give a *method* a free-function
+  spelling, `Line (V, …)` for `V.Line (…)` — where `extension` gives a function
+  a method spelling. `ViewPort` already has a `Line` member, so step 1 of
+  [EXP-022] answers it; there is nothing for an extension to add. The aliases
+  stay hand-written.
+- An extension's receiver must have a **written type**, and a declaration with
+  no parameters at all is refused. `extension` is also refused on a method, a
+  constructor, a nested subprogram and a `property`. It is **not** a keyword
+  [LEX-011] — `var extension := 8;` still compiles.
+
 - ⚠️ **A type-preserving routine must be written untyped, and that costs the
   caller something.** `Abs`, `Sqr`, `Min` and `Max` take their result type from
   their argument, which falls out of the arithmetic rather than being arranged.
@@ -278,8 +307,9 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is CoreAudio -- a square wave mixed with up to sixteen decoded samples | 14 | complete |
 | `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
+| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, no C at all | 27 | complete |
 
-The Tests column is the unit's own `test` blocks, 451 in all. `./test.sh`
+The Tests column is the unit's own `test` blocks, 478 in all. `./test.sh`
 reports what `--test` can reach instead, imports included, so it prints 385
 for `graph` (its 298, plus `math`'s 69 and `testing`'s 9) and 92 for `sound`.
 
@@ -319,6 +349,24 @@ needs; the library reads exactly one file -- a glyph file, in
 `InstallUserFont` -- and now does it through `file`. Nothing in the core is
 needed for file I/O: C can take a path as a String and answer a count, which
 is all `fileffi.c` uses.
+
+⚠️ **`strings` needs 0.1.5, and so therefore does the whole library.** It is
+the first unit to use `extension` [FUN-015], which 0.1.4 cannot parse. Before
+it there was no version floor at all; now `./test.sh` fails on anything older.
+
+`strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
+so the only one besides it that is portable as written — nothing for a
+per-platform build to rewrite. `Upper` and `Lower` are **ASCII only** and leave
+every other code point alone, because Unicode case mapping is a table rather
+than a rule and is not even character-to-character (`ß` uppercases to `SS`).
+That limitation is asserted rather than merely documented: a test checks
+`Upper ('café')` answers `CAFé`. `Repeat` takes a `String` and a Char is
+accepted where one is declared, which is what makes `Repeat ('-', 40)` the
+call it exists for. `Split` keeps the empty pieces, which is what makes
+`Join (Split (S, By), By)` answer `S` for every input — a test asserts the
+round trip. The private whitespace helper uses the language's `private`
+[MOD-006], which no other unit here does yet; `crt`'s `ByteAt` says "private
+to this unit" in a comment and is in fact exported.
 
 ⚠️ **`alg_` is the runtime's prefix, and a common noun after it will
 collide.** `fileffi.c` first used `alg_file_exists`, which the compiler's own

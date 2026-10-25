@@ -72,6 +72,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
 | [`IsTerminal`](#isterminal) | function | `crt` |
+| [`Join`](#join) | extension function | `strings` |
 | [`KeyPressed`](#keypressed) | function | `graph` and `crt` |
 | [`KeyUp` … `KeyClose`](#keys) | constants | `graph` and `crt` |
 | [`Line`](#line) | procedure, alias | `graph` |
@@ -80,6 +81,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`LineTo`](#lineto) | procedure, alias | `graph` |
 | [`Ln`](#ln) | function | `math` |
 | [`LoadSound`](#loadsound) | functions and procedures | `sound` |
+| [`Lower`](#lower) | extension function | `strings` |
 | [`LowVideo`](#lowvideo) | procedure | `graph` and `crt` |
 | [`Max`](#max) | function | `math` |
 | [`Min`](#min) | function | `math` |
@@ -105,6 +107,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ReadKey`](#readkey) | function | `graph` and `crt` |
 | [`ReadLines`](#readlines) | function and procedure | `file` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
+| [`Repeat`](#repeat) | extension function | `strings` |
 | [`Round`](#round) | function | `math` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
@@ -125,6 +128,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Sin`](#sin) | function | `math` |
 | [`Sound`](#sound) | procedures | `sound` |
 | [`SoundAvailable`](#soundavailable) | function | `sound` |
+| [`Split`](#split) | extension function | `strings` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
 | [`SurfaceAt`](#surfaceat) | function | `graph` and `crt` |
@@ -136,7 +140,9 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`TextRows`](#textrows) | function | `graph` and `crt` |
 | [`TextSettings` `ViewSettings`](#textsettings) | classes | `graph` |
 | [`TextWidth` `TextHeight`](#textwidth) | functions | `graph` |
+| [`Trim`](#trim) | extension function | `strings` |
 | [`Trunc`](#trunc) | function | `math` |
+| [`Upper`](#upper) | extension function | `strings` |
 | [`ViewPort`](#viewport) | class | `graph` |
 | [`WhereX`](#wherex) | function | `graph` and `crt` |
 | [`WhereY`](#wherey) | function | `graph` and `crt` |
@@ -4047,6 +4053,74 @@ ReadKey gave: true
 
 ---
 
+## Join
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns the members of a List written one after another with a separator
+between them.
+
+**Declaration**
+
+```algol24
+extension function Join (L : List, By : String) : String;
+```
+
+**Remarks**
+
+The receiver is a List rather than a String, this being the one routine in
+`strings` that answers text instead of taking it. Both spellings work, as they
+do for every extension: `Join (L, ', ')` and `L.Join (', ')` are the same call.
+
+Members go through `Str`, so a List of Integers joins as readily as a List of
+String, and a class carrying a `ToString` joins as that.
+
+An empty List answers the empty string and a List of one answers that member
+alone, in both cases without consulting `By`. An empty `By` is legitimate and
+concatenates.
+
+`Join` undoes [`Split`](#split) for every string and every separator, because
+`Split` keeps the empty pieces.
+
+Never raises.
+
+**See also**
+
+[`Split`](#split), [`Repeat`](#repeat), [`Trim`](#trim)
+
+**Example**
+
+```algol24
+uses strings;
+
+var Names := List ();
+
+Names.Add ('Ada');
+Names.Add ('Grace');
+Names.Add ('Alan');
+
+WriteLn (Names.Join (', '));
+WriteLn (Join (Names, ' and '));
+
+var Numbers := List ();
+
+Numbers.Add (1);
+Numbers.Add (2);
+Numbers.Add (3);
+
+WriteLn (Numbers.Join ('+'));
+```
+
+```console
+Ada, Grace, Alan
+Ada and Grace and Alan
+1+2+3
+```
+
+---
+
 ## KeyPressed
 
 *function* — unit `graph` and `crt`
@@ -4462,6 +4536,54 @@ started:  false (audible: false)
 freed:    SoundLength wants a sound from LoadSound.
 ```
 
+
+---
+
+## Lower
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument with the ASCII uppercase letters lowered.
+
+**Declaration**
+
+```algol24
+extension function Lower (S : String) : String;
+```
+
+**Remarks**
+
+ASCII only, on the same terms as [`Upper`](#upper) and for the same reason:
+Unicode case mapping is a table rather than a rule. Every character outside
+`A`–`Z` comes back exactly as it went in, accented letters and emoji included.
+
+Both spellings work: `Lower (S)` and `S.Lower ()`.
+
+Never raises.
+
+**See also**
+
+[`Upper`](#upper), [`Trim`](#trim)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn (Lower ('SHOUTING'));
+WriteLn ('MiXeD'.Lower ());
+
+// ASCII only, on the same terms as Upper.
+WriteLn ('CAFÉ'.Lower ());
+```
+
+```console
+shouting
+mixed
+cafÉ
+```
 
 ---
 
@@ -5951,6 +6073,56 @@ See [`Line`](#line), which frames its chart with one.
 
 ---
 
+## Repeat
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument written the given number of times, end to end.
+
+**Declaration**
+
+```algol24
+extension function Repeat (S : String, Times : Integer) : String;
+```
+
+**Remarks**
+
+A one-character literal is a Char and not a String, and a Char is accepted
+here — `Repeat ('-', 40)` is the call the routine exists for, and
+`Repeat ('ab', 3)` works the same way.
+
+A `Times` of zero answers the empty string, which is what makes the routine
+usable for a width that may come to nothing. A negative `Times` raises rather
+than answering empty, there being no reading of it that was intended.
+
+Both spellings work: `Repeat (S, 3)` and `S.Repeat (3)`.
+
+Raises `Repeat needs a count of zero or more.` for a negative count.
+
+**See also**
+
+[`Join`](#join), [`Trim`](#trim)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn (Repeat ('-', 20));
+WriteLn ('ab'.Repeat (3));
+WriteLn ('[' + Repeat ('x', 0) + ']');
+```
+
+```console
+--------------------
+ababab
+[]
+```
+
+---
+
 ## Round
 
 *function* — unit `math`
@@ -7349,6 +7521,73 @@ See [`Sound`](#sound).
 
 ---
 
+## Split
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns the pieces of a string between occurrences of a separator, as a List.
+
+**Declaration**
+
+```algol24
+extension function Split (S : String, By : String) : List;
+```
+
+**Remarks**
+
+Every piece is kept, the empty ones included: a separator at either end leaves
+an empty piece there, and two separators together leave one between them. That
+is what makes [`Join`](#join) undo `Split` for every string and every
+separator; dropping the empties would be a different routine wearing the same
+name.
+
+A separator that does not occur answers a List of one piece, `S` itself, so a
+caller need not ask first. The separator may be of any length.
+
+An empty separator raises, there being no sequence of pieces that would mean
+it.
+
+To find one occurrence rather than cut at all of them, the core's own `Pos`
+answers the index of the first, or −1 when there is none.
+
+Both spellings work: `Split (S, ',')` and `S.Split (',')`.
+
+Raises `Split needs a separator.` for an empty separator.
+
+**See also**
+
+[`Join`](#join), [`Trim`](#trim)
+
+**Example**
+
+```algol24
+uses strings;
+
+var Fields := 'red,green,blue'.Split (',');
+
+WriteLn (Fields.Length);
+WriteLn (Str (Fields[1]));
+
+// A separator that does not occur answers one piece, the whole string.
+WriteLn ('no commas here'.Split (',').Length);
+
+// Every piece is kept, which is what makes Join undo Split.
+WriteLn ('[' + ',a,'.Split (',').Join ('|') + ']');
+WriteLn ('a,,b'.Split (',').Join (','));
+```
+
+```console
+3
+green
+1
+[|a|]
+a,,b
+```
+
+---
+
 ## Sqr
 
 *function* — unit `math`
@@ -7942,6 +8181,64 @@ turned:   32 by 160
 
 ---
 
+## Trim
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument without the whitespace at either end.
+
+**Declaration**
+
+```algol24
+extension function Trim (S : String) : String;
+```
+
+**Remarks**
+
+Whitespace is the space and the five control characters above it that a text
+file uses as such — tab, newline, vertical tab, form feed and carriage return.
+Nothing else, which is the only answer that can be stated exactly: the Unicode
+space separators are a table, and `strings` has none.
+
+Whitespace inside the string is left alone; only the ends are touched. A string
+of nothing but whitespace answers the empty string, which is also what
+trimming the empty string answers.
+
+The ends are found by index rather than by building, so a string needing no
+trimming is copied once and never examined character by character.
+
+Both spellings work: `Trim (S)` and `S.Trim ()`. The second is what makes a
+chain read in the order it happens — `S.Trim ().Upper ()`.
+
+Never raises.
+
+**See also**
+
+[`Upper`](#upper), [`Lower`](#lower), [`Split`](#split)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn ('[' + Trim ('   padded   ') + ']');
+
+var Messy := #9 + '  tabs and spaces  ' + #10;
+
+WriteLn ('[' + Messy.Trim () + ']');
+WriteLn ('[' + Trim ('     ') + ']');
+```
+
+```console
+[padded]
+[tabs and spaces]
+[]
+```
+
+---
+
 ## Trunc
 
 *function* — unit `math`
@@ -8024,6 +8321,60 @@ end
 9
 1000000000000000019884624838656
 Trunc of an infinity.
+```
+
+---
+
+## Upper
+
+*extension function* — unit `strings`
+
+**Function**
+
+Returns its argument with the ASCII lowercase letters raised.
+
+**Declaration**
+
+```algol24
+extension function Upper (S : String) : String;
+```
+
+**Remarks**
+
+ASCII only, and deliberately. Unicode case mapping is a table rather than a
+rule, and not even a character-to-character one: `ß` uppercases to `SS`, and
+Turkish `i` to a dotted capital that is not `I`. A routine handling some of the
+exceptions and not others would be harder to reason about than one handling
+none, so every character outside `a`–`z` comes back exactly as it went in —
+accented letters, Greek, Cyrillic and emoji alike.
+
+Both spellings work: `Upper (S)` and `S.Upper ()`.
+
+Never raises.
+
+**See also**
+
+[`Lower`](#lower), [`Trim`](#trim)
+
+**Example**
+
+```algol24
+uses strings;
+
+WriteLn (Upper ('hello'));
+WriteLn ('mixed CASE 123'.Upper ());
+
+// ASCII only: the accented letter comes back as it went in.
+WriteLn ('café'.Upper ());
+
+WriteLn ('  trimmed first  '.Trim ().Upper ());
+```
+
+```console
+HELLO
+MIXED CASE 123
+CAFé
+TRIMMED FIRST
 ```
 
 ---

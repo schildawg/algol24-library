@@ -1,0 +1,477 @@
+/// Verbs over text that the core does not carry.
+///
+/// Every routine here is an `extension`, so each may be written either way --
+/// `Trim (S)` or `S.Trim ()` -- and a chain of them reads in the order it
+/// happens rather than inside out. The permission is per file: a program
+/// reaches the method spelling only where its own `uses` clause names this
+/// unit, which is what keeps `S.Trim ()` from meaning something different in
+/// two parts of one program.
+///
+/// The core already answers `Length`, `Copy`, `Pos`, `Str`, indexing and `+`,
+/// and nothing here re-spells one of them. A unit that restates the core is a
+/// unit that has to be kept in step with it.
+///
+/// Pure Algol-24, with no foreign code at all. That makes it the only unit
+/// besides `testing` that needs nothing of a platform -- no library name in a
+/// declaration, and nothing for a per-platform build to rewrite.
+unit strings;
+
+/// Whether C is one of the characters `Trim` removes.
+///
+/// Space, and the five control characters above it that a text file uses as
+/// whitespace: tab, newline, vertical tab, form feed and carriage return.
+/// Nothing else, which is the only answer that can be stated exactly -- the
+/// Unicode space separators are a table, and this unit has none.
+private function IsSpace (C : Char) : Boolean;
+begin
+    var N := Ord (C);
+
+    Exit N = 32 or (N >= 9 and N <= 13);
+end
+
+// ------------------------------------------------------------------- trimming
+
+/// S without the whitespace at either end.
+///
+/// A string of nothing but whitespace answers the empty string, which is the
+/// same answer as trimming the empty string and is what makes the routine
+/// total. The ends are found by index rather than by building, so a string
+/// needing no trimming is copied once and never examined character by
+/// character.
+///
+/// # Raises
+/// Nothing. Every string has an answer, the empty one included.
+///
+/// # Examples
+/// `Trim Removes Whitespace From Either End`
+extension function Trim (S : String) : String;
+begin
+    var First := 0;
+    var Last  := Length (S) - 1;
+
+    while First <= Last and IsSpace (S[First]) do First := First + 1;
+    while Last >= First and IsSpace (S[Last])  do Last  := Last - 1;
+
+    Exit Copy (S, First, Last - First + 1);
+end
+
+// ----------------------------------------------------------------------- case
+
+/// S with its ASCII lowercase letters raised, and every other character left
+/// alone.
+///
+/// ASCII only, and deliberately: Unicode case mapping is a table rather than a
+/// rule, and not even a character-to-character one -- `ß` uppercases to `SS`,
+/// and Turkish `i` to a dotted capital that is not `I`. A routine that handled
+/// some of the exceptions and not others would be harder to reason about than
+/// one that handles none, so accented letters, Greek, Cyrillic and emoji all
+/// come back exactly as they went in.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `Upper Raises The ASCII Letters And Leaves The Rest`
+extension function Upper (S : String) : String;
+begin
+    var Out := Buffer ();
+
+    for var C in S do
+    begin
+        var N := Ord (C);
+
+        if N >= 97 and N <= 122 then Out.Append (Char (N - 32));
+        else Out.Append (C);
+    end
+
+    Exit Out.Text;
+end
+
+/// S with its ASCII uppercase letters lowered, and every other character left
+/// alone.
+///
+/// ASCII only, on the same terms as `Upper` and for the same reason.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `Lower Lowers The ASCII Letters And Leaves The Rest`
+extension function Lower (S : String) : String;
+begin
+    var Out := Buffer ();
+
+    for var C in S do
+    begin
+        var N := Ord (C);
+
+        if N >= 65 and N <= 90 then Out.Append (Char (N + 32));
+        else Out.Append (C);
+    end
+
+    Exit Out.Text;
+end
+
+// ------------------------------------------------------------------- building
+
+/// S written Times over, end to end.
+///
+/// A count of zero answers the empty string, which is what makes the routine
+/// usable in a loop whose width may come to nothing. A negative count raises
+/// rather than answering empty, there being no reading of it that was
+/// intended.
+///
+/// A one-character literal is a Char and not a String, and a Char is accepted
+/// here: `Repeat ('-', 40)` is the call this routine exists for, and
+/// `Repeat ('ab', 3)` works the same way.
+///
+/// # Raises
+/// `Repeat needs a count of zero or more.` for a negative count.
+///
+/// # Examples
+/// `Repeat Writes Its Argument The Given Number Of Times`
+extension function Repeat (S : String, Times : Integer) : String;
+begin
+    if Times < 0 then raise 'Repeat needs a count of zero or more.';
+
+    var Out := Buffer ();
+
+    for var I := 0; I < Times; I := I + 1 do Out.Append (S);
+
+    Exit Out.Text;
+end
+
+// ------------------------------------------------------- splitting and joining
+
+/// The pieces of S between occurrences of By, as a List of String.
+///
+/// Every piece is kept, the empty ones included: a separator at either end
+/// leaves an empty piece there, and two separators together leave one between
+/// them. That is what makes the routine reversible -- `Join (Split (S, By),
+/// By)` is `S` for every S and every By -- and dropping the empties would be a
+/// different routine wearing the same name.
+///
+/// A separator that does not occur answers a List of one piece, S itself, so a
+/// caller need not ask first. An empty separator raises: there is no sequence
+/// of pieces that would mean it.
+///
+/// # Raises
+/// `Split needs a separator.` for an empty separator.
+///
+/// # Examples
+/// `Split Answers The Pieces Between The Separators`
+extension function Split (S : String, By : String) : List;
+begin
+    if Length (By) = 0 then raise 'Split needs a separator.';
+
+    var Parts := List ();
+    var Rest  := S;
+    var At    := Pos (Rest, By);
+
+    while At >= 0 do
+    begin
+        Parts.Add (Copy (Rest, 0, At));
+
+        Rest := Copy (Rest, At + Length (By), Length (Rest));
+        At   := Pos (Rest, By);
+    end
+
+    Parts.Add (Rest);
+
+    Exit Parts;
+end
+
+/// The members of L written one after another with By between them.
+///
+/// The receiver is a List rather than a String, this being the one routine
+/// here that answers text instead of taking it. Members go through `Str`, so a
+/// List of Integers joins as readily as a List of String and a class with a
+/// `ToString` joins as that.
+///
+/// An empty List answers the empty string and a List of one answers that
+/// member alone, in both cases without consulting By. An empty By is
+/// legitimate and concatenates.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `Join Writes The Members With The Separator Between Them`
+extension function Join (L : List, By : String) : String;
+begin
+    var Out := Buffer ();
+
+    for var I := 0; I < L.Length; I := I + 1 do
+    begin
+        if I > 0 then Out.Append (By);
+
+        Out.Append (Str (L[I]));
+    end
+
+    Exit Out.Text;
+end
+
+// ---------------------------------------------------------------------- tests
+
+test 'Trim Removes Whitespace From Either End';
+begin
+    AssertEqual ('abc', Trim ('   abc   '));
+    AssertEqual ('abc', Trim ('abc'));
+    AssertEqual ('a b', Trim ('  a b  '));
+end
+
+/// All six whitespace characters, and no seventh.
+test 'Trim Removes Space And The Five Control Characters Above It';
+begin
+    AssertEqual (Str ('x'), Trim (' x '));
+    AssertEqual (Str ('x'), Trim (#9 + 'x' + #9));
+    AssertEqual (Str ('x'), Trim (#10 + 'x' + #10));
+    AssertEqual (Str ('x'), Trim (#11 + 'x' + #11));
+    AssertEqual (Str ('x'), Trim (#12 + 'x' + #12));
+    AssertEqual (Str ('x'), Trim (#13 + 'x' + #13));
+
+    // Not whitespace: the one below tab, and the one above space.
+    AssertEqual (#8 + 'x' + #8, Trim (#8 + 'x' + #8));
+    AssertEqual ('!x!', Trim ('!x!'));
+end
+
+/// A string with nothing left after trimming, which is where an index-based
+/// scan would run off the end if `and` did not short-circuit.
+test 'Trim Answers Empty For A String Of Only Whitespace';
+begin
+    AssertEqual ('', Trim ('     '));
+    AssertEqual ('', Trim (''));
+    AssertEqual ('', Trim (#9 + #10 + #13));
+end
+
+test 'Trim Leaves Whitespace In The Middle Alone';
+begin
+    AssertEqual ('a  b', Trim ('  a  b  '));
+    AssertEqual ('a' + #10 + 'b', Trim (' a' + #10 + 'b '));
+end
+
+/// The method spelling, which is the permission the unit is written for and
+/// is not tested by the calls above.
+test 'Trim Answers The Same Either Spelling';
+begin
+    AssertEqual (Trim ('  x  '), '  x  '.Trim ());
+    AssertEqual (Str ('x'), '  x  '.Trim ());
+end
+
+test 'Upper Raises The ASCII Letters And Leaves The Rest';
+begin
+    AssertEqual ('ABC', Upper ('abc'));
+    AssertEqual ('ABC', Upper ('ABC'));
+    AssertEqual ('A1B!C', Upper ('a1b!c'));
+    AssertEqual ('', Upper (''));
+end
+
+test 'Lower Lowers The ASCII Letters And Leaves The Rest';
+begin
+    AssertEqual ('abc', Lower ('ABC'));
+    AssertEqual ('abc', Lower ('abc'));
+    AssertEqual ('a1b!c', Lower ('A1B!C'));
+    AssertEqual ('', Lower (''));
+end
+
+/// The boundaries of the two ranges, which an off-by-one would cross into
+/// punctuation: `@` is just below `A` and `[` just above `Z`.
+test 'Upper And Lower Touch Only The Letters';
+begin
+    AssertEqual ('@ABCXYZ[', Upper ('@abcxyz['));
+    AssertEqual ('`abcxyz{', Lower ('`ABCXYZ{'));
+
+    AssertEqual ('0123456789', Upper ('0123456789'));
+    AssertEqual ('0123456789', Lower ('0123456789'));
+end
+
+/// The documented limitation, asserted rather than merely described: a
+/// non-ASCII letter comes back exactly as it went in.
+test 'Upper And Lower Leave Characters Above ASCII Unchanged';
+begin
+    AssertEqual (Str ('é'), Upper ('é'));
+    AssertEqual (Str ('É'), Lower ('É'));
+    AssertEqual (Str ('ß'), Upper ('ß'));
+    AssertEqual ('Ελληνικά', Upper ('Ελληνικά'));
+    AssertEqual ('CAFé', Upper ('café'));
+end
+
+test 'Upper And Lower Answer The Same Either Spelling';
+begin
+    AssertEqual (Upper ('abc'), 'abc'.Upper ());
+    AssertEqual (Lower ('ABC'), 'ABC'.Lower ());
+    AssertEqual ('ABC', 'abc'.Upper ());
+    AssertEqual ('abc', 'ABC'.Lower ());
+end
+
+/// The chain is what extension functions were asked for.
+test 'Upper And Trim Compose In The Order They Are Written';
+begin
+    AssertEqual ('ABC', '  abc  '.Trim ().Upper ());
+    AssertEqual ('  ABC  ', '  abc  '.Upper ());
+end
+
+test 'Repeat Writes Its Argument The Given Number Of Times';
+begin
+    AssertEqual ('ababab', Repeat ('ab', 3));
+    AssertEqual ('ab', Repeat ('ab', 1));
+    AssertEqual ('-----', Repeat ('-', 5));
+end
+
+/// The call the routine exists for: a Char where a String is declared, which
+/// the language accepts.
+test 'Repeat Takes A One Character Literal As Readily As A String';
+begin
+    AssertEqual (Repeat ('-', 4), '----');
+    AssertEqual (40, Length (Repeat ('=', 40)));
+end
+
+test 'Repeat Of Zero Answers The Empty String';
+begin
+    AssertEqual ('', Repeat ('ab', 0));
+    AssertEqual ('', Repeat ('', 9));
+    AssertEqual ('', Repeat ('', 0));
+end
+
+test 'Repeat Refuses A Negative Count';
+begin
+    var Raised := False;
+
+    try Repeat ('x', -1); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+test 'Repeat Answers The Same Either Spelling';
+begin
+    AssertEqual (Repeat ('ab', 2), 'ab'.Repeat (2));
+    AssertEqual ('abab', 'ab'.Repeat (2));
+end
+
+test 'Split Answers The Pieces Between The Separators';
+begin
+    var Parts := Split ('a,b,c', ',');
+
+    AssertEqual (3, Parts.Length);
+    AssertEqual (Str ('a'), Str (Parts[0]));
+    AssertEqual (Str ('b'), Str (Parts[1]));
+    AssertEqual (Str ('c'), Str (Parts[2]));
+end
+
+/// A separator of more than one character, which the scan has to step over
+/// whole rather than one character at a time.
+test 'Split Takes A Separator Of Any Length';
+begin
+    var Parts := Split ('a::b::c', '::');
+
+    AssertEqual (3, Parts.Length);
+    AssertEqual (Str ('a'), Str (Parts[0]));
+    AssertEqual (Str ('c'), Str (Parts[2]));
+end
+
+/// Every piece is kept, which is what makes Split and Join inverses.
+test 'Split Keeps The Empty Pieces';
+begin
+    var Ends := Split (',a,', ',');
+
+    AssertEqual (3, Ends.Length);
+    AssertEqual ('', Str (Ends[0]));
+    AssertEqual (Str ('a'), Str (Ends[1]));
+    AssertEqual ('', Str (Ends[2]));
+
+    var Together := Split ('a,,b', ',');
+
+    AssertEqual (3, Together.Length);
+    AssertEqual ('', Str (Together[1]));
+end
+
+test 'Split Answers One Piece When The Separator Is Absent';
+begin
+    var Whole := Split ('abc', ',');
+
+    AssertEqual (1, Whole.Length);
+    AssertEqual ('abc', Str (Whole[0]));
+
+    var Nothing := Split ('', ',');
+
+    AssertEqual (1, Nothing.Length);
+    AssertEqual ('', Str (Nothing[0]));
+end
+
+test 'Split Refuses An Empty Separator';
+begin
+    var Raised := False;
+
+    try Split ('abc', ''); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+test 'Split Answers The Same Either Spelling';
+begin
+    var Parts := 'a,b'.Split (',');
+
+    AssertEqual (2, Parts.Length);
+    AssertEqual (Str ('a'), Str (Parts[0]));
+    AssertEqual (Str ('b'), Str (Parts[1]));
+end
+
+test 'Join Writes The Members With The Separator Between Them';
+begin
+    var L := List ();
+
+    L.Add ('a');
+    L.Add ('b');
+    L.Add ('c');
+
+    AssertEqual ('a-b-c', Join (L, '-'));
+    AssertEqual ('abc', Join (L, ''));
+end
+
+/// Members go through `Str`, so the List need not hold text.
+test 'Join Takes A List Of Anything';
+begin
+    var Numbers := List ();
+
+    Numbers.Add (1);
+    Numbers.Add (2);
+    Numbers.Add (3);
+
+    AssertEqual ('1, 2, 3', Join (Numbers, ', '));
+end
+
+test 'Join Of An Empty Or Single List Never Consults The Separator';
+begin
+    var Empty := List ();
+
+    AssertEqual ('', Join (Empty, '-'));
+
+    var One := List ();
+
+    One.Add ('only');
+
+    AssertEqual ('only', Join (One, '-'));
+end
+
+test 'Join Answers The Same Either Spelling';
+begin
+    var L := List ();
+
+    L.Add ('a');
+    L.Add ('b');
+
+    AssertEqual (Join (L, '+'), L.Join ('+'));
+    AssertEqual ('a+b', L.Join ('+'));
+end
+
+/// The property the two routines are written to have: every string survives a
+/// round trip, whatever the separator does or does not do to it.
+test 'Join Undoes Split For Any String And Separator';
+begin
+    AssertEqual ('a,b,c', 'a,b,c'.Split (',').Join (','));
+    AssertEqual (',a,', ',a,'.Split (',').Join (','));
+    AssertEqual ('a,,b', 'a,,b'.Split (',').Join (','));
+    AssertEqual ('abc', 'abc'.Split (',').Join (','));
+    AssertEqual ('', ''.Split (',').Join (','));
+    AssertEqual ('a::b', 'a::b'.Split ('::').Join ('::'));
+end

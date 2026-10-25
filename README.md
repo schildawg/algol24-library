@@ -30,6 +30,7 @@ built.
 | `crt` | the same text mode on a terminal, composited in memory and painted by difference |
 | `sound` | tones, BASIC's `Play`, and sampled sounds mixed sixteen at a time |
 | `file` | whole-file reads and writes, and the questions to ask about a path |
+| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split` and `Join`, each callable either as a function or on its first argument |
 | `testing` | `AssertNear`, for results whose exact bits are not guaranteed |
 
 `REFERENCE.md` documents every routine and constant, after the pattern of Turbo
@@ -39,9 +40,10 @@ is what it printed.
 
 ## Building and testing
 
-Needs `algc` on the path (`brew install algol24`), a C compiler, and SDL2 for
-`graph` (`brew install sdl2`). The test run opens no windows and makes no
-noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`
+Needs `algc` **0.1.5 or newer** on the path (`brew install algol24`), a C
+compiler, and SDL2 for `graph` (`brew install sdl2`). The version floor is
+`strings`, which uses extension functions that an earlier compiler cannot
+parse. The test run opens no windows and makes no noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`
 draws nowhere and `sound` computes every note and plays none of them.
 
 ```sh
