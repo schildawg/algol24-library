@@ -1,7 +1,14 @@
 # Sketch: streaming, and what sits on top of it
 
-**Status:** sketch, awaiting the unit and the method names. Nothing here is
-built. Written 2026-10-25.
+**Status:** groups 1 to 3 are **built** -- the handle, reading and writing,
+with the names as proposed below. Groups 4 (position and seeking) and 5
+(`Buffer.PutDouble`) are **not**, and are still open questions. Written
+2026-10-25; status updated the same day.
+
+What was built differs from this document in one place: `ReadBytes` takes an
+**offset** as well as a count, which this sketch did not propose. That is what
+allowed step 5 of the work order -- `ReadAll` now reads through `InFile`, so
+the layering is a fact rather than a claim.
 
 The whole-file surface in `file` works and should stay. What it should stop
 being is the *bottom* of the stack.

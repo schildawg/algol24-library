@@ -121,10 +121,22 @@ int64_t alg_libfile_size (const char *path)
 
 static FILE *handles[ALG_MAX_FILES];
 
-/* Opens a file for reading and answers a handle, or -1. */
-int64_t alg_libfile_open (const char *path)
+/* Opens a file and answers a handle, or -1.
+ *
+ * Mode 0 reads, 1 writes and empties first, 2 writes at the end -- which is
+ * Reset, Rewrite and Append, the three the core's own TextFile offers
+ * [RT-024]. Anything else is refused rather than guessed at.
+ */
+int64_t alg_libfile_open (const char *path, int64_t mode)
 {
     if (path == NULL) return -1;
+
+    const char *how = mode == 0 ? "rb"
+                    : mode == 1 ? "wb"
+                    : mode == 2 ? "ab"
+                    : NULL;
+
+    if (how == NULL) return -1;
 
     int slot = -1;
 
@@ -133,7 +145,7 @@ int64_t alg_libfile_open (const char *path)
 
     if (slot < 0) return -1;
 
-    FILE *f = fopen (path, "rb");
+    FILE *f = fopen (path, how);
 
     if (f == NULL) return -1;
 
@@ -162,6 +174,88 @@ int64_t alg_libfile_read_into (int64_t handle, void *into, int64_t offset,
                         handles[handle]);
 
     return (int64_t) got;
+}
+
+/* Writes a String's bytes, answering how many went out or -1.
+ *
+ * The text arrives as the String's own bytes and is used only during the
+ * call, so this direction has no lifetime question -- it is coming back the
+ * other way that borrows.
+ */
+int64_t alg_libfile_write_text (int64_t handle, const char *text)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return -1;
+    if (handles[handle] == NULL) return -1;
+    if (text == NULL) return 0;
+
+    size_t len = strlen (text);
+
+    if (len == 0) return 0;
+
+    return (int64_t) fwrite (text, 1, len, handles[handle]);
+}
+
+/* Writes Count bytes from a buffer at Offset, answering how many went out. */
+int64_t alg_libfile_write_bytes (int64_t handle, const void *from,
+                                 int64_t offset, int64_t count)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return -1;
+    if (handles[handle] == NULL) return -1;
+    if (from == NULL || offset < 0 || count <= 0) return 0;
+
+    return (int64_t) fwrite ((const char *) from + offset, 1, (size_t) count,
+                             handles[handle]);
+}
+
+/* Pushes buffered bytes at the operating system. Answers 1 for done. */
+int64_t alg_libfile_flush (int64_t handle)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return -1;
+    if (handles[handle] == NULL) return -1;
+
+    return fflush (handles[handle]) == 0 ? 1 : 0;
+}
+
+/* ------------------------------------------- bytes, for the line reader -- */
+/*
+ * These two exist for SPEED and carry no decisions. Finding a newline and
+ * copying a run of bytes are both things the unit could do with its own loop
+ * and `B[I]`, and both are the shape this project has measured as far too
+ * slow interpreted: graphffi.c carries a hex decoder for exactly this reason,
+ * the interpreted version having taken ~8 seconds for one font file.
+ *
+ * So the unit still decides what a line is, where it ends and what to do with
+ * a carriage return. It just does not walk the bytes one call at a time.
+ */
+
+/* The index of `byte` in [from, from + len), or -1. */
+int64_t alg_libfile_scan (const void *bytes, int64_t from, int64_t len,
+                          int64_t byte)
+{
+    if (bytes == NULL || from < 0 || len <= 0) return -1;
+
+    const unsigned char *found =
+        memchr ((const unsigned char *) bytes + from, (int) (byte & 255),
+                (size_t) len);
+
+    if (found == NULL) return -1;
+
+    return (int64_t) (found - (const unsigned char *) bytes);
+}
+
+/* Copies `len` bytes from src + src_off to dst + dst_off, answering the
+ * count. The regions must not overlap, and in this unit they never do --
+ * they are always two different buffers. */
+int64_t alg_libfile_copy_bytes (void *dst, int64_t dst_off, const void *src,
+                                int64_t src_off, int64_t len)
+{
+    if (dst == NULL || src == NULL) return 0;
+    if (dst_off < 0 || src_off < 0 || len <= 0) return 0;
+
+    memcpy ((char *) dst + dst_off, (const char *) src + src_off,
+            (size_t) len);
+
+    return len;
 }
 
 /* Closes a handle. A no-op for one already closed, so a handler can release

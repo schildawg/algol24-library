@@ -444,14 +444,16 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 298 | complete |
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is SDL2 audio -- a square wave mixed with up to sixteen decoded samples, WAV only | 14 | complete |
-| `file` | `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 9 | complete |
+| `file` | whole-file: `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; streaming: the `InFile` reader (`ReadLine`, `AtEnd`, `ReadBytes`, `Close`) and the `OutFile` writer (`Write`, `WriteLine`, `WriteBytes`, `Flush`, `Close`) with `AppendFile` inheriting it, no free-function aliases on any of them; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 25 | complete |
 | `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 47 | complete |
 | `time` | `Now`, `UtcNow`, `At`, `UtcAt` answering a `DateTime` with `Text`; `UtcOffset`, `IsDaylightSaving`; `timeffi.c` is C89 `localtime_r`. `GetDate`/`GetTime`'s four `var` parameters become one returned object; `SetDate`/`SetTime` are absent, needing root | 9 | complete |
 | `dos` | `DiskFree`, `DiskSize` by path rather than drive number and unbounded rather than `LongInt`; `GetEnv`, `HasEnv`, `Environment` answering a List, `EnvName`/`EnvValue`; `Exec` through `posix_spawn` with an argument List and **no shell**; `dosffi.c` is POSIX, not C99 | 13 | complete |
 
-The Tests column is the unit's own `test` blocks, 520 in all. `./test.sh`
-reports what `--test` can reach instead, imports included, so it prints 385
-for `graph` (its 298, plus `math`'s 69 and `testing`'s 9) and 92 for `sound`.
+The Tests column is the unit's own `test` blocks, 537 in all. `./test.sh`
+reports what `--test` can reach instead, imports included, so it prints 402
+for `graph` (its 298, plus `math`'s 69, `file`'s 26 and `testing`'s 9) and 92
+for `sound`. `graph` reaches `file` because `InstallUserFont` reads its glyph
+file through it.
 
 ⚠️ **`graph` has a design document, `DESIGN.md`, and it governs.** The unit is
 one world — celled text on a grid at Order 0, Canvas objects above and below
@@ -613,8 +615,43 @@ objection to streaming was that it "needs a way to hand back a line without
 handing back a borrowed pointer"; that pattern is now used three times here
 (`ReadAll`, `dos.GetEnv`, `graph`'s SDL error reader), so the obstacle is
 gone. Every other runtime makes the stream the primitive and the whole-file
-read the sugar; this unit has it the other way round. `SKETCH-STREAMING.md`
-has the surface, unbuilt and awaiting method names.
+read the sugar; this unit has it the other way round.
+`SKETCH-STREAMING.md` has the whole surface, of which groups 1 to 3 -- the
+handle, reading and writing -- are now built. Groups 4 and 5 are not: `Seek`
+and `Position` carry the question of what seeking a pipe should do, and
+`Buffer` still has no `PutDouble`, so a record holding a price has no
+encoding. Those were left for a separate decision rather than guessed at.
+
+⚠️ **The streaming classes have NO free-function aliases, and that breaks
+the house convention deliberately.** Nearly every surface verb in `graph` and
+`crt` has one -- `Line (V, …)` for `V.Line (…)` -- but both those units export
+a free `Write` and `WriteLn` already, and a third would make a bare `Write`
+ambiguous in the combinations worth writing. That is the `Delay` collision
+that keeps a third copy out of `sound`, and it is why these are
+`F.Write (…)` only. `WriteLine` is spelled out rather than `WriteLn` for the
+same reason.
+
+⚠️ **`InFile.ReadLine` and `ReadLines` must agree, and a test holds them
+together.** Both take a carriage return before a newline as part of the
+newline, treat a final line with no terminator as a line, and refuse to
+invent an empty last line after a trailing one. The test asserts they answer
+identically across five bodies plus the empty file, so neither can drift.
+
+⚠️ **A class gets ONE reference entry, with its members in the Declaration
+block** -- not an entry per method. That is the specification's own convention
+([RT-024] documents the whole of `TextFile` in one rule with a member table)
+and `REFERENCE.md`'s own precedent in `## ArcCoords`. A first attempt here
+used dotted headings, `## OutFile.Write` and the rest, which was wrong on both
+counts. The constructor is written under the class's own name --
+`constructor InFile (Path : String)` -- again following `ArcCoords`.
+
+⚠️ **`ReadAll` reads through `InFile`**, so the whole-file calls really are
+the convenience layer and not the foundation. That needed `ReadBytes` to take
+an **offset**: it fills a caller's buffer at a position, which is what lets
+`ReadAll` grow one buffer across several reads. Without the offset the two
+would have had a grow loop each, and the layering would have been a claim
+rather than a fact. The pipe reproduction still answers 1048576 of 1048576
+through the new path.
 
 ⚠️ **A Buffer must be sized exactly to become Text.** `Buffer.Text` refuses a
 buffer holding a zero byte, so a buffer larger than its contents fails on its
@@ -706,6 +743,13 @@ puts its own windows where they were. Ignoring comments the two differ in some
 180 lines. What the port actually demonstrates is that the **text** vocabulary
 is shared between the units closely enough to transfer almost verbatim, which
 is the interesting half of the claim and survives stating it accurately.
+
+⚠️ **`In` is a keyword and cannot be a variable.** `var In := Buffer (4);`
+answers `Expect variable name.`, because `in` is the `for … in` and
+membership operator -- so a reader's destination buffer is `Dst` and not `In`.
+And `Length` is **text only**: a List wants `Seen.Length` [RT-003], where
+`Length (Seen)` answers `Length expects text; use .Length for a collection.`
+Both cost a compile here.
 
 ⚠️ **Language points `crt` and `sound` learned the hard way**: it is
 `Char (65)`, not `Chr`; `#0` is **not a Char**, so NUL cannot be a sentinel;

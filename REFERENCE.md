@@ -16,6 +16,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` and `crt` |
+| [`AppendFile`](#appendfile) | class | `file` |
 | [`Arc`](#arc) | procedure, alias | `graph` |
 | [`ArcCoords`](#arccoords) | class | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
@@ -71,6 +72,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`HighVideo`](#highvideo) | procedure | `graph` and `crt` |
 | [`Image`](#image) | class | `graph` |
 | [`ImageSize`](#imagesize) | function | `graph` |
+| [`InFile`](#infile) | class | `file` |
 | [`Infinity`](#infinity) | constant | `math` |
 | [`InitCrt`](#initcrt) | procedures | `crt` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
@@ -99,6 +101,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`NormVideo`](#normvideo) | procedure | `graph` and `crt` |
 | [`Now` `UtcNow`](#now) | functions | `time` |
 | [`Odd`](#odd) | function | `math` |
+| [`OutFile`](#outfile) | class | `file` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`PenRel`](#penrel) | procedure, alias | `graph` |
@@ -274,6 +277,61 @@ See any alias entry — [`Line`](#line), [`GotoXY`](#gotoxy),
 [`SetColor`](#setcolor) — or `examples/ide.a24`, which uses both spellings.
 
 ---
+
+## AppendFile
+
+*class* — unit `file`
+
+**Function**
+
+A file open for writing at the end, keeping what is already there.
+
+**Declaration**
+
+```algol24
+constructor AppendFile (Path : String);
+
+// every OutFile member, inherited: Write, WriteLine, WriteBytes,
+// Flush, Close
+```
+
+**Remarks**
+
+Everything [`OutFile`](#outfile) does, opened differently — which is the whole
+of the difference, so it **inherits** rather than restating five methods.
+
+This is Turbo Pascal's `Append` to `OutFile`'s `Rewrite`. A file that does not
+exist yet is created, so appending to nothing is not an error.
+
+Raises `AppendFile: cannot open '<Path>'.` when the file cannot be opened for
+appending.
+
+**See also**
+
+[`OutFile`](#outfile), [`AppendAll`](#appendall), [`InFile`](#infile)
+
+**Example**
+
+```algol24
+uses file;
+
+WriteAll ('diary.txt', 'monday' + #10);
+
+var A := AppendFile ('diary.txt');
+
+A.WriteLine ('tuesday');
+A.Close ();
+
+WriteLn (ReadAll ('diary.txt'));
+
+Erase ('diary.txt');
+```
+
+```console
+monday
+tuesday
+
+```
 
 ## Arc
 
@@ -3999,6 +4057,127 @@ See [`GetImage`](#getimage).
 
 ---
 
+## InFile
+
+*class* — unit `file`
+
+**Function**
+
+A file open for reading, a line or a run of bytes at a time.
+
+**Declaration**
+
+```algol24
+constructor InFile (Path : String);
+
+function  ReadLine () : String                  the next line, no terminator
+function  AtEnd () : Boolean                    nothing left to give
+function  ReadBytes (Into : Any, Offset : Integer,
+                     Count : Integer) : Integer
+procedure Close ()                              released, and idempotent
+```
+
+**Remarks**
+
+The streaming half of the unit, and the primitive the whole-file routines are
+built on rather than a parallel way of doing the same thing — [`ReadAll`](#readall)
+reads through one of these. Reach for it directly when a file will not fit in
+memory, when the input is a pipe whose size cannot be known, or when the work
+is done line by line and there is no reason to hold the rest.
+
+A reader fills a window of 65536 bytes from the operating system and answers
+lines out of it, so the cost of a line is a scan rather than a system call.
+
+`ReadLine` takes **a carriage return before the newline as part of the
+newline**, so a file written on Windows reads the same as one written here. A
+final line with no terminator is still a line, and a trailing newline does not
+invent an empty one after it. ⚠️ **That is exactly the rule
+[`ReadLines`](#readlines) follows**, and the two must not disagree — a test
+asserts they answer the same lines for a file ending with a newline, ending
+without one, holding a carriage return pair, holding one bare newline, and
+empty. Past the last line it raises `ReadLine: at end of file.`, so a loop that
+forgets `AtEnd` fails rather than spinning on empty strings.
+
+`AtEnd` asks the operating system when its window is spent, so it is the honest
+answer rather than a guess from the size — which is what makes it right for a
+pipe.
+
+`ReadBytes` is the binary half. It fills `Into`, a `Buffer`, starting at
+`Offset`, and answers **0** at end of file rather than raising. The offset is
+what lets a caller fill a growing buffer across several reads, which is how
+`ReadAll` is built on this.
+
+`Close` **may be called more than once**, the second doing nothing. That is the
+bargain `Buffer.Free` and the core's `TextFile.Close` already make [RT-023]: a
+handler releases on the way out without knowing how far the program got, which
+matters because the language has no `try`/`finally`. Every other member of a
+closed reader raises `<Member>: the file is closed.`
+
+Raises `InFile: cannot open '<Path>'.` when the file is absent, is a directory,
+or cannot be opened. ⚠️ **A directory is refused rather than read as empty** —
+`fopen` succeeds on one, so this is a check the unit makes, and `ReadAll` makes
+the same one so that the two agree about what is readable.
+
+**See also**
+
+[`OutFile`](#outfile), [`AppendFile`](#appendfile), [`ReadAll`](#readall),
+[`ReadLines`](#readlines)
+
+**Example**
+
+```algol24
+uses file;
+
+WriteAll ('mixed.txt', 'unix' + #10 + 'windows' + #13 + #10 + 'no newline');
+
+var F := InFile ('mixed.txt');
+
+while not F.AtEnd () do WriteLn ('[', F.ReadLine (), ']');
+
+F.Close ();
+F.Close ();                       // allowed, and does nothing
+
+Erase ('mixed.txt');
+```
+
+```console
+[unix]
+[windows]
+[no newline]
+```
+
+Bytes rather than lines, and what a closed reader says:
+
+```algol24
+uses file;
+
+WriteAll ('four.bin', 'ABCD');
+
+var F   := InFile ('four.bin');
+var Dst := Buffer (4);
+
+WriteLn (F.ReadBytes (Dst, 0, 4));
+WriteLn (Dst[0], ' ', Dst[3]);
+WriteLn (F.ReadBytes (Dst, 0, 4));        // nothing left
+
+F.Close ();
+
+try
+    F.ReadLine ();
+except on E : String do
+    WriteLn (E);
+end
+
+Erase ('four.bin');
+```
+
+```console
+4
+65 68
+0
+ReadLine: the file is closed.
+```
+
 ## Infinity
 
 *constant* — unit `math`
@@ -5559,6 +5738,126 @@ for var N := 1; N <= 5; N := N + 1 do
 ```
 
 ---
+
+## OutFile
+
+*class* — unit `file`
+
+**Function**
+
+A file open for writing, emptied first.
+
+**Declaration**
+
+```algol24
+constructor OutFile (Path : String);
+
+procedure Write (Text : String)                 as it stands, adding nothing
+procedure WriteLine (Text : String)             and a newline
+procedure WriteBytes (From : Any, Count : Integer)
+procedure Flush ()                              push what is buffered
+procedure Close ()                              flushed, released, idempotent
+```
+
+**Remarks**
+
+The writing half of the streaming surface. Reach for it when output is produced
+as the program runs rather than assembled and handed over whole, which is what
+[`WriteAll`](#writeall) is for.
+
+Opening **empties** the file — Turbo Pascal's `Rewrite` rather than its
+`Append`. To keep what is there, use [`AppendFile`](#appendfile).
+
+⚠️ **There is deliberately no free-function alias for any of these**, where
+nearly every surface verb in `graph` and `crt` has one. Those two units both
+export a free `Write` that shadows the built-in, and a third would make a bare
+`Write` [ambiguous](#aliases) in the combinations worth writing — the same
+collision that keeps `Delay` out of `sound`. A method on a receiver collides
+with nothing. `WriteLine` is spelled out for the same reason: nobody reading it
+should have to wonder which unit's `WriteLn` answered.
+
+`WriteLine`'s terminator is `#10` alone, never a carriage return pair, which is
+what [`WriteLines`](#writelines) also writes — so a file written here reads back
+the same through [`InFile`](#infile) or [`ReadLines`](#readlines) on any
+platform.
+
+`WriteBytes` takes the bytes from the **start** of `From`, a `Buffer`. A `Count`
+of zero or less writes nothing, and `nil` raises `WriteBytes: needs a buffer.`
+
+⚠️ **Bytes may sit in a buffer until `Flush` or `Close`.** A program that ends
+without closing may lose the tail, which is the one real cost of writing this
+way instead of with `WriteAll`. `Flush` makes what was written readable without
+closing, which is what a long-running program keeping a log wants; `Close`
+flushes too, so a program that closes need not call it.
+
+`Close` **may be called more than once**, on the same terms as
+[`InFile`](#infile)'s. Every other member of a closed file raises
+`<Member>: the file is closed.`
+
+Raises `OutFile: cannot open '<Path>'.` when the file cannot be opened for
+writing.
+
+**See also**
+
+[`AppendFile`](#appendfile), [`InFile`](#infile), [`WriteAll`](#writeall),
+[`WriteLines`](#writelines)
+
+**Example**
+
+```algol24
+uses file;
+
+var O := OutFile ('report.txt');
+
+O.WriteLine ('totals');
+O.Write ('42');
+O.Flush ();
+
+// Readable while the file is still open.
+WriteLn (ReadAll ('report.txt'));
+
+O.Close ();
+O.Close ();                       // allowed, and does nothing
+
+try
+    O.Write ('more');
+except on E : String do
+    WriteLn (E);
+end
+
+Erase ('report.txt');
+```
+
+```console
+totals
+42
+Write: the file is closed.
+```
+
+Bytes rather than text:
+
+```algol24
+uses file;
+
+var B := Buffer (3);
+
+B[0] := 72;  B[1] := 105;  B[2] := 33;      // H i !
+
+var O := OutFile ('bytes.bin');
+
+O.WriteBytes (B, 3);
+O.Close ();
+
+WriteLn (ReadAll ('bytes.bin'));
+WriteLn (FileSize ('bytes.bin'));
+
+Erase ('bytes.bin');
+```
+
+```console
+Hi!
+3
+```
 
 ## OutText
 

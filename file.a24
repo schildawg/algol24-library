@@ -64,7 +64,7 @@ function RawSize (Path : String) : Integer;
 /// Private to this unit. A handle exists because reading to end of file needs
 /// the stream held open: a pipe can be neither re-opened nor seeked, its bytes
 /// being gone once read. The unit's own surface stays whole-file.
-private function RawOpen (Path : String) : Integer;
+private function RawOpen (Path : String, Mode : Integer) : Integer;
     external 'alg_libfile_open' in 'libfileffi.so';
 
 /// Reads up to Max bytes into a buffer at Offset, answering the count and 0
@@ -82,6 +82,61 @@ private function RawReadInto (Handle : Integer, Into : Pointer,
 /// Private to this unit.
 private procedure RawClose (Handle : Integer);
     external 'alg_libfile_close' in 'libfileffi.so';
+
+/// Writes a String's bytes, answering how many went out or -1.
+///
+/// Private to this unit. Passing a String into C is the safe direction: the
+/// bytes are read during the call and not kept.
+private function RawWriteText (Handle : Integer, Text : String) : Integer;
+    external 'alg_libfile_write_text' in 'libfileffi.so';
+
+/// Writes Count bytes from a buffer at Offset, answering how many went out.
+///
+/// Private to this unit.
+private function RawWriteBytes (Handle : Integer, From : Pointer,
+                                Offset : Integer, Count : Integer) : Integer;
+    external 'alg_libfile_write_bytes' in 'libfileffi.so';
+
+/// Pushes buffered bytes at the operating system.
+///
+/// Private to this unit.
+private function RawFlush (Handle : Integer) : Integer;
+    external 'alg_libfile_flush' in 'libfileffi.so';
+
+/// The index of a byte within a buffer's range, or -1.
+///
+/// Private to this unit, and there for speed rather than for any decision:
+/// the unit could walk the bytes with `B[I]` and this project has measured
+/// that as far too slow, `graphffi.c` carrying a hex decoder for the same
+/// reason. What a line is remains the unit's business.
+private function RawScan (Bytes : Pointer, From : Integer, Len : Integer,
+                          Byte : Integer) : Integer;
+    external 'alg_libfile_scan' in 'libfileffi.so';
+
+/// Copies a run of bytes between two buffers, answering the count.
+///
+/// Private to this unit, and on the same grounds as `RawScan`. The two
+/// buffers are always different ones here, so there is no overlap to worry
+/// about.
+private function RawCopyBytes (Dst : Pointer, DstOffset : Integer,
+                               Src : Pointer, SrcOffset : Integer,
+                               Len : Integer) : Integer;
+    external 'alg_libfile_copy_bytes' in 'libfileffi.so';
+
+/// How a file is opened: reading, writing from empty, or writing at the end.
+///
+/// Private to this unit. The three the core's own `TextFile` offers as
+/// `Reset`, `Rewrite` and `Append` [RT-024].
+private const ModeRead   := 0;
+private const ModeWrite  := 1;
+private const ModeAppend := 2;
+
+/// How many bytes a reader holds at a time.
+///
+/// Private to this unit. A reader fills this much from the operating system
+/// and then answers lines out of it, so the cost of a line is a scan rather
+/// than a system call.
+private const WindowSize := 65536;
 
 /// Reads a file into a buffer this unit owns, answering the byte count.
 ///
@@ -178,23 +233,24 @@ end
 /// `A File Written Can Be Read Back`
 function ReadAll (Path : String) : String;
 begin
-    // Asked first for the directory check, and for a size to start the buffer
-    // at. The size is a HINT and not a contract -- see below.
-    var Hint := RawSize (Path);
+    // Built on InFile, which is the point of having it: the streaming
+    // primitive is what makes this correct, so this is the convenience layer
+    // and not the foundation. A pipe can be neither re-opened nor seeked, so
+    // reading one fully means holding the stream open -- which is what
+    // trusting `stat` and reading once could not do, and what cost a megabyte
+    // piped in coming back as 65536 bytes reported as success.
+    var Reader := nil;
 
-    if Hint < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
+    try
+        Reader := InFile (Path);
+    except
+        raise 'ReadAll: cannot read ''' + Path + '''.';
+    end
 
-    var Handle := RawOpen (Path);
-
-    if Handle < 0 then raise 'ReadAll: cannot read ''' + Path + '''.';
-
-    // The read runs to end of file whatever the size said, because the size
-    // is unreliable for everything except a regular file that holds still:
-    // `stat` answers the bytes currently BUFFERED for a pipe, zero for most
-    // character devices, and a stale figure for a file that grows between the
-    // two calls. Trusting it cost a megabyte piped in coming back as 65536
-    // bytes -- one pipe buffer -- reported as success.
-    var Cap := Hint;
+    // The size only chooses a starting capacity. It is a HINT: `stat` answers
+    // the bytes currently BUFFERED for a pipe, zero for most character
+    // devices, and a stale figure for a file that grows while being read.
+    var Cap := RawSize (Path);
 
     if Cap < 65536 then Cap := 65536;
 
@@ -210,15 +266,14 @@ begin
             B.Resize (Cap);
         end
 
-        // B.Address is taken afresh each time: Resize may move the bytes.
-        var N := RawReadInto (Handle, B.Address, Got, Cap - Got);
+        var N := Reader.ReadBytes (B, Got, Cap - Got);
 
         if N <= 0 then break;
 
         Got := Got + N;
     end
 
-    RawClose (Handle);
+    Reader.Close ();
 
     // Sized exactly, because a Buffer holding a zero byte has no Text and a
     // buffer larger than its contents would refuse on its own trailing zeros.
@@ -654,6 +709,708 @@ begin
 
     AssertEqual (65536, Length (ReadAll (Path)));
     AssertEqual (Text, ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// A file open for reading, a line or a run of bytes at a time.
+///
+/// This is the streaming half of the unit, and the primitive the whole-file
+/// routines are built on rather than a parallel way of doing the same thing.
+/// Reach for it when a file will not fit in memory, when the input is a pipe
+/// whose size cannot be known, or when the work is done line by line and
+/// there is no reason to hold the rest.
+///
+/// A reader fills a window of bytes from the operating system and answers
+/// lines out of it, so the cost of a line is a scan and not a system call.
+///
+/// # Raises
+/// `InFile: cannot open '<Path>'.` when the file is absent, is a directory,
+/// or cannot be opened.
+///
+/// # Safety
+/// `Close` releases the handle and may be called more than once, so a handler
+/// can release on the way out without knowing how far the program got -- the
+/// bargain `Buffer.Free` and `TextFile.Close` already make [RT-023]. Every
+/// other member of a closed reader raises.
+///
+/// # Examples
+/// `InFile Reads A File Line By Line`
+///
+/// # Since
+/// 0.1.5
+class InFile;
+var
+    Handle : Integer;
+    Window : Any;
+    Have   : Integer;             // bytes in the window
+    At     : Integer;             // how far through it we are
+    Ended  : Boolean;             // the operating system has no more
+    Closed : Boolean;
+
+begin
+    constructor Init (Path : String);
+    begin
+        // Asked before opening, because `fopen` SUCCEEDS on a directory --
+        // measured on macOS, where this answered an empty reader rather than
+        // refusing. `RawSize` carries the S_ISDIR check, which is the same
+        // gate `ReadAll` uses, so the two agree about what is readable. A
+        // pipe is not caught by it: stat answers 0 for one, not -1.
+        if RawSize (Path) < 0 then
+            raise 'InFile: cannot open ''' + Path + '''.';
+
+        this.Handle := RawOpen (Path, ModeRead);
+
+        if this.Handle < 0 then
+            raise 'InFile: cannot open ''' + Path + '''.';
+
+        this.Window := Buffer (WindowSize);
+        this.Have   := 0;
+        this.At     := 0;
+        this.Ended  := False;
+        this.Closed := False;
+    end
+
+    /// Refills the window when it is spent, answering what it holds.
+    ///
+    /// Private to the class. Does nothing while bytes remain, so a caller may
+    /// ask freely.
+    function Refill () : Integer;
+    begin
+        if this.At < this.Have then Exit this.Have - this.At;
+        if this.Ended then Exit 0;
+
+        var N := RawReadInto (this.Handle, this.Window.Address, 0, WindowSize);
+
+        if N <= 0 then
+        begin
+            this.Ended := True;
+            this.Have  := 0;
+            this.At    := 0;
+
+            Exit 0;
+        end
+
+        this.Have := N;
+        this.At   := 0;
+
+        Exit N;
+    end
+
+    /// Whether the file has nothing left to give.
+    ///
+    /// Asks the operating system when the window is spent, so this is the
+    /// honest answer rather than a guess from the size.
+    function AtEnd () : Boolean;
+    begin
+        this.Check ('AtEnd');
+
+        Exit this.Refill () = 0;
+    end
+
+    /// The next line, without its terminator.
+    ///
+    /// A carriage return before the newline belongs to the newline, so a file
+    /// written on Windows reads the same as one written here. A final line
+    /// with no terminator is still a line; a trailing newline does not invent
+    /// an empty one after it. That is the rule `ReadLines` already follows,
+    /// and the two must not disagree.
+    ///
+    /// # Raises
+    /// `ReadLine: at end of file.` past the last line, so a loop that forgets
+    /// `AtEnd` fails rather than spinning on empty strings.
+    function ReadLine () : String;
+    begin
+        this.Check ('ReadLine');
+
+        if this.Refill () = 0 then raise 'ReadLine: at end of file.';
+
+        var Out    := Buffer ();
+        var OutLen := 0;
+
+        while True do
+        begin
+            if this.Refill () = 0 then break;
+
+            var Found := RawScan (this.Window.Address, this.At,
+                                  this.Have - this.At, 10);
+
+            var Upto := Found;
+
+            if Found < 0 then Upto := this.Have;
+
+            var N := Upto - this.At;
+
+            if N > 0 then
+            begin
+                Out.Resize (OutLen + N);
+
+                // Taken afresh: Resize may move the bytes.
+                RawCopyBytes (Out.Address, OutLen,
+                              this.Window.Address, this.At, N);
+
+                OutLen := OutLen + N;
+            end
+
+            this.At := Upto;
+
+            if Found >= 0 then
+            begin
+                this.At := this.At + 1;      // step over the newline itself
+
+                break;
+            end
+        end
+
+        Out.Resize (OutLen);
+
+        // A carriage return belongs to the newline that followed it.
+        if OutLen > 0 and Out[OutLen - 1] = 13 then
+        begin
+            OutLen := OutLen - 1;
+
+            Out.Resize (OutLen);
+        end
+
+        if OutLen = 0 then Exit '';
+
+        try
+            Exit Out.Text;
+        except
+            raise 'ReadLine: the line is not text.';
+        end
+    end
+
+    /// Up to Count bytes into a caller's buffer at Offset, answering how
+    /// many came.
+    ///
+    /// Answers 0 at end of file rather than raising, so a loop ends on a
+    /// count of zero. The buffer is the caller's; nothing here hands back a
+    /// pointer.
+    ///
+    /// The offset is what lets a caller fill a growing buffer across several
+    /// reads, which is how `ReadAll` is built on this rather than on a loop
+    /// of its own.
+    function ReadBytes (Into : Any, Offset : Integer,
+                        Count : Integer) : Integer;
+    begin
+        this.Check ('ReadBytes');
+
+        if Into = nil then raise 'ReadBytes: needs a buffer.';
+        if Offset < 0 then raise 'ReadBytes: the offset cannot be negative.';
+        if Count <= 0 then Exit 0;
+
+        var Got := 0;
+
+        while Got < Count do
+        begin
+            if this.Refill () = 0 then break;
+
+            var Want := Count - Got;
+            var Left := this.Have - this.At;
+
+            if Want > Left then Want := Left;
+
+            // Into.Address afresh each time: the caller may have resized it
+            // between calls, which is exactly what ReadAll does.
+            RawCopyBytes (Into.Address, Offset + Got,
+                          this.Window.Address, this.At, Want);
+
+            this.At := this.At + Want;
+            Got     := Got + Want;
+        end
+
+        Exit Got;
+    end
+
+    /// Releases the handle, and does nothing when already closed.
+    procedure Close ();
+    begin
+        if this.Closed then Exit;
+
+        RawClose (this.Handle);
+
+        this.Closed := True;
+    end
+
+    /// Refuses a member on a closed reader, naming it.
+    ///
+    /// Private to the class.
+    procedure Check (Who : String);
+    begin
+        if this.Closed then raise Who + ': the file is closed.';
+    end
+end
+
+/// A file open for writing, emptied first.
+///
+/// The writing half of the streaming surface. Reach for it when output is
+/// produced as the program runs rather than assembled and handed over whole,
+/// which is what `WriteAll` is for.
+///
+/// # Raises
+/// `OutFile: cannot open '<Path>'.` when the file cannot be opened for
+/// writing.
+///
+/// # Safety
+/// `Close` flushes, releases the handle, and may be called more than once.
+/// Bytes written may sit in a buffer until `Flush` or `Close`, so a program
+/// that ends without closing may lose the tail -- which is the one real cost
+/// of writing this way instead of with `WriteAll`.
+///
+/// # Examples
+/// `OutFile Writes Lines That Read Back`
+///
+/// # Since
+/// 0.1.5
+class OutFile;
+var
+    Handle : Integer;
+    Closed : Boolean;
+
+begin
+    constructor Init (Path : String);
+    begin
+        this.Handle := RawOpen (Path, ModeWrite);
+
+        if this.Handle < 0 then
+            raise 'OutFile: cannot open ''' + Path + '''.';
+
+        this.Closed := False;
+    end
+
+    /// Writes text as it stands, adding nothing.
+    ///
+    /// There is deliberately no free-function alias for this. `graph` and
+    /// `crt` both export a free `Write` that shadows the built-in, and a
+    /// third would make a bare `Write` ambiguous in the combinations worth
+    /// writing -- the same collision that keeps `Delay` out of `sound`. A
+    /// method on a receiver collides with nothing.
+    procedure Write (Text : String);
+    begin
+        this.Check ('Write');
+
+        if RawWriteText (this.Handle, Text) < 0 then
+            raise 'Write: the file is not open for writing.';
+    end
+
+    /// Writes text and a newline.
+    ///
+    /// Named `WriteLine` rather than `WriteLn` so that nobody reading it has
+    /// to wonder which unit's `WriteLn` answered.
+    procedure WriteLine (Text : String);
+    begin
+        this.Check ('WriteLine');
+
+        this.Write (Text);
+        this.Write (Str (#10));
+    end
+
+    /// Writes Count bytes from the start of a buffer.
+    procedure WriteBytes (From : Any, Count : Integer);
+    begin
+        this.Check ('WriteBytes');
+
+        if From = nil then raise 'WriteBytes: needs a buffer.';
+        if Count <= 0 then Exit;
+
+        if RawWriteBytes (this.Handle, From.Address, 0, Count) < 0 then
+            raise 'WriteBytes: the file is not open for writing.';
+    end
+
+    /// Pushes what is buffered at the operating system.
+    procedure Flush ();
+    begin
+        this.Check ('Flush');
+
+        RawFlush (this.Handle);
+    end
+
+    /// Flushes and releases the handle, and does nothing when already closed.
+    procedure Close ();
+    begin
+        if this.Closed then Exit;
+
+        RawFlush (this.Handle);
+        RawClose (this.Handle);
+
+        this.Closed := True;
+    end
+
+    /// Refuses a member on a closed file, naming it.
+    ///
+    /// Private to the class.
+    procedure Check (Who : String);
+    begin
+        if this.Closed then raise Who + ': the file is closed.';
+    end
+end
+
+/// A file open for writing at the end, keeping what is already there.
+///
+/// Everything `OutFile` does, opened differently -- which is the whole of the
+/// difference, so it inherits rather than restating five methods.
+///
+/// # Raises
+/// `AppendFile: cannot open '<Path>'.` when the file cannot be opened for
+/// appending.
+///
+/// # Safety
+/// As `OutFile`.
+///
+/// # Examples
+/// `AppendFile Adds To What Is Already There`
+///
+/// # Since
+/// 0.1.5
+class AppendFile (OutFile);
+begin
+    constructor Init (Path : String);
+    begin
+        this.Handle := RawOpen (Path, ModeAppend);
+
+        if this.Handle < 0 then
+            raise 'AppendFile: cannot open ''' + Path + '''.';
+
+        this.Closed := False;
+    end
+end
+
+/// # Examples cites this by name from `InFile`.
+test 'InFile Reads A File Line By Line';
+begin
+    var Path := 'alg-infile-lines.txt';
+
+    WriteAll (Path, 'alpha' + #10 + 'beta' + #10 + 'gamma' + #10);
+
+    var F     := InFile (Path);
+    var Seen  := [];
+
+    while not F.AtEnd () do Seen.Add (F.ReadLine ());
+
+    F.Close ();
+
+    AssertEqual (3, Seen.Length);
+    AssertEqual ('alpha', Seen[0]);
+    AssertEqual ('beta',  Seen[1]);
+    AssertEqual ('gamma', Seen[2]);
+
+    Erase (Path);
+end
+
+/// A trailing newline must not invent an empty last line, and a line with no
+/// terminator is still a line. The same rule `ReadLines` follows.
+test 'InFile Agrees With ReadLines About Line Endings';
+begin
+    var Path := 'alg-infile-endings.txt';
+
+    for var Body in ['a' + #10 + 'b' + #10, 'a' + #10 + 'b',
+                     'a' + #13 + #10 + 'b', '', #10, 'only'] do
+    begin
+        WriteAll (Path, Body);
+
+        var Whole := ReadLines (Path);
+        var F     := InFile (Path);
+        var Seen  := [];
+
+        while not F.AtEnd () do Seen.Add (F.ReadLine ());
+
+        F.Close ();
+
+        AssertEqual (Whole.Length, Seen.Length);
+
+        for var I := 0; I < Whole.Length; I := I + 1 do
+            AssertEqual (Whole[I], Seen[I]);
+    end
+
+    Erase (Path);
+end
+
+/// A carriage return before the newline belongs to the newline, so a file
+/// written on Windows reads the same as one written here.
+test 'InFile Takes A Carriage Return As Part Of The Newline';
+begin
+    var Path := 'alg-infile-crlf.txt';
+
+    WriteAll (Path, 'one' + #13 + #10 + 'two' + #13 + #10);
+
+    var F := InFile (Path);
+
+    AssertEqual ('one', F.ReadLine ());
+    AssertEqual ('two', F.ReadLine ());
+    AssertTrue (F.AtEnd ());
+
+    F.Close ();
+    Erase (Path);
+end
+
+/// Past the last line is a refusal rather than an empty string, so a loop
+/// that forgets AtEnd fails instead of spinning.
+test 'InFile Refuses To Read Past The End';
+begin
+    var Path := 'alg-infile-end.txt';
+
+    WriteAll (Path, 'only' + #10);
+
+    var F      := InFile (Path);
+    var Raised := False;
+
+    AssertEqual ('only', F.ReadLine ());
+
+    try
+        F.ReadLine ();
+    except on E : String do
+        Raised := True;
+    end
+
+    AssertTrue (Raised);
+
+    F.Close ();
+    Erase (Path);
+end
+
+/// The window is 65536 bytes, so a file past it exercises the refill and a
+/// line straddling the boundary exercises assembly across two windows.
+test 'InFile Reads Lines Across Its Window Boundary';
+begin
+    var Path := 'alg-infile-window.txt';
+    var Big  := Buffer ();
+
+    // Lines of 100 bytes, enough of them to pass 65536 several times over.
+    for var I := 0; I < 3000; I := I + 1 do
+    begin
+        for var J := 0; J < 99; J := J + 1 do Big.Append ('x');
+
+        Big.Append (Str (#10));
+    end
+
+    WriteAll (Path, Big.Text);
+
+    var F     := InFile (Path);
+    var Count := 0;
+
+    while not F.AtEnd () do
+    begin
+        var L := F.ReadLine ();
+
+        AssertEqual (99, Length (L));
+
+        Count := Count + 1;
+    end
+
+    F.Close ();
+
+    AssertEqual (3000, Count);
+
+    Erase (Path);
+end
+
+/// Bytes rather than lines, filling a buffer the caller owns.
+test 'InFile Reads Bytes Into A Callers Buffer';
+begin
+    var Path := 'alg-infile-bytes.bin';
+    var Out  := Buffer (4);
+
+    Out[0] := 65;  Out[1] := 66;  Out[2] := 67;  Out[3] := 68;
+
+    var W := OutFile (Path);
+
+    W.WriteBytes (Out, 4);
+    W.Close ();
+
+    var F   := InFile (Path);
+    var Dst := Buffer (4);
+
+    AssertEqual (4, F.ReadBytes (Dst, 0, 4));
+    AssertEqual (65, Dst[0]);
+    AssertEqual (68, Dst[3]);
+
+    // Nothing left, so 0 rather than a raise.
+    AssertEqual (0, F.ReadBytes (Dst, 0, 4));
+
+    F.Close ();
+    Erase (Path);
+end
+
+/// Close releases and may be called again, which is the bargain Buffer.Free
+/// and TextFile.Close already make [RT-023] -- a handler can release on the
+/// way out without knowing how far the program got.
+test 'Closing A Reader Twice Is Allowed And Using One Is Not';
+begin
+    var Path := 'alg-infile-closed.txt';
+
+    WriteAll (Path, 'x' + #10);
+
+    var F := InFile (Path);
+
+    F.Close ();
+    F.Close ();
+
+    var Raised := False;
+
+    try
+        F.ReadLine ();
+    except on E : String do
+        Raised := True;
+    end
+
+    AssertTrue (Raised);
+
+    Erase (Path);
+end
+
+/// Opening what is not there says so rather than answering an empty reader.
+test 'InFile Says So When It Cannot Open';
+begin
+    var Raised := False;
+
+    try
+        InFile ('alg-no-such-file-at-all.txt');
+    except on E : String do
+        Raised := True;
+    end
+
+    AssertTrue (Raised);
+end
+
+/// A directory is not a readable file, and must be refused rather than
+/// answered as an empty reader. `fopen` succeeds on one, so this is a check
+/// the unit has to make -- and `ReadAll` makes the same one, so the two agree
+/// about what is readable.
+test 'InFile Refuses A Directory';
+begin
+    var Raised := False;
+
+    try
+        InFile ('.');
+    except on E : String do
+        Raised := True;
+    end
+
+    AssertTrue (Raised);
+
+    // And the whole-file route agrees.
+    var AlsoRaised := False;
+
+    try
+        ReadAll ('.');
+    except on E : String do
+        AlsoRaised := True;
+    end
+
+    AssertTrue (AlsoRaised);
+end
+
+/// # Examples cites this by name from `OutFile`.
+test 'OutFile Writes Lines That Read Back';
+begin
+    var Path := 'alg-outfile-lines.txt';
+    var O    := OutFile (Path);
+
+    O.WriteLine ('first');
+    O.WriteLine ('second');
+    O.Write ('third, with no newline');
+    O.Close ();
+
+    AssertEqual ('first' + #10 + 'second' + #10 + 'third, with no newline',
+                 ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// Opening for writing empties what was there, which is Rewrite and not
+/// Append.
+test 'OutFile Empties The File It Opens';
+begin
+    var Path := 'alg-outfile-empty.txt';
+
+    WriteAll (Path, 'old contents');
+
+    var O := OutFile (Path);
+
+    O.Write ('new');
+    O.Close ();
+
+    AssertEqual ('new', ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// Flush pushes what is buffered without closing, so the bytes are readable
+/// while the file is still open.
+test 'Flush Makes Written Bytes Readable Before Close';
+begin
+    var Path := 'alg-outfile-flush.txt';
+    var O    := OutFile (Path);
+
+    O.Write ('buffered');
+    O.Flush ();
+
+    AssertEqual ('buffered', ReadAll (Path));
+
+    O.WriteLine ('');
+    O.Close ();
+
+    Erase (Path);
+end
+
+/// # Examples cites this by name from `AppendFile`.
+test 'AppendFile Adds To What Is Already There';
+begin
+    var Path := 'alg-appendfile.txt';
+
+    WriteAll (Path, 'kept' + #10);
+
+    var A := AppendFile (Path);
+
+    A.WriteLine ('added');
+    A.Close ();
+
+    AssertEqual ('kept' + #10 + 'added' + #10, ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// AppendFile inherits every method rather than restating them, so the ones
+/// worth proving are the inherited ones.
+test 'AppendFile Inherits The Writing Methods';
+begin
+    var Path := 'alg-appendfile-inherit.txt';
+    var A    := AppendFile (Path);
+    var B    := Buffer (2);
+
+    B[0] := 72;  B[1] := 73;
+
+    A.Write ('a');
+    A.WriteLine ('b');
+    A.WriteBytes (B, 2);
+    A.Flush ();
+    A.Close ();
+    A.Close ();
+
+    AssertEqual ('ab' + #10 + 'HI', ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// A closed writer refuses and names the member that was called.
+test 'Closing A Writer Twice Is Allowed And Using One Is Not';
+begin
+    var Path := 'alg-outfile-closed.txt';
+    var O    := OutFile (Path);
+
+    O.Close ();
+    O.Close ();
+
+    var Message := '';
+
+    try
+        O.Write ('after');
+    except on E : String do
+        Message := E;
+    end
+
+    AssertEqual ('Write: the file is closed.', Message);
 
     Erase (Path);
 end
