@@ -1,7 +1,7 @@
 # Proposal: Bitwise Operators
 
 **From:** the `algol24-library` project, as a user of the language
-**Status:** proposal, for the language project to accept, refuse or reshape
+**Status:** **ACCEPTED and shipped in 0.1.6** as `&`, `|`, `^`, `~`, `<<` and `>>` [EXP-023, EXP-024], with a warning when `and` or `or` is handed an Integer. What this document asked for and what landed are compared in `DEFECTS.md` H-3, which also records that the native `^` measured four times faster than the `alg_xor` foreign call this proposal cited — so `graph`'s C is gone rather than merely unnecessary. The original ask follows, unedited.
 **Concerns:** Integer operators only — no change to types, scoping or the
 numeric model
 

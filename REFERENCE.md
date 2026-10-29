@@ -16,6 +16,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` and `crt` |
+| [`AppendFile`](#appendfile) | class | `file` |
 | [`Arc`](#arc) | procedure, alias | `graph` |
 | [`ArcCoords`](#arccoords) | class | `graph` |
 | [`ArcTan`](#arctan) | function | `math` |
@@ -39,9 +40,11 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Delete`](#delete) | extension function | `strings` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
 | [`DiskFree` `DiskSize`](#diskfree) | functions | `dos` |
+| [`Directory`](#directory) | class | `file` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`EnableMouse`](#enablemouse) | procedures and functions | `graph` and `crt` |
+| [`Entries`](#entries) | function | `file` |
 | [`Event`](#event) | class | `graph` and `crt` |
 | [`EventKinds`](#eventkinds) | constants | `graph` and `crt` |
 | [`Environment` `EnvName` `EnvValue`](#environment) | functions | `dos` |
@@ -71,6 +74,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`HighVideo`](#highvideo) | procedure | `graph` and `crt` |
 | [`Image`](#image) | class | `graph` |
 | [`ImageSize`](#imagesize) | function | `graph` |
+| [`InFile`](#infile) | class | `file` |
 | [`Infinity`](#infinity) | constant | `math` |
 | [`InitCrt`](#initcrt) | procedures | `crt` |
 | [`InitGraph`](#initgraph) | procedure | `graph` |
@@ -99,6 +103,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`NormVideo`](#normvideo) | procedure | `graph` and `crt` |
 | [`Now` `UtcNow`](#now) | functions | `time` |
 | [`Odd`](#odd) | function | `math` |
+| [`OutFile`](#outfile) | class | `file` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
 | [`PenRel`](#penrel) | procedure, alias | `graph` |
@@ -116,6 +121,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ReadEvent`](#readevent) | functions | `graph` and `crt` |
 | [`ReadKey`](#readkey) | function | `graph` and `crt` |
 | [`ReadLines`](#readlines) | function and procedure | `file` |
+| [`RecordFile`](#recordfile) | class | `file` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Repeat`](#repeat) | extension function | `strings` |
 | [`Replace`](#replace) | extension function | `strings` |
@@ -140,6 +146,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Sound`](#sound) | procedures | `sound` |
 | [`SoundAvailable`](#soundavailable) | function | `sound` |
 | [`Split`](#split) | extension function | `strings` |
+| [`SplitPath` `FullPath`](#splitpath) | functions | `file` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
 | [`SurfaceAt`](#surfaceat) | function | `graph` and `crt` |
@@ -274,6 +281,68 @@ See any alias entry — [`Line`](#line), [`GotoXY`](#gotoxy),
 [`SetColor`](#setcolor) — or `examples/ide.a24`, which uses both spellings.
 
 ---
+
+## AppendFile
+
+*class* — unit `file`
+
+**Function**
+
+A file open for writing at the end, keeping what is already there.
+
+**Declaration**
+
+```algol24
+constructor AppendFile (Path : String);
+
+// every OutFile member, inherited: Write, WriteLine, WriteBytes,
+// Flush, Position, Size, Close
+procedure Seek (Offset : Integer)               refused -- see below
+```
+
+**Remarks**
+
+Everything [`OutFile`](#outfile) does, opened differently — which is the whole
+of the difference, so it **inherits** rather than restating five methods.
+
+This is Turbo Pascal's `Append` to `OutFile`'s `Rewrite`. A file that does not
+exist yet is created, so appending to nothing is not an error.
+
+⚠️ **[`Seek`](#outfile) is refused here rather than ignored.** A file opened
+for appending writes at the end whatever its position says — the operating
+system's rule, not this unit's — so a `Seek` would appear to work and then
+change nothing. It raises `Seek: an AppendFile always writes at the end.`
+Use [`OutFile`](#outfile) where writing to a position matters.
+
+Raises `AppendFile: cannot open '<Path>'.` when the file cannot be opened for
+appending.
+
+**See also**
+
+[`OutFile`](#outfile), [`AppendAll`](#appendall), [`InFile`](#infile)
+
+**Example**
+
+```algol24
+uses file;
+
+WriteAll ('diary.txt', 'monday' + #10);
+
+var A := AppendFile ('diary.txt');
+
+A.WriteLine ('tuesday');
+A.Close ();
+
+WriteLn (ReadAll ('diary.txt'));
+
+Erase ('diary.txt');
+```
+
+```console
+monday
+tuesday
+
+```
 
 ## Arc
 
@@ -1826,6 +1895,137 @@ true
 ```
 
 ---
+
+## Directory
+
+*class* — unit `file`
+
+**Function**
+
+A directory being read, one entry at a time.
+
+**Declaration**
+
+```algol24
+constructor Directory (Path : String);
+
+function  AtEnd () : Boolean                    every entry answered
+function  Next () : String                      the next entry's name
+procedure Close ()                              released, and idempotent
+```
+
+**Remarks**
+
+The core can make, remove and change directories [RT-026] and cannot **list**
+one, which is the gap this fills. Turbo Pascal's `FindFirst` and `FindNext`
+with their shared `SearchRec`, done as an object rather than a record the
+caller holds and passes back.
+
+An iterator rather than a function answering everything, for the reason
+[`ReadAll`](#readall) learned: the incremental form is the primitive and the
+all-at-once form is sugar on it. [`Entries`](#entries) is that sugar, and is
+what most programs should use.
+
+⚠️ **`.` and `..` are not answered.** Every caller would filter them, and the
+ones that forgot would recurse forever.
+
+⚠️ **The order is the filesystem's**, which is not sorted and not stable
+between runs. Sort the result if order matters.
+
+`Next` answers a bare name with no directory part, so testing one means
+joining it back: `IsDirectory (Path + '/' + Name)`.
+
+Raises `Directory: cannot open '<Path>'.` when the path is absent, is not a
+directory, or cannot be read; `Next: at end of directory.` past the last
+entry, so a loop that forgets `AtEnd` fails rather than spinning; and
+`<Member>: the directory is closed.` once closed. `Close` may be called more
+than once, on the same terms as [`InFile`](#infile)'s.
+
+**See also**
+
+[`Entries`](#entries), [`IsDirectory`](#readall),
+[`SplitPath`](#splitpath), [`InFile`](#infile)
+
+**Example**
+
+```algol24
+uses file;
+
+MkDir ('stock');
+WriteAll ('stock/apples.txt', '12');
+WriteAll ('stock/pears.txt', '7');
+
+var D     := Directory ('stock');
+var Found := 0;
+
+while not D.AtEnd () do
+begin
+    var Name := D.Next ();
+
+    if not IsDirectory ('stock/' + Name) then Found := Found + 1;
+end
+
+D.Close ();
+
+WriteLn ('files: ', Found);
+
+Erase ('stock/apples.txt');
+Erase ('stock/pears.txt');
+RmDir ('stock');
+```
+
+```console
+files: 2
+```
+
+## Entries
+
+*function* — unit `file`
+
+**Function**
+
+Every entry in a directory, as a List of names.
+
+**Declaration**
+
+```algol24
+function Entries (Path : String) : List;
+```
+
+**Remarks**
+
+The convenience form, standing to [`Directory`](#directory) as
+[`ReadLines`](#readlines) stands to [`InFile`](#infile). Names only, with no
+directory part, and without `.` or `..`.
+
+⚠️ **The order is the filesystem's and is not sorted.**
+
+Raises `Entries: cannot open '<Path>'.` on the same terms as `Directory`.
+
+**See also**
+
+[`Directory`](#directory), [`ReadLines`](#readlines),
+[`IsDirectory`](#readall)
+
+**Example**
+
+```algol24
+uses file;
+
+MkDir ('bin');
+WriteAll ('bin/run', 'x');
+
+WriteLn (Entries ('bin').Length, ' entry');
+WriteLn (Entries ('bin')[0]);
+
+Erase ('bin/run');
+RmDir ('bin');
+```
+
+```console
+1 entry
+run
+```
 
 ## DrawPoly
 
@@ -3999,6 +4199,144 @@ See [`GetImage`](#getimage).
 
 ---
 
+## InFile
+
+*class* — unit `file`
+
+**Function**
+
+A file open for reading, a line or a run of bytes at a time.
+
+**Declaration**
+
+```algol24
+constructor InFile (Path : String);
+
+function  ReadLine () : String                  the next line, no terminator
+function  AtEnd () : Boolean                    nothing left to give
+function  ReadBytes (Into : Any, Offset : Integer,
+                     Count : Integer) : Integer
+function  Position () : Integer                 bytes from the beginning
+procedure Seek (Offset : Integer)               move the next read
+function  Size () : Integer                     bytes the file holds
+procedure Close ()                              released, and idempotent
+```
+
+**Remarks**
+
+The streaming half of the unit, and the primitive the whole-file routines are
+built on rather than a parallel way of doing the same thing — [`ReadAll`](#readall)
+reads through one of these. Reach for it directly when a file will not fit in
+memory, when the input is a pipe whose size cannot be known, or when the work
+is done line by line and there is no reason to hold the rest.
+
+A reader fills a window of 65536 bytes from the operating system and answers
+lines out of it, so the cost of a line is a scan rather than a system call.
+
+`ReadLine` takes **a carriage return before the newline as part of the
+newline**, so a file written on Windows reads the same as one written here. A
+final line with no terminator is still a line, and a trailing newline does not
+invent an empty one after it. ⚠️ **That is exactly the rule
+[`ReadLines`](#readlines) follows**, and the two must not disagree — a test
+asserts they answer the same lines for a file ending with a newline, ending
+without one, holding a carriage return pair, holding one bare newline, and
+empty. Past the last line it raises `ReadLine: at end of file.`, so a loop that
+forgets `AtEnd` fails rather than spinning on empty strings.
+
+`AtEnd` asks the operating system when its window is spent, so it is the honest
+answer rather than a guess from the size — which is what makes it right for a
+pipe.
+
+`ReadBytes` is the binary half. It fills `Into`, a `Buffer`, starting at
+`Offset`, and answers **0** at end of file rather than raising. The offset is
+what lets a caller fill a growing buffer across several reads, which is how
+`ReadAll` is built on this.
+
+`Position`, `Seek` and `Size` index by **byte**, not by line and not by
+record — there being no `sizeof` in this language, so no width the unit could
+assume. For records indexed by record, see [`RecordFile`](#recordfile).
+
+⚠️ **`Position` is where the CALLER is, not where the handle is.** A reader
+takes 65536 bytes from the operating system at a time, so the handle runs
+ahead by whatever is still in its window; `Position` subtracts that. And
+`Seek` discards the window, or the next read would answer bytes from where the
+reader used to be.
+
+⚠️ **None of the three works on a pipe**, which can only go forwards. Each
+raises `<Member>: this file cannot be positioned.` — or `… measured.` for
+`Size` — rather than letting a `-1` read as "position zero".
+
+`Close` **may be called more than once**, the second doing nothing. That is the
+bargain `Buffer.Free` and the core's `TextFile.Close` already make [RT-023]: a
+handler releases on the way out without knowing how far the program got, which
+matters because the language has no `try`/`finally`. Every other member of a
+closed reader raises `<Member>: the file is closed.`
+
+Raises `InFile: cannot open '<Path>'.` when the file is absent, is a directory,
+or cannot be opened. ⚠️ **A directory is refused rather than read as empty** —
+`fopen` succeeds on one, so this is a check the unit makes, and `ReadAll` makes
+the same one so that the two agree about what is readable.
+
+**See also**
+
+[`OutFile`](#outfile), [`AppendFile`](#appendfile), [`ReadAll`](#readall),
+[`ReadLines`](#readlines)
+
+**Example**
+
+```algol24
+uses file;
+
+WriteAll ('mixed.txt', 'unix' + #10 + 'windows' + #13 + #10 + 'no newline');
+
+var F := InFile ('mixed.txt');
+
+while not F.AtEnd () do WriteLn ('[', F.ReadLine (), ']');
+
+F.Close ();
+F.Close ();                       // allowed, and does nothing
+
+Erase ('mixed.txt');
+```
+
+```console
+[unix]
+[windows]
+[no newline]
+```
+
+Bytes rather than lines, and what a closed reader says:
+
+```algol24
+uses file;
+
+WriteAll ('four.bin', 'ABCD');
+
+var F   := InFile ('four.bin');
+var Dst := Buffer (4);
+
+WriteLn (F.ReadBytes (Dst, 0, 4));
+WriteLn (Dst[0], ' ', Dst[3]);
+WriteLn (F.ReadBytes (Dst, 0, 4));        // nothing left
+
+F.Close ();
+
+try
+    F.ReadLine ();
+except on E : String do
+    WriteLn (E);
+end
+
+Erase ('four.bin');
+```
+
+```console
+4
+65 68
+0
+ReadLine: the file is closed.
+```
+
 ## Infinity
 
 *constant* — unit `math`
@@ -5141,9 +5479,11 @@ extension function Lower (S : String) : String;
 
 **Remarks**
 
-ASCII only, on the same terms as [`Upper`](#upper) and for the same reason:
-Unicode case mapping is a table rather than a rule. Every character outside
-`A`–`Z` comes back exactly as it went in, accented letters and emoji included.
+⚠️ **This is the core's own `ToLower`, with the extension spelling added**,
+on the same terms as [`Upper`](#upper). `ToLower (S)` is the same call.
+
+ASCII only, which is the core's decision: every character outside `A`–`Z`
+comes back exactly as it went in, accented letters and emoji included.
 
 Both spellings work: `Lower (S)` and `S.Lower ()`.
 
@@ -5557,6 +5897,138 @@ for var N := 1; N <= 5; N := N + 1 do
 ```
 
 ---
+
+## OutFile
+
+*class* — unit `file`
+
+**Function**
+
+A file open for writing, emptied first.
+
+**Declaration**
+
+```algol24
+constructor OutFile (Path : String);
+
+procedure Write (Text : String)                 as it stands, adding nothing
+procedure WriteLine (Text : String)             and a newline
+procedure WriteBytes (From : Any, Count : Integer)
+procedure Flush ()                              push what is buffered
+function  Position () : Integer                 bytes from the beginning
+procedure Seek (Offset : Integer)               move the next write
+function  Size () : Integer                     bytes the file holds
+procedure Close ()                              flushed, released, idempotent
+```
+
+**Remarks**
+
+The writing half of the streaming surface. Reach for it when output is produced
+as the program runs rather than assembled and handed over whole, which is what
+[`WriteAll`](#writeall) is for.
+
+Opening **empties** the file — Turbo Pascal's `Rewrite` rather than its
+`Append`. To keep what is there, use [`AppendFile`](#appendfile).
+
+⚠️ **There is deliberately no free-function alias for any of these**, where
+nearly every surface verb in `graph` and `crt` has one. Those two units both
+export a free `Write` that shadows the built-in, and a third would make a bare
+`Write` [ambiguous](#aliases) in the combinations worth writing — the same
+collision that keeps `Delay` out of `sound`. A method on a receiver collides
+with nothing. `WriteLine` is spelled out for the same reason: nobody reading it
+should have to wonder which unit's `WriteLn` answered.
+
+`WriteLine`'s terminator is `#10` alone, never a carriage return pair, which is
+what [`WriteLines`](#writelines) also writes — so a file written here reads back
+the same through [`InFile`](#infile) or [`ReadLines`](#readlines) on any
+platform.
+
+`WriteBytes` takes the bytes from the **start** of `From`, a `Buffer`. A `Count`
+of zero or less writes nothing, and `nil` raises `WriteBytes: needs a buffer.`
+
+⚠️ **Bytes may sit in a buffer until `Flush` or `Close`.** A program that ends
+without closing may lose the tail, which is the one real cost of writing this
+way instead of with `WriteAll`. `Flush` makes what was written readable without
+closing, which is what a long-running program keeping a log wants; `Close`
+flushes too, so a program that closes need not call it.
+
+`Position`, `Seek` and `Size` are byte-indexed, as [`InFile`](#infile)'s are.
+`Size` counts what is still buffered as well as what has reached the disk,
+because it asks the handle rather than the path. Seeking back and writing is
+how a record is replaced in place without rewriting the file —
+[`RecordFile`](#recordfile) is that, done by record index.
+
+Writing past the end leaves a hole, which reads back as zero bytes. That is
+the operating system's behaviour rather than this unit's choice.
+
+`Close` **may be called more than once**, on the same terms as
+[`InFile`](#infile)'s. Every other member of a closed file raises
+`<Member>: the file is closed.`
+
+Raises `OutFile: cannot open '<Path>'.` when the file cannot be opened for
+writing.
+
+**See also**
+
+[`AppendFile`](#appendfile), [`InFile`](#infile), [`WriteAll`](#writeall),
+[`WriteLines`](#writelines)
+
+**Example**
+
+```algol24
+uses file;
+
+var O := OutFile ('report.txt');
+
+O.WriteLine ('totals');
+O.Write ('42');
+O.Flush ();
+
+// Readable while the file is still open.
+WriteLn (ReadAll ('report.txt'));
+
+O.Close ();
+O.Close ();                       // allowed, and does nothing
+
+try
+    O.Write ('more');
+except on E : String do
+    WriteLn (E);
+end
+
+Erase ('report.txt');
+```
+
+```console
+totals
+42
+Write: the file is closed.
+```
+
+Bytes rather than text:
+
+```algol24
+uses file;
+
+var B := Buffer (3);
+
+B[0] := 72;  B[1] := 105;  B[2] := 33;      // H i !
+
+var O := OutFile ('bytes.bin');
+
+O.WriteBytes (B, 3);
+O.Close ();
+
+WriteLn (ReadAll ('bytes.bin'));
+WriteLn (FileSize ('bytes.bin'));
+
+Erase ('bytes.bin');
+```
+
+```console
+Hi!
+3
+```
 
 ## OutText
 
@@ -6075,8 +6547,10 @@ The color is written directly and does not use the pen, so
 [`SetColor`](#setcolor) does not affect it. Drawing does not appear until
 something presents; [`Show`](#show) is that.
 
-Raises `CloseGraph has closed this surface.` once the window it belongs to
-has gone.
+Raises `PutPixel wants a color or Transparent.` below `Transparent` or above
+[`White`](#colors) — this member had no color check at all before 0.1.6, and
+wrote the value straight into the surface — and `CloseGraph has closed this
+surface.` once the window it belongs to has gone.
 
 **See also**
 
@@ -6683,6 +7157,125 @@ carriage returns:    true
 
 ---
 
+## RecordFile
+
+*class* — unit `file`
+
+**Function**
+
+A file of fixed-size records, indexed by record rather than by byte.
+
+**Declaration**
+
+```algol24
+constructor RecordFile (Path : String, Width : Integer);
+
+function  Count () : Integer                    whole records held
+function  Read (N : Integer) : Any              record N, as a new Buffer
+function  Read (N : Integer, Into : Any) : Integer
+procedure Write (N : Integer, From : Any)       replaces record N
+procedure Append (From : Any)                   adds one at the end
+procedure Flush ()                              push what is buffered
+procedure Close ()                              flushed, released, idempotent
+```
+
+**Remarks**
+
+Turbo Pascal's `file of Record`, as close as this language can come to it.
+
+⚠️ **The record *type* cannot carry over, and that is the whole of the
+difference.** Pascal's `Seek (F, 5)` worked because the compiler knew
+`sizeof(Customer)`; there is no `sizeof` here, and a class instance is a
+reference with no defined byte layout. So the width is given at construction
+and the field layout is the caller's — a `Buffer` is the record, with
+`PutInt`, `PutDouble` and byte indexing laying the fields out. That is less of
+a concession than it sounds: Pascal's `string[30]` was already a fixed-width
+field a programmer chose.
+
+What does carry over is the useful half — random access by index, a file
+larger than memory, and **updating one record in place**, which a whole-file
+read and write cannot do without rewriting everything.
+
+`Count` answers **records**, as Pascal's `FileSize` did for a typed file. A
+trailing part-record is not counted.
+
+**The two `Read` forms differ only in allocation.** `Read (N)` answers a Buffer
+of its own and reads better; `Read (N, Into)` fills one the caller owns and
+allocates nothing, which is what a walk over many thousands of records wants.
+`Into` must hold at least a record; a larger one is filled from its start and
+the rest left alone.
+
+`Write` at an index equal to `Count ()` appends, which is what `Append` does
+more plainly. Anything past that is refused rather than leaving a hole.
+
+The file is opened for reading **and** writing without being emptied, and is
+created if absent — so a record file is opened the same way whether or not it
+exists yet.
+
+Raises `RecordFile: a record must have a positive size.`,
+`RecordFile: cannot open '<Path>'.`, `Read: there is no record <N>.` and its
+`Write` counterpart, `<Member>: needs a buffer.`,
+`<Member>: the buffer is smaller than a record.`, and
+`<Member>: the file is closed.` once closed.
+
+**See also**
+
+[`InFile`](#infile), [`OutFile`](#outfile), [`FileSize`](#filesize)
+
+**Example**
+
+```algol24
+uses file;
+
+const Width := 16;                  // an Integer at 0, a Double at 8
+
+var F := RecordFile ('stock.dat', Width);
+
+for var I := 0; I < 3; I := I + 1 do
+begin
+    var R := Buffer (Width);
+
+    R.PutInt (0, 100 + I);
+    R.PutDouble (8, 1.5 * I);
+
+    F.Append (R);
+end
+
+WriteLn ('records: ', F.Count ());
+
+// One record changes; the others are not rewritten.
+var Upd := Buffer (Width);
+
+Upd.PutInt (0, 999);
+Upd.PutDouble (8, 4.25);
+
+F.Write (1, Upd);
+
+// The allocation-free form, one buffer reused down the file.
+var Into := Buffer (Width);
+
+for var I := 0; I < F.Count (); I := I + 1 do
+begin
+    F.Read (I, Into);
+
+    WriteLn (I, ': ', Into.GetInt (0), '  ', Str (Into.GetDouble (8), 2));
+end
+
+F.Close ();
+
+WriteLn ('bytes: ', FileSize ('stock.dat'));
+
+Erase ('stock.dat');
+```
+
+```console
+records: 3
+0: 100  0.00
+1: 999  4.25
+2: 102  3.00
+bytes: 48
+```
+
 ## Rectangle
 
 *procedure, alias of `ViewPort.Rectangle`* — unit `graph`
@@ -7185,7 +7778,7 @@ under them. See [`FillStyles`](#fillstyles).
 It is a third pen, independent of [`SetColor`](#setcolor)'s and
 [`SetFillStyle`](#setfillstyle)'s; setting one never disturbs another.
 
-Raises `SetBkColor wants a color or Transparent.` below `Transparent`, and
+Raises `SetBkColor wants a color or Transparent.` below `Transparent` or above [`White`](#colors) — [`Blink`](#blink) is ink's alone, so `White + Blink` is refused — and
 `CloseGraph has closed this surface.` once the window has gone.
 
 **See also**
@@ -7318,9 +7911,20 @@ for lines and letters both. A fresh viewport draws in `White`.
 [`PutPixel`](#putpixel) is the exception: it names its own color and ignores
 the pen.
 
-Raises `SetColor wants an RGB color.` for a negative, there being no
-transparent ink, and `CloseGraph has closed this surface.` once the window has
-gone.
+Raises `SetColor wants an RGB color.` for a negative — there being no
+transparent ink — and for anything above [`White`](#colors). ⚠️ **The ceiling
+is checked here so it cannot surface later.** Without it an impossible color
+reached the pixel writer and came back as `Integer … is too large to use
+here.` from `Buffer.PutInt`, mid-draw, naming neither the color nor the call
+that set it.
+
+⚠️ **[`Blink`](#blink) is not a pen color.** It belongs to
+[`TextColor`](#textcolor), the only member that reads it, so `White + Blink`
+is refused here. The same ceiling applies to [`SetBkColor`](#setbkcolor),
+[`SetFillStyle`](#setfillstyle), [`PutPixel`](#putpixel) and
+[`TextBackground`](#textbackground).
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
 
 **See also**
 
@@ -7398,7 +8002,7 @@ Nothing consults this state yet — the figures that take a fill are still to
 come. It is settled first because they will all want it, and because the
 choice between one pen and two is theirs to inherit rather than to argue.
 
-Raises `SetFillStyle wants a known pattern.`, `SetFillStyle wants UserFill
+Raises `SetFillStyle wants an RGB color.` for a color below zero or above [`White`](#colors), and `SetFillStyle wants a known pattern.`, `SetFillStyle wants UserFill
 from SetFillPattern.` for `UserFill` itself, `SetFillStyle wants an RGB
 color.`, `SetFillPattern wants eight rows.`, and `SetFillPattern wants an RGB
 color.`
@@ -8259,7 +8863,9 @@ An empty separator raises, there being no sequence of pieces that would mean
 it.
 
 To find one occurrence rather than cut at all of them, the core's own `Pos`
-answers the index of the first, or −1 when there is none.
+answers the index of the first, or −1 when there is none — and takes a start
+index, so `Pos (S, What, From)` walks the occurrences without slicing. That is
+what this routine does internally, in one pass over `S`.
 
 Both spellings work: `Split (S, ',')` and `S.Split (',')`.
 
@@ -8296,6 +8902,119 @@ a,,b
 ```
 
 ---
+
+## SplitPath
+
+*functions* — unit `file`
+
+**Function**
+
+Takes a path apart into its directory, name and extension, and puts a relative
+one back together as an absolute.
+
+**Declaration**
+
+```algol24
+function SplitPath (Path : String) : PathParts;
+function FullPath  (Path : String) : String;
+
+// PathParts, readable
+Dir  : String                   up to and including the last separator
+Name : String                   the bare name, with no extension
+Ext  : String                   from the last dot, including it
+
+function Text () : String       the three put back together
+```
+
+**Remarks**
+
+Turbo Pascal's `FSplit`, which wrote into three `var` parameters. This answers
+the one object they become — the same trade `time` makes for `GetDate`.
+
+⚠️ **The three concatenate back into the path they came from**, for every
+input. `Dir` keeps its trailing separator and `Ext` its leading dot precisely
+so that they do, and `Text ()` is that concatenation. A test asserts the round
+trip over thirteen shapes.
+
+A dot that **begins** the name is part of the name, so `.profile` is a name
+with no extension rather than the other way round. Only the **last** dot
+separates, so `archive.tar.gz` has `.gz`.
+
+A trailing separator gives an empty `Name`, and a path with no separator an
+empty `Dir`.
+
+Raises nothing — every string is a path as far as this is concerned.
+
+**See also**
+
+[`Directory`](#directory), [`Exists`](#readall)
+
+**Example**
+
+```algol24
+uses file;
+
+var S := SplitPath ('/tmp/archive.tar.gz');
+
+WriteLn ('dir:  ', S.Dir);
+WriteLn ('name: ', S.Name);
+WriteLn ('ext:  ', S.Ext);
+WriteLn ('back: ', S.Text ());
+
+var H := SplitPath ('.profile');
+
+WriteLn ('a leading dot is a name: [', H.Name, '] [', H.Ext, ']');
+```
+
+```console
+dir:  /tmp/
+name: archive.tar
+ext:  .gz
+back: /tmp/archive.tar.gz
+a leading dot is a name: [.profile] []
+```
+
+### FullPath
+
+A path made absolute, with `.` and `..` resolved away.
+
+```algol24
+function FullPath (Path : String) : String;
+```
+
+Turbo Pascal's `FExpand`. A relative path is taken against the working
+directory, which the core answers with `GetDir` [RT-026]; an absolute one is
+only tidied.
+
+Tidying means repeated separators collapse, a `.` component goes, and a `..`
+component removes the one before it. A `..` at the root **stays** at the root
+rather than climbing past it.
+
+⚠️ **This asks the filesystem nothing.** It does not resolve symbolic links
+and does not require the path to exist — which is what makes it usable on a
+name a program is about to create.
+
+Raises nothing.
+
+**Example**
+
+```algol24
+uses file;
+
+WriteLn (FullPath ('/a/b/../c'));
+WriteLn (FullPath ('/a/./b//c'));
+WriteLn (FullPath ('/..'));
+WriteLn (FullPath ('/no/./such/../such/place'));
+WriteLn (FullPath ('x.txt') = GetDir () + '/x.txt');
+```
+
+```console
+/a/c
+/a/b/c
+/
+/no/such/place
+true
+```
 
 ## Sqr
 
@@ -8467,7 +9186,7 @@ opaque, which is what a menu bar or a readable HUD over a busy scene wants.
 The setting applies to cells painted from now on; nothing already on the
 grid changes.
 
-Raises `TextBackground wants a color or Transparent.` for a negative that is
+Raises `TextBackground wants a color or Transparent.` above [`White`](#colors) — [`Blink`](#blink) belongs to [`TextColor`](#textcolor) and is refused here — and for a negative that is
 not `Transparent`.
 
 **See also**
@@ -9050,12 +9769,15 @@ extension function Upper (S : String) : String;
 
 **Remarks**
 
-ASCII only, and deliberately. Unicode case mapping is a table rather than a
-rule, and not even a character-to-character one: `ß` uppercases to `SS`, and
-Turkish `i` to a dotted capital that is not `I`. A routine handling some of the
-exceptions and not others would be harder to reason about than one handling
-none, so every character outside `a`–`z` comes back exactly as it went in —
-accented letters, Greek, Cyrillic and emoji alike.
+⚠️ **This is the core's own `ToUpper`, with the extension spelling added.**
+It exists so that `S.Upper ()` composes in a chain, which a built-in function
+cannot; `ToUpper (S)` is the same call and needs no `uses`.
+
+ASCII only, which is the core's decision rather than this unit's — and the
+right one. Unicode case mapping is a table and not even
+character-to-character: `ß` uppercases to `SS`. Every character outside
+`a`–`z` comes back exactly as it went in, accented letters, Greek, Cyrillic
+and emoji alike.
 
 Both spellings work: `Upper (S)` and `S.Upper ()`.
 
