@@ -456,14 +456,14 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 299 | complete |
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is SDL2 audio -- a square wave mixed with up to sixteen decoded samples, WAV only | 14 | complete |
-| `file` | whole-file: `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; streaming: the `InFile` reader (`ReadLine`, `AtEnd`, `ReadBytes`) and the `OutFile` writer (`Write`, `WriteLine`, `WriteBytes`, `Flush`) with `AppendFile` inheriting it, each with `Position`, `Seek`, `Size` and an idempotent `Close`, no free-function aliases on any of them; `RecordFile` indexes fixed-width records by number — Turbo Pascal's `file of Record` with the width given rather than computed; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 33 | complete |
+| `file` | whole-file: `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; streaming: the `InFile` reader (`ReadLine`, `AtEnd`, `ReadBytes`) and the `OutFile` writer (`Write`, `WriteLine`, `WriteBytes`, `Flush`) with `AppendFile` inheriting it, each with `Position`, `Seek`, `Size` and an idempotent `Close`, no free-function aliases on any of them; `RecordFile` indexes fixed-width records by number — Turbo Pascal's `file of Record` with the width given rather than computed; directories through the `Directory` iterator and `Entries`, paths through `SplitPath` (answering a `PathParts`) and `FullPath`, which need no C at all; `fileffi.c` is C99 plus POSIX `dirent`, which mingw-w64 also ships — so it still cross-compiles for Windows | 40 | complete |
 | `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 48 | complete |
 | `time` | `Now`, `UtcNow`, `At`, `UtcAt` answering a `DateTime` with `Text`; `UtcOffset`, `IsDaylightSaving`; `timeffi.c` is C89 `localtime_r`. `GetDate`/`GetTime`'s four `var` parameters become one returned object; `SetDate`/`SetTime` are absent, needing root | 9 | complete |
 | `dos` | `DiskFree`, `DiskSize` by path rather than drive number and unbounded rather than `LongInt`; `GetEnv`, `HasEnv`, `Environment` answering a List, `EnvName`/`EnvValue`; `Exec` through `posix_spawn` with an argument List and **no shell**; `dosffi.c` is POSIX, not C99 | 13 | complete |
 
-The Tests column is the unit's own `test` blocks, 546 in all. `./test.sh`
-reports what `--test` can reach instead, imports included, so it prints 410
-for `graph` (its 299, plus `math`'s 69, `file`'s 33 and `testing`'s 9) and 92
+The Tests column is the unit's own `test` blocks, 553 in all. `./test.sh`
+reports what `--test` can reach instead, imports included, so it prints 417
+for `graph` (its 299, plus `math`'s 69, `file`'s 40 and `testing`'s 9) and 92
 for `sound`. `graph` reaches `file` because `InstallUserFont` reads its glyph
 file through it.
 
@@ -648,6 +648,35 @@ together.** Both take a carriage return before a newline as part of the
 newline, treat a final line with no terminator as a line, and refuse to
 invent an empty last line after a trailing one. The test asserts they answer
 identically across five bodies plus the empty file, so neither can drift.
+
+⚠️ **`Directory` is an iterator and `Entries` is the sugar, not the other way
+round.** That is the `ReadAll` lesson applied before it could bite again:
+`readdir` is itself incremental, so the incremental form is the primitive. A
+directory with a hundred thousand entries needs no more memory than one.
+
+⚠️ **`.` and `..` are skipped in the C, not by the caller.** Every caller
+would filter them and the ones that forgot would recurse forever; Python's
+`listdir` and Go's `ReadDir` make the same choice. The order is the
+filesystem's -- not sorted, not stable between runs -- and the doc comment
+says so rather than letting someone discover it.
+
+⚠️ **`dirent.h` is the one thing in `fileffi.c` that is not plain C99**, and
+it was checked before being put here rather than in `dos`: mingw-w64 ships a
+`dirent` that wraps `FindFirstFile`, so the file still cross-compiles for
+Windows. Had it not, directory reading would have belonged in `dos`, which is
+POSIX already and claims nothing about portability.
+
+⚠️ **`SplitPath`'s three parts concatenate back into the path**, for every
+input, which is why `Dir` keeps its trailing separator and `Ext` its leading
+dot. A test asserts the round trip over thirteen shapes. `FullPath` asks the
+filesystem **nothing** -- no symlink resolution, no existence check -- which
+is what makes it usable on a name a program is about to create.
+
+⚠️ **The Char-versus-String seam bit a fourth time, in a test.** A round-trip
+assertion over a list of paths failed on `'/'` alone, because a
+one-character literal is a **Char** and a Char never equals a String. The code
+was right and the test was wrong. `Str ('/')` on the literal side; the test now
+says so in a comment, because the next person will write the same list.
 
 ⚠️ **`InFile.Position` is where the CALLER is, not where the handle is.** A
 reader buys 65536 bytes at a time, so the handle runs ahead by whatever is

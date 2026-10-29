@@ -48,6 +48,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The one thing here that is not plain C99. POSIX rather than ISO -- but
+ * mingw-w64 ships a dirent that wraps FindFirstFile, so this file still
+ * cross-compiles for Windows; verified with x86_64-w64-mingw32-gcc before
+ * directory reading was put in this unit rather than in `dos`. */
+#include <dirent.h>
 #include <sys/stat.h>
 
 /* Whether a path exists at all, directory or not. */
@@ -265,6 +271,92 @@ int64_t alg_libfile_copy_bytes (void *dst, int64_t dst_off, const void *src,
             (size_t) len);
 
     return len;
+}
+
+/* --------------------------------------------------------- directories -- */
+/*
+ * Reading a directory, which the core offers no way to do: it has MkDir,
+ * RmDir, ChDir and GetDir [RT-026] and nothing that LISTS one.
+ *
+ * An iterator rather than a function answering everything, for the reason the
+ * rest of this file learned the hard way -- the incremental form is the
+ * primitive and the all-at-once form is sugar on top, never the other way
+ * round. `readdir` is itself incremental, so this is the shape the operating
+ * system already has.
+ *
+ * `.` and `..` are skipped here rather than by the caller. Every caller would
+ * filter them and the ones that forgot would recurse forever; Python's
+ * listdir and Go's ReadDir both make the same choice.
+ */
+
+#define ALG_MAX_DIRS 16
+
+static DIR *dirs[ALG_MAX_DIRS];
+
+/* Opens a directory and answers a handle, or -1. */
+int64_t alg_libdir_open (const char *path)
+{
+    if (path == NULL) return -1;
+
+    int slot = -1;
+
+    for (int i = 0; i < ALG_MAX_DIRS; i++)
+        if (dirs[i] == NULL) { slot = i; break; }
+
+    if (slot < 0) return -1;
+
+    DIR *d = opendir (path);
+
+    if (d == NULL) return -1;
+
+    dirs[slot] = d;
+
+    return slot;
+}
+
+/* Copies the next entry's name into a caller's buffer and answers its length.
+ *
+ * Answers 0 when the directory is exhausted, and -1 for a bad handle or a
+ * name too long for the buffer. A name is bounded by the filesystem -- 255
+ * bytes on every one this runs on -- and the unit passes a buffer far larger,
+ * so -1 here means something genuinely strange rather than a small buffer.
+ */
+int64_t alg_libdir_next (int64_t handle, void *into, int64_t max)
+{
+    if (handle < 0 || handle >= ALG_MAX_DIRS) return -1;
+    if (dirs[handle] == NULL) return -1;
+    if (into == NULL || max <= 0) return -1;
+
+    for (;;)
+    {
+        struct dirent *e = readdir (dirs[handle]);
+
+        if (e == NULL) return 0;                    /* nothing left */
+
+        /* Skip the two that are not really entries. */
+        if (strcmp (e->d_name, ".") == 0) continue;
+        if (strcmp (e->d_name, "..") == 0) continue;
+
+        size_t len = strlen (e->d_name);
+
+        if ((int64_t) len > max) return -1;
+
+        memcpy (into, e->d_name, len);
+
+        return (int64_t) len;
+    }
+}
+
+/* Closes a handle. A no-op for one already closed, on the same terms as a
+ * file's. */
+void alg_libdir_close (int64_t handle)
+{
+    if (handle < 0 || handle >= ALG_MAX_DIRS) return;
+    if (dirs[handle] == NULL) return;
+
+    closedir (dirs[handle]);
+
+    dirs[handle] = NULL;
 }
 
 /* ------------------------------------------------------------ position -- */

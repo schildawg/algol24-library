@@ -40,9 +40,11 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Delete`](#delete) | extension function | `strings` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
 | [`DiskFree` `DiskSize`](#diskfree) | functions | `dos` |
+| [`Directory`](#directory) | class | `file` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`EnableMouse`](#enablemouse) | procedures and functions | `graph` and `crt` |
+| [`Entries`](#entries) | function | `file` |
 | [`Event`](#event) | class | `graph` and `crt` |
 | [`EventKinds`](#eventkinds) | constants | `graph` and `crt` |
 | [`Environment` `EnvName` `EnvValue`](#environment) | functions | `dos` |
@@ -144,6 +146,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Sound`](#sound) | procedures | `sound` |
 | [`SoundAvailable`](#soundavailable) | function | `sound` |
 | [`Split`](#split) | extension function | `strings` |
+| [`SplitPath` `FullPath`](#splitpath) | functions | `file` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
 | [`SurfaceAt`](#surfaceat) | function | `graph` and `crt` |
@@ -1892,6 +1895,137 @@ true
 ```
 
 ---
+
+## Directory
+
+*class* — unit `file`
+
+**Function**
+
+A directory being read, one entry at a time.
+
+**Declaration**
+
+```algol24
+constructor Directory (Path : String);
+
+function  AtEnd () : Boolean                    every entry answered
+function  Next () : String                      the next entry's name
+procedure Close ()                              released, and idempotent
+```
+
+**Remarks**
+
+The core can make, remove and change directories [RT-026] and cannot **list**
+one, which is the gap this fills. Turbo Pascal's `FindFirst` and `FindNext`
+with their shared `SearchRec`, done as an object rather than a record the
+caller holds and passes back.
+
+An iterator rather than a function answering everything, for the reason
+[`ReadAll`](#readall) learned: the incremental form is the primitive and the
+all-at-once form is sugar on it. [`Entries`](#entries) is that sugar, and is
+what most programs should use.
+
+⚠️ **`.` and `..` are not answered.** Every caller would filter them, and the
+ones that forgot would recurse forever.
+
+⚠️ **The order is the filesystem's**, which is not sorted and not stable
+between runs. Sort the result if order matters.
+
+`Next` answers a bare name with no directory part, so testing one means
+joining it back: `IsDirectory (Path + '/' + Name)`.
+
+Raises `Directory: cannot open '<Path>'.` when the path is absent, is not a
+directory, or cannot be read; `Next: at end of directory.` past the last
+entry, so a loop that forgets `AtEnd` fails rather than spinning; and
+`<Member>: the directory is closed.` once closed. `Close` may be called more
+than once, on the same terms as [`InFile`](#infile)'s.
+
+**See also**
+
+[`Entries`](#entries), [`IsDirectory`](#readall),
+[`SplitPath`](#splitpath), [`InFile`](#infile)
+
+**Example**
+
+```algol24
+uses file;
+
+MkDir ('stock');
+WriteAll ('stock/apples.txt', '12');
+WriteAll ('stock/pears.txt', '7');
+
+var D     := Directory ('stock');
+var Found := 0;
+
+while not D.AtEnd () do
+begin
+    var Name := D.Next ();
+
+    if not IsDirectory ('stock/' + Name) then Found := Found + 1;
+end
+
+D.Close ();
+
+WriteLn ('files: ', Found);
+
+Erase ('stock/apples.txt');
+Erase ('stock/pears.txt');
+RmDir ('stock');
+```
+
+```console
+files: 2
+```
+
+## Entries
+
+*function* — unit `file`
+
+**Function**
+
+Every entry in a directory, as a List of names.
+
+**Declaration**
+
+```algol24
+function Entries (Path : String) : List;
+```
+
+**Remarks**
+
+The convenience form, standing to [`Directory`](#directory) as
+[`ReadLines`](#readlines) stands to [`InFile`](#infile). Names only, with no
+directory part, and without `.` or `..`.
+
+⚠️ **The order is the filesystem's and is not sorted.**
+
+Raises `Entries: cannot open '<Path>'.` on the same terms as `Directory`.
+
+**See also**
+
+[`Directory`](#directory), [`ReadLines`](#readlines),
+[`IsDirectory`](#readall)
+
+**Example**
+
+```algol24
+uses file;
+
+MkDir ('bin');
+WriteAll ('bin/run', 'x');
+
+WriteLn (Entries ('bin').Length, ' entry');
+WriteLn (Entries ('bin')[0]);
+
+Erase ('bin/run');
+RmDir ('bin');
+```
+
+```console
+1 entry
+run
+```
 
 ## DrawPoly
 
@@ -8768,6 +8902,119 @@ a,,b
 ```
 
 ---
+
+## SplitPath
+
+*functions* — unit `file`
+
+**Function**
+
+Takes a path apart into its directory, name and extension, and puts a relative
+one back together as an absolute.
+
+**Declaration**
+
+```algol24
+function SplitPath (Path : String) : PathParts;
+function FullPath  (Path : String) : String;
+
+// PathParts, readable
+Dir  : String                   up to and including the last separator
+Name : String                   the bare name, with no extension
+Ext  : String                   from the last dot, including it
+
+function Text () : String       the three put back together
+```
+
+**Remarks**
+
+Turbo Pascal's `FSplit`, which wrote into three `var` parameters. This answers
+the one object they become — the same trade `time` makes for `GetDate`.
+
+⚠️ **The three concatenate back into the path they came from**, for every
+input. `Dir` keeps its trailing separator and `Ext` its leading dot precisely
+so that they do, and `Text ()` is that concatenation. A test asserts the round
+trip over thirteen shapes.
+
+A dot that **begins** the name is part of the name, so `.profile` is a name
+with no extension rather than the other way round. Only the **last** dot
+separates, so `archive.tar.gz` has `.gz`.
+
+A trailing separator gives an empty `Name`, and a path with no separator an
+empty `Dir`.
+
+Raises nothing — every string is a path as far as this is concerned.
+
+**See also**
+
+[`Directory`](#directory), [`Exists`](#readall)
+
+**Example**
+
+```algol24
+uses file;
+
+var S := SplitPath ('/tmp/archive.tar.gz');
+
+WriteLn ('dir:  ', S.Dir);
+WriteLn ('name: ', S.Name);
+WriteLn ('ext:  ', S.Ext);
+WriteLn ('back: ', S.Text ());
+
+var H := SplitPath ('.profile');
+
+WriteLn ('a leading dot is a name: [', H.Name, '] [', H.Ext, ']');
+```
+
+```console
+dir:  /tmp/
+name: archive.tar
+ext:  .gz
+back: /tmp/archive.tar.gz
+a leading dot is a name: [.profile] []
+```
+
+### FullPath
+
+A path made absolute, with `.` and `..` resolved away.
+
+```algol24
+function FullPath (Path : String) : String;
+```
+
+Turbo Pascal's `FExpand`. A relative path is taken against the working
+directory, which the core answers with `GetDir` [RT-026]; an absolute one is
+only tidied.
+
+Tidying means repeated separators collapse, a `.` component goes, and a `..`
+component removes the one before it. A `..` at the root **stays** at the root
+rather than climbing past it.
+
+⚠️ **This asks the filesystem nothing.** It does not resolve symbolic links
+and does not require the path to exist — which is what makes it usable on a
+name a program is about to create.
+
+Raises nothing.
+
+**Example**
+
+```algol24
+uses file;
+
+WriteLn (FullPath ('/a/b/../c'));
+WriteLn (FullPath ('/a/./b//c'));
+WriteLn (FullPath ('/..'));
+WriteLn (FullPath ('/no/./such/../such/place'));
+WriteLn (FullPath ('x.txt') = GetDir () + '/x.txt');
+```
+
+```console
+/a/c
+/a/b/c
+/
+/no/such/place
+true
+```
 
 ## Sqr
 

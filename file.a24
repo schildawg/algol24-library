@@ -143,6 +143,26 @@ private function RawTell (Handle : Integer) : Integer;
 private function RawLength (Handle : Integer) : Integer;
     external 'alg_libfile_length' in 'libfileffi.so';
 
+/// Opens a directory and answers a handle, or -1.
+///
+/// Private to this unit.
+private function RawDirOpen (Path : String) : Integer;
+    external 'alg_libdir_open' in 'libfileffi.so';
+
+/// Copies the next entry's name into a buffer, answering its length, 0 when
+/// the directory is exhausted, and -1 for a name too long to fit.
+///
+/// Private to this unit. `.` and `..` are skipped in the C rather than here.
+private function RawDirNext (Handle : Integer, Into : Pointer,
+                             Max : Integer) : Integer;
+    external 'alg_libdir_next' in 'libfileffi.so';
+
+/// Closes a directory handle, and does nothing for one already closed.
+///
+/// Private to this unit.
+private procedure RawDirClose (Handle : Integer);
+    external 'alg_libdir_close' in 'libfileffi.so';
+
 /// How a file is opened: reading, writing from empty, or writing at the end.
 ///
 /// Private to this unit. The three the core's own `TextFile` offers as
@@ -158,6 +178,13 @@ private const ModeAppend := 2;
 /// Private to this unit. Neither has a counterpart in the core's `TextFile`.
 private const ModeUpdate := 3;
 private const ModeCreate := 4;
+
+/// How long a directory entry's name may be.
+///
+/// Private to this unit. A filesystem bounds a name at 255 bytes, so this is
+/// generous by a factor of four and a refusal from `RawDirNext` means
+/// something strange rather than a buffer too small.
+private const NameMax := 1024;
 
 /// How many bytes a reader holds at a time.
 ///
@@ -682,6 +709,317 @@ begin
     Erase (Scratch + '2');
 end
 
+
+/// A directory being read, one entry at a time.
+///
+/// The core can make, remove and change directories [RT-026] and cannot list
+/// one, which is the gap this fills. Turbo Pascal's `FindFirst` and `FindNext`
+/// with their shared `SearchRec`, done as an object rather than a record the
+/// caller has to hold and pass back.
+///
+/// An iterator rather than a function answering everything, for the reason
+/// `ReadAll` learned: the incremental form is the primitive and the
+/// all-at-once form is sugar on it. `Entries` is that sugar, and is what most
+/// programs should use.
+///
+/// `.` and `..` are not answered. Every caller would filter them and the ones
+/// that forgot would recurse forever.
+///
+/// The order is the filesystem's, which is not sorted and not stable between
+/// runs. Sort the result if order matters.
+///
+/// # Raises
+/// `Directory: cannot open '<Path>'.` when the path is absent, is not a
+/// directory, or cannot be read.
+///
+/// # Safety
+/// `Close` releases the handle and may be called more than once [RT-023].
+/// Every other member of a closed directory raises.
+///
+/// # Examples
+/// `Directory Answers Every Entry Once`
+///
+/// # Since
+/// 0.1.6
+class Directory;
+var
+    Handle  : Integer;
+    Pending : String;              // read ahead, so AtEnd can be honest
+    Known   : Boolean;             // whether Pending holds one
+    Ended   : Boolean;
+    Closed  : Boolean;
+
+begin
+    constructor Init (Path : String);
+    begin
+        this.Handle := RawDirOpen (Path);
+
+        if this.Handle < 0 then
+            raise 'Directory: cannot open ''' + Path + '''.';
+
+        this.Pending := '';
+        this.Known   := False;
+        this.Ended   := False;
+        this.Closed  := False;
+    end
+
+    /// Reads one entry ahead, so that `AtEnd` can answer without consuming.
+    ///
+    /// Private to the class. A directory cannot be rewound by one entry, so
+    /// knowing whether another exists means having already fetched it -- the
+    /// same bargain `InFile` makes with its window.
+    function Peek () : Boolean;
+    begin
+        if this.Known then Exit True;
+        if this.Ended then Exit False;
+
+        var B := Buffer (NameMax);
+        var N := RawDirNext (this.Handle, B.Address, NameMax);
+
+        if N = 0 then
+        begin
+            this.Ended := True;
+
+            Exit False;
+        end
+
+        if N < 0 then raise 'Next: this directory cannot be read.';
+
+        B.Resize (N);
+
+        this.Pending := B.Text;
+        this.Known   := True;
+
+        Exit True;
+    end
+
+    /// Whether every entry has been answered.
+    function AtEnd () : Boolean;
+    begin
+        this.Check ('AtEnd');
+
+        Exit not this.Peek ();
+    end
+
+    /// The next entry's name, without any directory part.
+    ///
+    /// # Raises
+    /// `Next: at end of directory.` past the last entry, so a loop that
+    /// forgets `AtEnd` fails rather than spinning on empty strings.
+    function Next () : String;
+    begin
+        this.Check ('Next');
+
+        if not this.Peek () then raise 'Next: at end of directory.';
+
+        this.Known := False;
+
+        Exit this.Pending;
+    end
+
+    /// Releases the handle, and does nothing when already closed.
+    procedure Close ();
+    begin
+        if this.Closed then Exit;
+
+        RawDirClose (this.Handle);
+
+        this.Closed := True;
+    end
+
+    /// Refuses a member on a closed directory, naming it.
+    ///
+    /// Private to the class.
+    procedure Check (Who : String);
+    begin
+        if this.Closed then raise Who + ': the directory is closed.';
+    end
+end
+
+/// Every entry in a directory, as a List of names.
+///
+/// The convenience form, standing to `Directory` as `ReadLines` stands to
+/// `InFile`. Names only, without any directory part, and without `.` or `..`.
+///
+/// The order is the filesystem's and is not sorted.
+///
+/// # Raises
+/// `Entries: cannot open '<Path>'.` on the same terms as `Directory`.
+///
+/// # Examples
+/// `Entries Answers The Same Names As Directory`
+///
+/// # Since
+/// 0.1.6
+function Entries (Path : String) : List;
+begin
+    var D := nil;
+
+    try
+        D := Directory (Path);
+    except
+        raise 'Entries: cannot open ''' + Path + '''.';
+    end
+
+    var Names := [];
+
+    while not D.AtEnd () do Names.Add (D.Next ());
+
+    D.Close ();
+
+    Exit Names;
+end
+
+/// A path taken apart: the directory, the bare name, and the extension.
+///
+/// Turbo Pascal's `FSplit` wrote into three `var` parameters; this is the one
+/// object they become, the same trade `time` makes for `GetDate`.
+///
+/// The three concatenate back into the path they came from -- `Dir + Name +
+/// Ext` is the original, for every input -- which is what makes the split
+/// safe to do and undo. A test asserts it over a dozen shapes.
+///
+/// # Since
+/// 0.1.6
+class PathParts;
+var
+    Dir  : String;              // up to and including the last separator
+    Name : String;              // the bare name, with no extension
+    Ext  : String;              // from the last dot, including it
+
+begin
+    constructor Init (Dir : String, Name : String, Ext : String);
+    begin
+        this.Dir  := Dir;
+        this.Name := Name;
+        this.Ext  := Ext;
+    end
+
+    /// The three put back together, which is the path they came from.
+    function Text () : String;
+    begin
+        Exit this.Dir + this.Name + this.Ext;
+    end
+end
+
+/// Takes a path apart into its directory, name and extension.
+///
+/// `Dir` keeps its trailing separator and `Ext` keeps its leading dot, so the
+/// three concatenate back into the original -- including for a path with no
+/// directory, no extension, or neither.
+///
+/// A dot that begins the name is part of the name and not an extension, so
+/// `.profile` splits as a name with no extension rather than the other way
+/// round. Only the last dot separates, so `archive.tar.gz` has `.gz`.
+///
+/// # Raises
+/// Nothing. Every string is a path as far as this is concerned.
+///
+/// # Examples
+/// `SplitPath Takes A Path Apart And Puts It Back`
+///
+/// # Since
+/// 0.1.6
+function SplitPath (Path : String) : PathParts;
+begin
+    // The directory is everything up to the last separator, which stays with
+    // it -- so joining needs no knowledge of what the separator was.
+    var Cut := 0 - 1;
+
+    for var I := 0; I < Length (Path); I := I + 1 do
+        if Path[I] = '/' then Cut := I;
+
+    var Dir  := Copy (Path, 0, Cut + 1);
+    var Rest := Copy (Path, Cut + 1, Length (Path));
+
+    // The extension is from the LAST dot, and a dot in first position belongs
+    // to the name: `.profile` is a name, not an extension.
+    var Dot := 0 - 1;
+
+    for var I := 1; I < Length (Rest); I := I + 1 do
+        if Rest[I] = '.' then Dot := I;
+
+    if Dot < 0 then Exit PathParts (Dir, Rest, '');
+
+    Exit PathParts (Dir, Copy (Rest, 0, Dot), Copy (Rest, Dot, Length (Rest)));
+end
+
+/// A path made absolute, with `.` and `..` resolved away.
+///
+/// Turbo Pascal's `FExpand`. A relative path is taken against the working
+/// directory, which the core answers with `GetDir` [RT-026]; an absolute one
+/// is only tidied.
+///
+/// Tidying means what it says: repeated separators collapse, a `.` component
+/// goes, and a `..` component removes the one before it. A `..` at the root
+/// stays at the root rather than climbing past it.
+///
+/// This asks the filesystem nothing. It does not resolve symbolic links and
+/// does not require the path to exist, which is what makes it usable on a
+/// name a program is about to create.
+///
+/// # Raises
+/// Nothing.
+///
+/// # Examples
+/// `FullPath Resolves Dots Against The Working Directory`
+///
+/// # Since
+/// 0.1.6
+function FullPath (Path : String) : String;
+begin
+    var Base := Path;
+
+    if Length (Path) = 0 then Base := GetDir ();
+    else if Path[0] <> '/' then Base := GetDir () + '/' + Path;
+
+    // Walked rather than split, because `List` has no Remove and `..` needs
+    // one -- so a depth counter stands in for popping, and entries beyond it
+    // are simply ignored.
+    var Stack := [];
+    var Depth := 0;
+    var At    := 0;
+
+    while At <= Length (Base) do
+    begin
+        var Slash := Pos (Base, '/', At);
+        var Stop  := Slash;
+
+        if Slash < 0 then Stop := Length (Base);
+
+        var Piece := Copy (Base, At, Stop - At);
+
+        if Piece = '' or Piece = Str ('.') then
+        begin
+            // Nothing: an empty piece is a repeated separator.
+        end
+        else if Piece = '..' then
+        begin
+            if Depth > 0 then Depth := Depth - 1;
+        end
+        else
+        begin
+            if Depth < Stack.Length then Stack[Depth] := Piece;
+            else Stack.Add (Piece);
+
+            Depth := Depth + 1;
+        end
+
+        At := Stop + 1;
+    end
+
+    if Depth = 0 then Exit '/';
+
+    var Out := Buffer ();
+
+    for var I := 0; I < Depth; I := I + 1 do
+    begin
+        Out.Append ('/');
+        Out.Append (Stack[I]);
+    end
+
+    Exit Out.Text;
+end
 
 /// A file of fixed-size records, indexed by record rather than by byte.
 ///
@@ -2001,4 +2339,199 @@ begin
     AssertEqual (3, Closed);
 
     Erase (Path);
+end
+
+/// # Examples cites this by name from `Directory`.
+test 'Directory Answers Every Entry Once';
+begin
+    var Dir := 'alg-dir-test';
+
+    MkDir (Dir);
+    WriteAll (Dir + '/alpha.txt', 'a');
+    WriteAll (Dir + '/beta.dat', 'b');
+    MkDir (Dir + '/sub');
+
+    var D     := Directory (Dir);
+    var Names := [];
+
+    while not D.AtEnd () do Names.Add (D.Next ());
+
+    D.Close ();
+    D.Close ();
+
+    AssertEqual (3, Names.Length);
+    AssertTrue ('alpha.txt' in Names);
+    AssertTrue ('beta.dat' in Names);
+    AssertTrue ('sub' in Names);
+
+    // Neither of the two that are not really entries.
+    AssertTrue (not (Str ('.') in Names));
+    AssertTrue (not ('..' in Names));
+
+    RmDir (Dir + '/sub');
+    Erase (Dir + '/alpha.txt');
+    Erase (Dir + '/beta.dat');
+    RmDir (Dir);
+end
+
+/// # Examples cites this by name from `Entries`.
+test 'Entries Answers The Same Names As Directory';
+begin
+    var Dir := 'alg-dir-same';
+
+    MkDir (Dir);
+    WriteAll (Dir + '/one', '1');
+    WriteAll (Dir + '/two', '2');
+
+    var Walked := [];
+    var D      := Directory (Dir);
+
+    while not D.AtEnd () do Walked.Add (D.Next ());
+
+    D.Close ();
+
+    var Listed := Entries (Dir);
+
+    // Lists compare by identity, not content, so the names are checked one
+    // by one rather than with AssertEqual on the Lists.
+    AssertEqual (Walked.Length, Listed.Length);
+
+    for var N in Walked do AssertTrue (N in Listed);
+
+    Erase (Dir + '/one');
+    Erase (Dir + '/two');
+    RmDir (Dir);
+end
+
+/// An empty directory is not an error, and answers nothing at all.
+test 'An Empty Directory Answers Nothing';
+begin
+    var Dir := 'alg-dir-empty';
+
+    MkDir (Dir);
+
+    var D := Directory (Dir);
+
+    AssertTrue (D.AtEnd ());
+    AssertEqual (0, Entries (Dir).Length);
+
+    var Raised := False;
+
+    try D.Next (); except on E : String do Raised := True; end
+
+    AssertTrue (Raised);
+
+    D.Close ();
+    RmDir (Dir);
+end
+
+/// What is not a directory, and what is not there, are both refused rather
+/// than answered as empty.
+test 'Directory Refuses What It Cannot Read';
+begin
+    var Path := 'alg-dir-notadir.txt';
+
+    WriteAll (Path, 'x');
+
+    var Refused := 0;
+
+    try Directory (Path);              except on E : String do Refused := Refused + 1; end
+    try Directory ('alg-no-such-dir'); except on E : String do Refused := Refused + 1; end
+    try Entries (Path);                except on E : String do Refused := Refused + 1; end
+    try Entries ('alg-no-such-dir');   except on E : String do Refused := Refused + 1; end
+
+    AssertEqual (4, Refused);
+
+    Erase (Path);
+end
+
+/// A closed directory refuses every member but Close, naming the one called.
+test 'A Closed Directory Says So';
+begin
+    var Dir := 'alg-dir-closed';
+
+    MkDir (Dir);
+
+    var D := Directory (Dir);
+
+    D.Close ();
+
+    var Message := '';
+
+    try D.Next (); except on E : String do Message := E; end
+
+    AssertEqual ('Next: the directory is closed.', Message);
+
+    var Also := '';
+
+    try D.AtEnd (); except on E : String do Also := E; end
+
+    AssertEqual ('AtEnd: the directory is closed.', Also);
+
+    RmDir (Dir);
+end
+
+/// # Examples cites this by name from `SplitPath`.
+///
+/// The three parts concatenate back into the path for every input, which is
+/// what makes the split safe to undo. Note `Str` on the single-character
+/// cases: a one-character literal is a Char, and a Char never equals a
+/// String, so comparing against a bare `'/'` would fail whatever the code did.
+test 'SplitPath Takes A Path Apart And Puts It Back';
+begin
+    for var P in ['/usr/local/bin/algc', 'notes.txt', '/tmp/archive.tar.gz',
+                  '.profile', '/etc/', 'plain', Str ('/'), '', 'a/b/.hidden',
+                  'dir.d/file', '/x/y.z/w', '..', Str ('.')] do
+        AssertEqual (P, SplitPath (P).Text ());
+
+    // The directory keeps its separator and the extension its dot, which is
+    // what makes the round trip hold.
+    var S := SplitPath ('/tmp/archive.tar.gz');
+
+    AssertEqual ('/tmp/', S.Dir);
+    AssertEqual ('archive.tar', S.Name);
+    AssertEqual ('.gz', S.Ext);
+
+    // A leading dot is a name, not an extension.
+    var H := SplitPath ('.profile');
+
+    AssertEqual ('', H.Dir);
+    AssertEqual ('.profile', H.Name);
+    AssertEqual ('', H.Ext);
+
+    // A dot in a directory is not an extension of the name.
+    var Q := SplitPath ('dir.d/file');
+
+    AssertEqual ('dir.d/', Q.Dir);
+    AssertEqual ('file', Q.Name);
+    AssertEqual ('', Q.Ext);
+
+    // No name at all, which a trailing separator gives.
+    var T := SplitPath ('/etc/');
+
+    AssertEqual ('/etc/', T.Dir);
+    AssertEqual ('', T.Name);
+    AssertEqual ('', T.Ext);
+end
+
+/// # Examples cites this by name from `FullPath`.
+test 'FullPath Resolves Dots Against The Working Directory';
+begin
+    AssertEqual ('/a/c', FullPath ('/a/b/../c'));
+    AssertEqual ('/a/b/c', FullPath ('/a/./b//c'));
+    AssertEqual ('/a/b', FullPath ('/a/b/'));
+
+    // A climb at the root stays at the root rather than going above it.
+    AssertEqual (Str ('/'), FullPath ('/..'));
+    AssertEqual (Str ('/'), FullPath ('/a/b/../../../'));
+    AssertEqual (Str ('/'), FullPath (Str ('/')));
+
+    // A relative path is taken against the working directory, and an empty
+    // one is the working directory.
+    AssertEqual (GetDir () + '/x.txt', FullPath ('x.txt'));
+    AssertEqual (GetDir (), FullPath (''));
+    AssertEqual (GetDir (), FullPath (Str ('.')));
+
+    // It asks the filesystem nothing, so a name that does not exist is fine.
+    AssertEqual ('/no/such/place', FullPath ('/no/./such/../such/place'));
 end
