@@ -6376,8 +6376,10 @@ The color is written directly and does not use the pen, so
 [`SetColor`](#setcolor) does not affect it. Drawing does not appear until
 something presents; [`Show`](#show) is that.
 
-Raises `CloseGraph has closed this surface.` once the window it belongs to
-has gone.
+Raises `PutPixel wants a color or Transparent.` below `Transparent` or above
+[`White`](#colors) — this member had no color check at all before 0.1.6, and
+wrote the value straight into the surface — and `CloseGraph has closed this
+surface.` once the window it belongs to has gone.
 
 **See also**
 
@@ -7486,7 +7488,7 @@ under them. See [`FillStyles`](#fillstyles).
 It is a third pen, independent of [`SetColor`](#setcolor)'s and
 [`SetFillStyle`](#setfillstyle)'s; setting one never disturbs another.
 
-Raises `SetBkColor wants a color or Transparent.` below `Transparent`, and
+Raises `SetBkColor wants a color or Transparent.` below `Transparent` or above [`White`](#colors) — [`Blink`](#blink) is ink's alone, so `White + Blink` is refused — and
 `CloseGraph has closed this surface.` once the window has gone.
 
 **See also**
@@ -7619,9 +7621,20 @@ for lines and letters both. A fresh viewport draws in `White`.
 [`PutPixel`](#putpixel) is the exception: it names its own color and ignores
 the pen.
 
-Raises `SetColor wants an RGB color.` for a negative, there being no
-transparent ink, and `CloseGraph has closed this surface.` once the window has
-gone.
+Raises `SetColor wants an RGB color.` for a negative — there being no
+transparent ink — and for anything above [`White`](#colors). ⚠️ **The ceiling
+is checked here so it cannot surface later.** Without it an impossible color
+reached the pixel writer and came back as `Integer … is too large to use
+here.` from `Buffer.PutInt`, mid-draw, naming neither the color nor the call
+that set it.
+
+⚠️ **[`Blink`](#blink) is not a pen color.** It belongs to
+[`TextColor`](#textcolor), the only member that reads it, so `White + Blink`
+is refused here. The same ceiling applies to [`SetBkColor`](#setbkcolor),
+[`SetFillStyle`](#setfillstyle), [`PutPixel`](#putpixel) and
+[`TextBackground`](#textbackground).
+
+Raises `CloseGraph has closed this surface.` once the window has gone.
 
 **See also**
 
@@ -7699,7 +7712,7 @@ Nothing consults this state yet — the figures that take a fill are still to
 come. It is settled first because they will all want it, and because the
 choice between one pen and two is theirs to inherit rather than to argue.
 
-Raises `SetFillStyle wants a known pattern.`, `SetFillStyle wants UserFill
+Raises `SetFillStyle wants an RGB color.` for a color below zero or above [`White`](#colors), and `SetFillStyle wants a known pattern.`, `SetFillStyle wants UserFill
 from SetFillPattern.` for `UserFill` itself, `SetFillStyle wants an RGB
 color.`, `SetFillPattern wants eight rows.`, and `SetFillPattern wants an RGB
 color.`
@@ -8770,7 +8783,7 @@ opaque, which is what a menu bar or a readable HUD over a busy scene wants.
 The setting applies to cells painted from now on; nothing already on the
 grid changes.
 
-Raises `TextBackground wants a color or Transparent.` for a negative that is
+Raises `TextBackground wants a color or Transparent.` above [`White`](#colors) — [`Blink`](#blink) belongs to [`TextColor`](#textcolor) and is refused here — and for a negative that is
 not `Transparent`.
 
 **See also**

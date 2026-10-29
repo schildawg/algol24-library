@@ -583,7 +583,7 @@ begin
     begin
         Check ();
 
-        if Color < Transparent then
+        if Color < Transparent or Color > White then
             raise 'TextBackground wants a color or Transparent.';
 
         BackAsked := Color;

@@ -327,21 +327,33 @@ it, and diff.
 
 Learned here, by use:
 
-- ⚠️ **There are no bitwise operators, and `and`/`or` conceal that rather than
-  provide it.** They test truthiness and yield an *operand* [EXP-010], so
-  `6 and 3` is **3** where bitwise would be 2, and `6 or 3` is **6** where it
-  would be 7 — a plausible wrong number, not an error. Every other spelling is
-  absent too: `&`, `|`, `^` and `~` are not even lexed, and `xor`, `shl`, `shr`
-  and `bitand` are parse errors or undefined names. Bit work here is `div`,
-  `mod` and a multiplier, which is what `crt`'s `ByteAt` does, or an `external`
-  into C, which is what `graph`'s `XorWords` does. A pure Algol-24 exclusive or
-  costs 0.7 ms a call and is unusable in a pixel loop. See `DEFECTS.md` H-3,
-  and `PROPOSAL-BITWISE-OPERATORS.md` for the ask.
-- ⚠️ **`div` truncates toward zero, so it is not a shift.** `-7 div 2` is `-3`,
-  where an arithmetic right shift would floor to `-4`. The two agree only when
-  the bits shifted out are zero, so a byte picked out of a negative word has to
-  be brought into range first — which is what the `+ 4294967296` in `graph` and
-  `crt` is doing.
+- ⚠️ **Bitwise operators arrived in 0.1.6 — `&`, `|`, `^`, `~`, `<<`, `>>`
+  [EXP-023, EXP-024] — and `and`/`or` are still NOT them.** The old hazard
+  remains underneath: `and` and `or` test truthiness and yield an *operand*
+  [EXP-010], so `6 and 3` is **3** where `6 & 3` is 2. Since 0.1.6 handing
+  either an Integer **warns** and names the bitwise operators, which closes
+  most of `DEFECTS.md` H-3 — but ⚠️ **that warning goes to stdout**, so a unit
+  using `and` on an Integer would add a line to every consumer's output. That
+  is L-4's third trigger. No unit here does; checked by compiling all ten.
+- ⚠️ **`^` is FASTER than a foreign call, so bit work needs no C.** Measured
+  over three runs: the native operator 1.87 µs a call against `alg_xor`'s
+  7.6 µs, the FFI overhead dwarfing a one-instruction operation — and against
+  547 µs for the hand-rolled `div`/`mod` version this file used to recommend
+  against. `graph`'s `XorWords` and its C are gone.
+- ⚠️ **`^` does not narrow to 32 bits, where the C it replaced did**, and that
+  changed a behavior for the better. `alg_xor` masked and sign-extended, so an
+  out-of-range color silently drew a wrong pixel in `XorPut` while `CopyPut`
+  already raised on the same value. `Buffer.PutInt` refuses anything outside
+  int32, so the operator makes the two write modes agree. `SetColor` is now
+  bounded at `White + Blink` as well, which stops such a color reaching either.
+- ⚠️ **`div` truncates toward zero, and `>>` floors, so they are not the same
+  thing.** `-7 div 2` is `-3` where `-7 >> 1` is `-4` — and now that both
+  spellings exist this matters more, not less, since they disagree on exactly
+  the negative values nobody checks. A right shift is **arithmetic**: the sign
+  carries in. The `+ 4294967296` in `graph` and `crt` brought a negative word
+  into range before a `div`; after a shift it is unnecessary, because a
+  following `& 255` discards the sign-extended bits — measured on `-1` and
+  `-16777216` at three widths. Those call sites are not yet converted.
 
 - ⚠️ **An extension's visibility is per-file and non-transitive, so every
   consumer must say `uses` of the unit itself.** Since 0.1.5 a top-level

@@ -339,18 +339,6 @@ void alg_stamp_ratio (int64_t num_x, int64_t den_x, int64_t num_y,
     set_rotation (rotation);
 }
 
-/* The bitwise exclusive or of two pixel words.
- *
- * The language has no bitwise operators at all -- its `and` and `or` are
- * logical -- so this is a genuine gap rather than a shortcut.  It is the
- * whole of what XorPut line drawing needs, and being pure it is testable
- * against known values.
- */
-int64_t alg_xor (int64_t a, int64_t b)
-{
-    return (int64_t) (int32_t) ((uint32_t) a ^ (uint32_t) b);
-}
-
 void alg_stamp_target (void *pixels, int64_t w, int64_t h)
 {
     target   = (int32_t *) pixels;

@@ -225,14 +225,6 @@ procedure StampRatio (NumX : Integer, DenX : Integer, NumY : Integer,
                       DenY : Integer, Rotation : Integer);
     external 'alg_stamp_ratio' in 'libgraphffi.so';
 
-/// The bitwise exclusive or of two pixel words.
-///
-/// Private to this unit. The language has no bitwise operators at all -- its
-/// `and` and `or` are logical, answering an operand rather than combining
-/// bits -- so this is a genuine gap rather than a shortcut.
-function XorWords (A : Integer, B : Integer) : Integer;
-    external 'alg_xor' in 'libgraphffi.so';
-
 /// Copies a rectangle of the stamp target into a caller's buffer.
 ///
 /// Private to this unit. A rectangle of any size is thousands of pixels, the
@@ -2502,7 +2494,8 @@ begin
     begin
         Check ();
 
-        if Color < Transparent then raise 'TextBackground wants a color or Transparent.';
+        if Color < Transparent or Color > White then
+            raise 'TextBackground wants a color or Transparent.';
 
         BackAsked := Color;
         Back      := Themed (Palette, Color);
@@ -3051,6 +3044,12 @@ begin
     begin
         Check ();
 
+        // This had no colour check at all, and wrote `Color - 16777216`
+        // straight into the buffer -- so an impossible colour arrived as
+        // `Integer ... is too large to use here.` from `Buffer.PutInt`.
+        if Color < Transparent or Color > White then
+            raise 'PutPixel wants a color or Transparent.';
+
         if PX >= 1 then
           if PY >= 1 then
             if PX <= W then
@@ -3341,7 +3340,7 @@ begin
     begin
         Check ();
 
-        if Color < Transparent then
+        if Color < Transparent or Color > White then
             raise 'SetBkColor wants a color or Transparent.';
 
         BkAsked := Color;
@@ -3575,7 +3574,7 @@ begin
         var At := ((PY - 1) * W + (PX - 1)) * 4;
 
         if WMode = XorPut then
-            Buf.PutInt (At, XorWords (Buf.GetInt (At), Pen - 16777216));
+            Buf.PutInt (At, Buf.GetInt (At) ^ (Pen - 16777216));
         else Buf.PutInt (At, Pen - 16777216);
     end
 
@@ -3820,7 +3819,16 @@ begin
     begin
         Check ();
 
-        if Color < 0 then raise 'SetColor wants an RGB color.';
+        // 24 bits of RGB and nothing above. Bounded here because an
+        // out-of-range pen used to surface from deep inside a draw as
+        // `Integer ... is too large to use here.` out of `Buffer.PutInt`,
+        // naming neither the colour nor the call that set it.
+        //
+        // The ceiling is White rather than White + Blink: Blink belongs to
+        // `TextColor`, which is the only member that reads it, and a pen that
+        // blinks is not a thing this unit has.
+        if Color < 0 or Color > White then
+            raise 'SetColor wants an RGB color.';
 
         PenAsked := Color;
         Pen      := Themed (Palette, Color);
@@ -4516,7 +4524,8 @@ begin
         if Style < EmptyFill or Style > CloseDotFill then
             raise 'SetFillStyle wants a known pattern.';
 
-        if Color < 0 then raise 'SetFillStyle wants an RGB color.';
+        if Color < 0 or Color > White then
+            raise 'SetFillStyle wants an RGB color.';
 
         Filling   := Style;
         FillAsked := Color;
@@ -11966,17 +11975,88 @@ begin
     AssertTrue (clock () - Before < 0.05);
 end
 
-test 'The Exclusive Or Primitive Answers Known Values';
+test 'The Exclusive Or Answers Known Values';
 begin
-    // The language has no bitwise operators, so this one is foreign and gets
-    // asserted against values worked out by hand.
-    AssertEqual (6, XorWords (12, 10));
-    AssertEqual (0, XorWords (255, 255));
-    AssertEqual (255, XorWords (0, 255));
-    AssertEqual (65535, XorWords (65280, 255));
+    // The language's own operator since 0.1.6 [EXP-023]. This unit used to
+    // declare `alg_xor` in C because there was none; the operator is four
+    // times faster than that foreign call -- 1.87 microseconds against 7.6,
+    // measured -- so the C went.
+    AssertEqual (6, 12 ^ 10);
+    AssertEqual (0, 255 ^ 255);
+    AssertEqual (255, 0 ^ 255);
+    AssertEqual (65535, 65280 ^ 255);
 
-    // And it is its own inverse, which is the whole reason it is here.
-    AssertEqual (11141120, XorWords (XorWords (11141120, 5635925), 5635925));
+    // And it is its own inverse, which is the whole reason it is used here.
+    AssertEqual (11141120, (11141120 ^ 5635925) ^ 5635925);
+
+    // Unlike the C it replaced, it does NOT narrow to 32 bits. `alg_xor`
+    // masked and sign-extended, which silently swallowed a colour too large
+    // to be one -- where CopyPut already raised on the same value. The two
+    // write modes now agree.
+    AssertEqual (4278190079, 0 ^ 4278190079);
+end
+
+/// Every colour-taking member refuses a colour that is not one.
+///
+/// These existed as lower-bound checks only, so an impossible colour reached
+/// the pixel writer and came back as `Integer ... is too large to use here.`
+/// from `Buffer.PutInt` -- mid-draw, naming neither the colour nor the call
+/// that set it. `XorPut` did not even raise: the C exclusive-or it used to go
+/// through narrowed to 32 bits and swallowed it, so the two write modes
+/// disagreed.
+///
+/// The ceiling is `White` rather than `White + Blink` for all of these.
+/// `Blink` belongs to `TextColor`, the only member that reads it.
+test 'Every Color Setter Refuses An Impossible Color';
+begin
+    CloseGraph ();
+    InitGraph (640, 480, 'bounds', False);
+
+    var V := ViewPort (1, 1, 20, 20, 1);
+    var W := Window (1, 1, 10, 5, 1);
+    var Huge := 4294967295;
+
+    var Caught := 0;
+
+    try V.SetColor (Huge);              except on E : String do Caught := Caught + 1; end
+    try V.SetBkColor (Huge);            except on E : String do Caught := Caught + 1; end
+    try V.SetFillStyle (SolidFill, Huge); except on E : String do Caught := Caught + 1; end
+    try V.PutPixel (2, 2, Huge);        except on E : String do Caught := Caught + 1; end
+    try W.TextBackground (Huge);        except on E : String do Caught := Caught + 1; end
+
+    AssertEqual (5, Caught);
+
+    // White is the ceiling and must still be accepted by each.
+    V.SetColor (White);
+    V.SetBkColor (White);
+    V.SetFillStyle (SolidFill, White);
+    V.PutPixel (2, 2, White);
+    W.TextBackground (White);
+
+    // Transparent stays acceptable where it was: a background and a pixel,
+    // never a pen or a fill.
+    V.SetBkColor (Transparent);
+    V.PutPixel (3, 3, Transparent);
+    W.TextBackground (Transparent);
+
+    var Rejected := 0;
+
+    try V.SetColor (Transparent);       except on E : String do Rejected := Rejected + 1; end
+    try V.SetFillStyle (SolidFill, Transparent); except on E : String do Rejected := Rejected + 1; end
+
+    AssertEqual (2, Rejected);
+
+    // And Blink is still ink's alone -- accepted by TextColor, refused by the
+    // rest, which is what the tighter ceiling buys.
+    W.TextColor (White + Blink);
+
+    var Blinkless := 0;
+
+    try V.SetColor (White + Blink);     except on E : String do Blinkless := Blinkless + 1; end
+    try V.SetBkColor (White + Blink);   except on E : String do Blinkless := Blinkless + 1; end
+    try W.TextBackground (White + Blink); except on E : String do Blinkless := Blinkless + 1; end
+
+    AssertEqual (3, Blinkless);
 end
 
 test 'XorPut Draws A Line Twice And Leaves No Mark';

@@ -75,7 +75,7 @@ Run against the same values:
 | `0.125` | `0.12` | `0.12` |
 | `8.835` | `8.84` | **`8.83`** — a wrong digit |
 | `0.00001234` | `0.00` | **`1.23`** — wrong by 10⁵ |
-| `1.0E16` | `10000000000000002.00` | **`1.0E`** — not a number |
+| `1.0E16` | `10000000000000000.00` | **`1.0E`** — not a number |
 
 Three of six wrong, one of them not even numeric. The three that agree do so
 because truncation happened to match, not because the routine is right.
@@ -157,7 +157,7 @@ function Str (X : Double, Width : Integer, Decimals : Integer) : String;
 text and so survives, which is the half arithmetic cannot do.
 
 **Never exponent form.** This is the point of the routine: a fixed-decimal
-rendering of `1.0E16` is `10000000000000002.00`, long and correct, and a
+rendering of `1.0E16` is `10000000000000000.00`, long and correct, and a
 rendering that answers `1.0E` is useless. A caller who wants the short form
 already has one-argument `Str`.
 
