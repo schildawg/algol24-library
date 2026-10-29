@@ -600,9 +600,18 @@ begin
 
         if InkAsked in BrightPartner then InkAsked := BrightOf (InkAsked);
         else if InkAsked in DimPartner then Exit;
-        else InkAsked := (InkAsked div 65536 + (255 - InkAsked div 65536) div 2) * 65536
-                  + (InkAsked div 256 mod 256 + (255 - InkAsked div 256 mod 256) div 2) * 256
-                  + (InkAsked mod 256 + (255 - InkAsked mod 256) div 2);
+        else
+        begin
+            // The channels, by shift and mask since 0.1.6 -- `div 65536` and
+            // `mod 256` said the same thing less plainly.
+            var R := (InkAsked >> 16) & 255;
+            var G := (InkAsked >> 8) & 255;
+            var B := InkAsked & 255;
+
+            InkAsked := ((R + (255 - R) div 2) << 16)
+                      | ((G + (255 - G) div 2) << 8)
+                      |  (B + (255 - B) div 2);
+        end
 
         Ink := Themed (Palette, InkAsked);
     end
@@ -614,9 +623,14 @@ begin
 
         if InkAsked in DimPartner then InkAsked := DimOf (InkAsked);
         else if InkAsked in BrightPartner then Exit;
-        else InkAsked := (InkAsked div 65536 div 2) * 65536
-                  + (InkAsked div 256 mod 256 div 2) * 256
-                  + (InkAsked mod 256 div 2);
+        else
+        begin
+            var R := (InkAsked >> 16) & 255;
+            var G := (InkAsked >> 8) & 255;
+            var B := InkAsked & 255;
+
+            InkAsked := ((R div 2) << 16) | ((G div 2) << 8) | (B div 2);
+        end
 
         Ink := Themed (Palette, InkAsked);
     end
@@ -1026,15 +1040,13 @@ end
 /// out of it.
 function ByteAt (B : Any, N : Integer) : Integer;
 begin
-    var Word := B.GetInt ((N div 4) * 4);
-
-    if Word < 0 then Word := Word + 4294967296;
-
-    var Shift := 1;
-
-    for var K := 0; K < N mod 4; K := K + 1 do Shift := Shift * 256;
-
-    Exit (Word div Shift) mod 256;
+    // One shift and one mask since 0.1.6. This used to bring a negative word
+    // into range by adding 2^32, then divide by a multiplier it built in a
+    // loop -- because `div` truncates toward zero and so is not a shift. The
+    // mask makes the correction unnecessary: `& 255` discards the
+    // sign-extended bits, proven equal over the whole int32 range at all four
+    // byte positions before the change.
+    Exit (B.GetInt ((N div 4) * 4) >> (8 * (N mod 4))) & 255;
 end
 
 /// The escapes the last paint produced, as text.

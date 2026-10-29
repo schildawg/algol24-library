@@ -229,7 +229,7 @@ survives. The old note that `div` truncates where a shift floors now matters
 *more* rather than less, because both spellings are available and they disagree
 on exactly the negative values where it is easy not to look.
 
-#### How the library defended against it before 0.1.6
+#### How the library defended against it before 0.1.6, none of which remains
 
 1. **Reach for C, and say so.** `graph` declares
    `XorWords … external 'alg_xor'` with a doc block naming the gap. That is the
@@ -281,11 +281,29 @@ XorPut with the same color:
 `SetColor` is now bounded at `White + Blink`, so such a color is refused at
 the call rather than deep in a draw, and the two write modes agree.
 
-**Defence 4 stands.** `crt`'s `ByteAt` and both units' channel splitting still
-use `div` and `mod`. They can become `(W >> 8 * N) & 255`, and the
-`+ 4294967296` that brings a negative word into range becomes unnecessary once
-a mask follows the shift — `& 255` discards the sign-extended bits, measured on
-`-1` and on `-16777216` at three widths. Not yet converted.
+**Defence 4 is gone too**, and with it the last of this entry's cost. `crt`'s
+`ByteAt` is one line:
+
+```algol24
+Exit (B.GetInt ((N div 4) * 4) >> (8 * (N mod 4))) & 255;
+```
+
+where it used to add 2^32 to bring a negative word into range, then build a
+multiplier in a loop and divide by it — because `div` truncates toward zero
+and so is not a shift. **The mask makes the correction unnecessary**: `& 255`
+discards the sign-extended bits, so no `+ 4294967296` survives anywhere in
+either unit.
+
+Seven sites in all: `ByteAt`, `graph`'s `Mix`, its RRGGBBAA pixel path, its
+font colour probe, and `HighVideo`/`LowVideo` in both units.
+
+⚠️ **Equivalence was proven before any of it was changed**, not after. The old
+and new forms were run against each other over the int32 range — all four byte
+positions for `ByteAt`, every colour a bounded setter now admits for the
+channel split, and the signed pixel words including `-2147483648` — at zero
+disagreements. Then the tests: each converted path has a named one, the
+RRGGBBAA path being covered by `An Emoji Glyph Arrives In Its Own Colors`
+rather than by the formula alone.
 
 **This one has a proposal rather than only a defence.**
 `PROPOSAL-BITWISE-OPERATORS.md` asks the language project for the six

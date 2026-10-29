@@ -939,19 +939,19 @@ begin
     if Cover >= 255 then Exit Ink;
     if Cover <= 0   then Exit Ground;
 
-    var GR := Ground div 65536;
-    var GG := Ground div 256 mod 256;
-    var GB := Ground mod 256;
+    var GR := (Ground >> 16) & 255;
+    var GG := (Ground >> 8) & 255;
+    var GB :=  Ground & 255;
 
-    var IR := Ink div 65536;
-    var IG := Ink div 256 mod 256;
-    var IB := Ink mod 256;
+    var IR := (Ink >> 16) & 255;
+    var IG := (Ink >> 8) & 255;
+    var IB :=  Ink & 255;
 
     var R := GR + (IR - GR) * Cover div 255;
     var G := GG + (IG - GG) * Cover div 255;
     var B := GB + (IB - GB) * Cover div 255;
 
-    Exit R * 65536 + G * 256 + B;
+    Exit (R << 16) | (G << 8) | B;
 end
 
 /// Blends one pixel into the background framebuffer, clipped at its edge.
@@ -990,16 +990,18 @@ begin
             if Code in FontPictures then
             begin
                 // RRGGBBAA: the pixel brings its own color, and only the
-                // alpha decides how much of it lands. GetInt reads the word
-                // signed, so a pixel past the sign bit comes back negative
-                // and its bit pattern is restored by adding 2^32.
+                // alpha decides how much of it lands.
+                //
+                // GetInt reads the word signed, so a pixel past the sign bit
+                // comes back negative -- which used to be undone by adding
+                // 2^32 before dividing. A mask after the shift discards the
+                // sign-extended bits instead, so the correction is gone;
+                // proven equal over the whole int32 range before the change.
                 var Pixel := Words.GetInt ((R * Wide + C) * 4);
+                var Alpha := Pixel & 255;
 
-                if Pixel < 0 then Pixel := Pixel + 4294967296;
-
-                var Alpha := Pixel mod 256;
-
-                if Alpha > 0 then Wash (X + C, Y + R, Pixel div 256, Alpha);
+                if Alpha > 0 then
+                    Wash (X + C, Y + R, (Pixel >> 8) & 16777215, Alpha);
             end
             else if FontGray then
             begin
@@ -2511,9 +2513,18 @@ begin
         // means, rather than brightening a color the palette already chose.
         if InkAsked in BrightPartner then InkAsked := BrightOf (InkAsked);
         else if InkAsked in DimPartner then Exit;
-        else InkAsked := (InkAsked div 65536 + (255 - InkAsked div 65536) div 2) * 65536
-                  + (InkAsked div 256 mod 256 + (255 - InkAsked div 256 mod 256) div 2) * 256
-                  + (InkAsked mod 256 + (255 - InkAsked mod 256) div 2);
+        else
+        begin
+            // The channels, by shift and mask since 0.1.6 -- `div 65536` and
+            // `mod 256` said the same thing less plainly.
+            var R := (InkAsked >> 16) & 255;
+            var G := (InkAsked >> 8) & 255;
+            var B := InkAsked & 255;
+
+            InkAsked := ((R + (255 - R) div 2) << 16)
+                      | ((G + (255 - G) div 2) << 8)
+                      |  (B + (255 - B) div 2);
+        end
 
         Ink := Themed (Palette, InkAsked);
     end
@@ -2525,9 +2536,14 @@ begin
 
         if InkAsked in DimPartner then InkAsked := DimOf (InkAsked);
         else if InkAsked in BrightPartner then Exit;
-        else InkAsked := (InkAsked div 65536 div 2) * 65536
-                  + (InkAsked div 256 mod 256 div 2) * 256
-                  + (InkAsked mod 256 div 2);
+        else
+        begin
+            var R := (InkAsked >> 16) & 255;
+            var G := (InkAsked >> 8) & 255;
+            var B := InkAsked & 255;
+
+            InkAsked := ((R div 2) << 16) | ((G div 2) << 8) | (B div 2);
+        end
 
         Ink := Themed (Palette, InkAsked);
     end
@@ -6020,7 +6036,7 @@ begin
         begin
             var P := Pixels.GetInt ((Y * WindowWidth + X) * 4);
 
-            if P div 65536 mod 256 <> P mod 256 then Colored := True;
+            if ((P >> 16) & 255) <> (P & 255) then Colored := True;
         end
 
     AssertTrue (Colored);

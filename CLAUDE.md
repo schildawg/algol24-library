@@ -350,10 +350,11 @@ Learned here, by use:
   thing.** `-7 div 2` is `-3` where `-7 >> 1` is `-4` — and now that both
   spellings exist this matters more, not less, since they disagree on exactly
   the negative values nobody checks. A right shift is **arithmetic**: the sign
-  carries in. The `+ 4294967296` in `graph` and `crt` brought a negative word
-  into range before a `div`; after a shift it is unnecessary, because a
-  following `& 255` discards the sign-extended bits — measured on `-1` and
-  `-16777216` at three widths. Those call sites are not yet converted.
+  carries in. The `+ 4294967296` that used to bring a negative word into range
+  before a `div` is **gone from both units** — a following `& 255` discards the
+  sign-extended bits, so the correction was never needed once a mask followed
+  the shift. Seven sites converted, equivalence proven over the int32 range
+  first; `DEFECTS.md` H-3 has the detail.
 
 - ⚠️ **An extension's visibility is per-file and non-transitive, so every
   consumer must say `uses` of the unit itself.** Since 0.1.5 a top-level
@@ -823,7 +824,8 @@ Both cost a compile here.
 `Char (65)`, not `Chr`; `#0` is **not a Char**, so NUL cannot be a sentinel;
 `List` has no `Remove`, so a queue keeps a head index; `Buffer` has `PutInt`/`GetInt` for words **and
 indexes by byte** -- `B[4]` reads and `B[4] := 200` writes, which `graph`'s
-key decoder uses and `crt`'s `ByteAt` predates; `end` before `else` takes **no** semicolon,
+key decoder uses and `crt`'s `ByteAt` predates (and `ByteAt` is now one shift
+and one mask rather than the `div`/`mod` loop it was written as); `end` before `else` takes **no** semicolon,
 where a simple statement before `else` takes one; a one-character map key is a
 **Char**, so `Str (C) in Map` never matches a `'C' : 0` entry; **Lists and
 Maps compare by identity, not by content** -- `AssertEqual` on two
