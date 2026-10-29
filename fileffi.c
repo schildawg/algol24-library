@@ -125,7 +125,14 @@ static FILE *handles[ALG_MAX_FILES];
  *
  * Mode 0 reads, 1 writes and empties first, 2 writes at the end -- which is
  * Reset, Rewrite and Append, the three the core's own TextFile offers
- * [RT-024]. Anything else is refused rather than guessed at.
+ * [RT-024].
+ *
+ * Mode 3 is read AND write without emptying, which none of those three can
+ * do and which a record file needs: updating record 5 must leave records 0
+ * to 4 where they are. Mode 4 is the same but creates or empties, for a
+ * record file being started rather than opened.
+ *
+ * Anything else is refused rather than guessed at.
  */
 int64_t alg_libfile_open (const char *path, int64_t mode)
 {
@@ -134,6 +141,8 @@ int64_t alg_libfile_open (const char *path, int64_t mode)
     const char *how = mode == 0 ? "rb"
                     : mode == 1 ? "wb"
                     : mode == 2 ? "ab"
+                    : mode == 3 ? "r+b"
+                    : mode == 4 ? "w+b"
                     : NULL;
 
     if (how == NULL) return -1;
@@ -256,6 +265,67 @@ int64_t alg_libfile_copy_bytes (void *dst, int64_t dst_off, const void *src,
             (size_t) len);
 
     return len;
+}
+
+/* ------------------------------------------------------------ position -- */
+/*
+ * What a record file is built on. Everything above indexes by RECORD; these
+ * three index by byte, because the language has no sizeof and so no width the
+ * C could know about.
+ *
+ * None of them works on a pipe, which can only go forwards. fseek answers
+ * failure there rather than doing something surprising, and the unit turns
+ * that into a raise naming the reason -- a quiet -1 would read as "position
+ * zero" to a caller who did not check.
+ */
+
+/* Moves to `offset` bytes from the start. Answers 1 for moved, 0 for not. */
+int64_t alg_libfile_seek (int64_t handle, int64_t offset)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return 0;
+    if (handles[handle] == NULL) return 0;
+    if (offset < 0) return 0;
+
+    return fseek (handles[handle], (long) offset, SEEK_SET) == 0 ? 1 : 0;
+}
+
+/* Where the handle is, in bytes from the start, or -1. */
+int64_t alg_libfile_tell (int64_t handle)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return -1;
+    if (handles[handle] == NULL) return -1;
+
+    long at = ftell (handles[handle]);
+
+    return at < 0 ? -1 : (int64_t) at;
+}
+
+/* How many bytes the OPEN file holds, or -1.
+ *
+ * Asked of the handle rather than of the path, because a writer's bytes may
+ * still be in a buffer -- `stat` would answer the file as it was before the
+ * last few writes. So this flushes first, then measures by moving to the end
+ * and back, leaving the position where it found it.
+ */
+int64_t alg_libfile_length (int64_t handle)
+{
+    if (handle < 0 || handle >= ALG_MAX_FILES) return -1;
+    if (handles[handle] == NULL) return -1;
+
+    FILE *f = handles[handle];
+
+    if (fflush (f) != 0) return -1;
+
+    long here = ftell (f);
+
+    if (here < 0) return -1;                       /* a pipe, most likely */
+    if (fseek (f, 0, SEEK_END) != 0) return -1;
+
+    long end = ftell (f);
+
+    if (fseek (f, here, SEEK_SET) != 0) return -1;
+
+    return end < 0 ? -1 : (int64_t) end;
 }
 
 /* Closes a handle. A no-op for one already closed, so a handler can release

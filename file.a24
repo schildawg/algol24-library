@@ -123,6 +123,26 @@ private function RawCopyBytes (Dst : Pointer, DstOffset : Integer,
                                Len : Integer) : Integer;
     external 'alg_libfile_copy_bytes' in 'libfileffi.so';
 
+/// Moves a handle to a byte offset, answering 1 for moved and 0 for not.
+///
+/// Private to this unit. Answers 0 for a pipe, which can only go forwards.
+private function RawSeek (Handle : Integer, Offset : Integer) : Integer;
+    external 'alg_libfile_seek' in 'libfileffi.so';
+
+/// Where a handle is, in bytes from the start, or -1.
+///
+/// Private to this unit.
+private function RawTell (Handle : Integer) : Integer;
+    external 'alg_libfile_tell' in 'libfileffi.so';
+
+/// How many bytes the open file holds, or -1.
+///
+/// Private to this unit. Asked of the handle rather than the path, because a
+/// writer's bytes may still be buffered and `stat` would answer the file as
+/// it was several writes ago.
+private function RawLength (Handle : Integer) : Integer;
+    external 'alg_libfile_length' in 'libfileffi.so';
+
 /// How a file is opened: reading, writing from empty, or writing at the end.
 ///
 /// Private to this unit. The three the core's own `TextFile` offers as
@@ -130,6 +150,14 @@ private function RawCopyBytes (Dst : Pointer, DstOffset : Integer,
 private const ModeRead   := 0;
 private const ModeWrite  := 1;
 private const ModeAppend := 2;
+
+/// Reading and writing at once, which a record file needs: updating record 5
+/// must leave records 0 to 4 where they are. `ModeUpdate` requires the file
+/// to exist and `ModeCreate` makes or empties one.
+///
+/// Private to this unit. Neither has a counterpart in the core's `TextFile`.
+private const ModeUpdate := 3;
+private const ModeCreate := 4;
 
 /// How many bytes a reader holds at a time.
 ///
@@ -654,6 +682,188 @@ begin
     Erase (Scratch + '2');
 end
 
+
+/// A file of fixed-size records, indexed by record rather than by byte.
+///
+/// Turbo Pascal's `file of Record`, as close as this language can come to it.
+/// What cannot carry over is the record TYPE: there is no `sizeof` here, and a
+/// class instance is a reference with no defined byte layout, so the width is
+/// given at construction and the field layout is the caller's business. A
+/// `Buffer` is the record -- `PutInt`, `PutDouble` and byte indexing lay the
+/// fields out, exactly as Pascal's `string[30]` was a fixed-width field a
+/// programmer chose.
+///
+/// What does carry over is the useful half: random access by index, a file
+/// larger than memory, and updating one record in place.
+///
+/// # Raises
+/// `RecordFile: a record must have a positive size.`, and
+/// `RecordFile: cannot open '<Path>'.` when the file can be neither opened nor
+/// created.
+///
+/// # Safety
+/// `Close` flushes and releases, and may be called more than once [RT-023].
+/// Every other member of a closed file raises.
+///
+/// # Examples
+/// `RecordFile Updates One Record In Place`
+///
+/// # Since
+/// 0.1.5
+class RecordFile;
+var
+    Handle : Integer;
+    Width  : Integer;
+    Closed : Boolean;
+
+begin
+    constructor Init (Path : String, Width : Integer);
+    begin
+        if Width <= 0 then
+            raise 'RecordFile: a record must have a positive size.';
+
+        this.Width := Width;
+
+        // Reading and writing at once, keeping what is there -- updating
+        // record 5 must leave 0 to 4 alone. ModeCreate is tried only when
+        // ModeUpdate fails, so an existing file is never emptied.
+        this.Handle := RawOpen (Path, ModeUpdate);
+
+        if this.Handle < 0 then this.Handle := RawOpen (Path, ModeCreate);
+
+        if this.Handle < 0 then
+            raise 'RecordFile: cannot open ''' + Path + '''.';
+
+        this.Closed := False;
+    end
+
+    /// How many whole records the file holds.
+    ///
+    /// In records, which is what Turbo Pascal's `FileSize` answered for a
+    /// typed file. A trailing part-record is not counted, so a file written
+    /// only through this class always answers the number put in.
+    function Count () : Integer;
+    begin
+        this.Check ('Count');
+
+        var N := RawLength (this.Handle);
+
+        if N < 0 then raise 'Count: this file cannot be measured.';
+
+        Exit N div this.Width;
+    end
+
+    /// Record N, as a Buffer of its own.
+    ///
+    /// The readable form. It allocates a Buffer per call, so a walk over many
+    /// thousands of records wants the two-argument form instead, which fills
+    /// one buffer over and over.
+    ///
+    /// # Raises
+    /// `Read: there is no record <N>.` past the end, and for a negative index.
+    function Read (N : Integer) : Any;
+    begin
+        this.Check ('Read');
+
+        var B := Buffer (this.Width);
+
+        this.Read (N, B);
+
+        Exit B;
+    end
+
+    /// Record N into a buffer the caller owns, answering the bytes read.
+    ///
+    /// The allocation-free form, for a loop. `Into` must hold at least a
+    /// record; a larger one is filled from its start and the rest left alone.
+    ///
+    /// # Raises
+    /// `Read: there is no record <N>.`, `Read: needs a buffer.`, and
+    /// `Read: the buffer is smaller than a record.`
+    function Read (N : Integer, Into : Any) : Integer;
+    begin
+        this.Check ('Read');
+
+        if Into = nil then raise 'Read: needs a buffer.';
+
+        if Into.Length < this.Width then
+            raise 'Read: the buffer is smaller than a record.';
+
+        if N < 0 or N >= this.Count () then
+            raise 'Read: there is no record ' + Str (N) + '.';
+
+        if RawSeek (this.Handle, N * this.Width) = 0 then
+            raise 'Read: this file cannot be positioned.';
+
+        Exit RawReadInto (this.Handle, Into.Address, 0, this.Width);
+    end
+
+    /// Replaces record N, leaving every other record alone.
+    ///
+    /// This is the method the class exists for, and the one a whole-file read
+    /// and write cannot do without rewriting everything.
+    ///
+    /// Writing to `Count ()` itself appends, which is what `Append` does more
+    /// plainly; anything past that is refused rather than leaving a hole.
+    ///
+    /// # Raises
+    /// `Write: there is no record <N>.`, `Write: needs a buffer.`, and
+    /// `Write: the buffer is smaller than a record.`
+    procedure Write (N : Integer, From : Any);
+    begin
+        this.Check ('Write');
+
+        if From = nil then raise 'Write: needs a buffer.';
+
+        if From.Length < this.Width then
+            raise 'Write: the buffer is smaller than a record.';
+
+        if N < 0 or N > this.Count () then
+            raise 'Write: there is no record ' + Str (N) + '.';
+
+        if RawSeek (this.Handle, N * this.Width) = 0 then
+            raise 'Write: this file cannot be positioned.';
+
+        if RawWriteBytes (this.Handle, From.Address, 0, this.Width) < 0 then
+            raise 'Write: the file is not open for writing.';
+    end
+
+    /// Adds a record to the end.
+    procedure Append (From : Any);
+    begin
+        this.Check ('Append');
+
+        this.Write (this.Count (), From);
+    end
+
+    /// Pushes what is buffered at the operating system.
+    procedure Flush ();
+    begin
+        this.Check ('Flush');
+
+        RawFlush (this.Handle);
+    end
+
+    /// Flushes and releases the handle, and does nothing when already closed.
+    procedure Close ();
+    begin
+        if this.Closed then Exit;
+
+        RawFlush (this.Handle);
+        RawClose (this.Handle);
+
+        this.Closed := True;
+    end
+
+    /// Refuses a member on a closed file, naming it.
+    ///
+    /// Private to the class.
+    procedure Check (Who : String);
+    begin
+        if this.Closed then raise Who + ': the file is closed.';
+    end
+end
+
 /// The growth loop, which is what makes a read to end of file work.
 ///
 /// Note what this does and does not cover. The fault that prompted it was a
@@ -923,6 +1133,65 @@ begin
         Exit Got;
     end
 
+    /// Where the next read will start, in bytes from the file's beginning.
+    ///
+    /// Byte-indexed rather than record-indexed, there being no `sizeof` in
+    /// this language and so no width for the unit to assume.
+    ///
+    /// # Raises
+    /// `Position: this file cannot be positioned.` for a pipe, which can only
+    /// go forwards.
+    function Position () : Integer;
+    begin
+        this.Check ('Position');
+
+        var Where := RawTell (this.Handle);
+
+        if Where < 0 then
+            raise 'Position: this file cannot be positioned.';
+
+        // The window holds bytes already taken from the operating system but
+        // not yet handed to the caller, so the handle is ahead by whatever is
+        // left in it. Reporting the handle's own figure would be wrong by up
+        // to one window.
+        Exit Where - (this.Have - this.At);
+    end
+
+    /// Moves so that the next read starts at Offset bytes from the beginning.
+    ///
+    /// # Raises
+    /// `Seek: the offset cannot be negative.`, and
+    /// `Seek: this file cannot be positioned.` for a pipe.
+    procedure Seek (Offset : Integer);
+    begin
+        this.Check ('Seek');
+
+        if Offset < 0 then raise 'Seek: the offset cannot be negative.';
+
+        if RawSeek (this.Handle, Offset) = 0 then
+            raise 'Seek: this file cannot be positioned.';
+
+        // The window describes where we were, so it cannot survive the move.
+        this.Have  := 0;
+        this.At    := 0;
+        this.Ended := False;
+    end
+
+    /// How many bytes the file holds.
+    ///
+    /// # Raises
+    /// `Size: this file cannot be measured.` for a pipe.
+    function Size () : Integer;
+    begin
+        this.Check ('Size');
+
+        var N := RawLength (this.Handle);
+
+        if N < 0 then raise 'Size: this file cannot be measured.';
+
+        Exit N;
+    end
+
     /// Releases the handle, and does nothing when already closed.
     procedure Close ();
     begin
@@ -1026,6 +1295,58 @@ begin
         RawFlush (this.Handle);
     end
 
+    /// Where the next write will go, in bytes from the file's beginning.
+    ///
+    /// # Raises
+    /// `Position: this file cannot be positioned.` for a pipe.
+    function Position () : Integer;
+    begin
+        this.Check ('Position');
+
+        var Where := RawTell (this.Handle);
+
+        if Where < 0 then
+            raise 'Position: this file cannot be positioned.';
+
+        Exit Where;
+    end
+
+    /// Moves so that the next write goes to Offset bytes from the beginning.
+    ///
+    /// Writing past the end leaves a hole, which reads back as zero bytes --
+    /// the operating system's behaviour, not this unit's choice.
+    ///
+    /// # Raises
+    /// `Seek: the offset cannot be negative.`, and
+    /// `Seek: this file cannot be positioned.` for a pipe.
+    procedure Seek (Offset : Integer);
+    begin
+        this.Check ('Seek');
+
+        if Offset < 0 then raise 'Seek: the offset cannot be negative.';
+
+        if RawSeek (this.Handle, Offset) = 0 then
+            raise 'Seek: this file cannot be positioned.';
+    end
+
+    /// How many bytes the file holds.
+    ///
+    /// Counts what is buffered as well as what is written, because it asks
+    /// the handle rather than the path.
+    ///
+    /// # Raises
+    /// `Size: this file cannot be measured.` for a pipe.
+    function Size () : Integer;
+    begin
+        this.Check ('Size');
+
+        var N := RawLength (this.Handle);
+
+        if N < 0 then raise 'Size: this file cannot be measured.';
+
+        Exit N;
+    end
+
     /// Flushes and releases the handle, and does nothing when already closed.
     procedure Close ();
     begin
@@ -1073,6 +1394,22 @@ begin
             raise 'AppendFile: cannot open ''' + Path + '''.';
 
         this.Closed := False;
+    end
+
+    /// Refused, because an append-only file cannot honour it.
+    ///
+    /// A file opened for appending writes at the end whatever its position
+    /// says -- that is the operating system's rule, not this unit's -- so a
+    /// `Seek` here would appear to work and then change nothing. Refusing is
+    /// the honest answer; use `OutFile` where writing to a position matters.
+    ///
+    /// # Raises
+    /// `Seek: an AppendFile always writes at the end.`
+    procedure Seek (Offset : Integer);
+    begin
+        this.Check ('Seek');
+
+        raise 'Seek: an AppendFile always writes at the end.';
     end
 end
 
@@ -1411,6 +1748,257 @@ begin
     end
 
     AssertEqual ('Write: the file is closed.', Message);
+
+    Erase (Path);
+end
+
+/// Position must account for the read-ahead window.
+///
+/// A reader takes 65536 bytes from the operating system at a time, so the
+/// handle's own position runs ahead of the caller's by whatever is still in
+/// the window. Reporting the handle's figure would be wrong by up to a whole
+/// window -- which on a small file means wrong by the whole file.
+test 'Position Reports Where The Caller Is, Not Where The Handle Is';
+begin
+    var Path := 'alg-pos.txt';
+
+    WriteAll (Path, 'abcde' + #10 + 'fghij' + #10);
+
+    var F := InFile (Path);
+
+    AssertEqual (0, F.Position ());
+
+    F.ReadLine ();                      // six bytes: five and the newline
+    AssertEqual (6, F.Position ());
+
+    F.ReadLine ();
+    AssertEqual (12, F.Position ());
+    AssertTrue (F.AtEnd ());
+
+    AssertEqual (12, F.Size ());
+
+    F.Close ();
+    Erase (Path);
+end
+
+/// Seeking discards the window, or the next read would answer bytes from
+/// where the reader used to be.
+test 'Seek Moves A Reader And Forgets What It Had Buffered';
+begin
+    var Path := 'alg-seek.txt';
+
+    WriteAll (Path, 'first' + #10 + 'second' + #10 + 'third' + #10);
+
+    var F := InFile (Path);
+
+    AssertEqual ('first', F.ReadLine ());   // fills the window with everything
+
+    F.Seek (6);                             // the start of 'second'
+    AssertEqual (6, F.Position ());
+    AssertEqual ('second', F.ReadLine ());
+
+    F.Seek (0);
+    AssertEqual ('first', F.ReadLine ());
+
+    // And bytes, not just lines.
+    var B := Buffer (5);
+
+    F.Seek (13);
+    AssertEqual (5, F.ReadBytes (B, 0, 5));
+    AssertEqual (116, B[0]);                // 't' of 'third'
+
+    var Raised := False;
+
+    try F.Seek (0 - 1); except on E : String do Raised := True; end
+    AssertTrue (Raised);
+
+    F.Close ();
+    Erase (Path);
+end
+
+/// A writer can position too, which is what makes an in-place update
+/// possible without a record class.
+test 'A Writer Can Position And Measure Itself';
+begin
+    var Path := 'alg-wpos.txt';
+    var O    := OutFile (Path);
+
+    AssertEqual (0, O.Position ());
+
+    O.Write ('0123456789');
+    AssertEqual (10, O.Position ());
+    AssertEqual (10, O.Size ());            // buffered, and still counted
+
+    O.Seek (3);
+    AssertEqual (3, O.Position ());
+    O.Write ('XY');
+
+    O.Close ();
+
+    AssertEqual ('012XY56789', ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// An append-only file refuses to be positioned rather than appearing to
+/// move and then ignoring it.
+test 'AppendFile Refuses To Seek';
+begin
+    var Path := 'alg-apseek.txt';
+
+    WriteAll (Path, 'kept');
+
+    var A       := AppendFile (Path);
+    var Message := '';
+
+    try
+        A.Seek (0);
+    except on E : String do
+        Message := E;
+    end
+
+    AssertEqual ('Seek: an AppendFile always writes at the end.', Message);
+
+    A.Close ();
+
+    // What was there is still there, the refusal having changed nothing.
+    AssertEqual ('kept', ReadAll (Path));
+
+    Erase (Path);
+end
+
+/// # Examples cites this by name from `RecordFile`.
+test 'RecordFile Updates One Record In Place';
+begin
+    var Path  := 'alg-rec.dat';
+    var Width := 16;
+    var F     := RecordFile (Path, Width);
+
+    AssertEqual (0, F.Count ());
+
+    for var I := 0; I < 3; I := I + 1 do
+    begin
+        var R := Buffer (Width);
+
+        R.PutInt (0, 100 + I);
+        R.PutDouble (8, 1.5 * I);
+
+        F.Append (R);
+    end
+
+    AssertEqual (3, F.Count ());
+
+    // The readable form answers a Buffer of its own.
+    var Two := F.Read (2);
+
+    AssertEqual (102, Two.GetInt (0));
+    AssertEqual (3.0, Two.GetDouble (8));
+
+    // One record changes and the others do not, which is the whole point.
+    var Upd := Buffer (Width);
+
+    Upd.PutInt (0, 999);
+    Upd.PutDouble (8, 0 - 2.25);
+
+    F.Write (1, Upd);
+
+    AssertEqual (3, F.Count ());            // no growth
+    AssertEqual (100, F.Read (0).GetInt (0));
+    AssertEqual (999, F.Read (1).GetInt (0));
+    AssertEqual (0 - 2.25, F.Read (1).GetDouble (8));
+    AssertEqual (102, F.Read (2).GetInt (0));
+
+    F.Close ();
+    F.Close ();
+
+    AssertEqual (48, FileSize (Path));
+
+    Erase (Path);
+end
+
+/// The two Read forms must answer the same bytes; one allocates and one does
+/// not, and that is the only difference.
+test 'Both Read Forms Answer The Same Record';
+begin
+    var Path  := 'alg-rec2.dat';
+    var Width := 8;
+    var F     := RecordFile (Path, Width);
+
+    for var I := 0; I < 4; I := I + 1 do
+    begin
+        var R := Buffer (Width);
+
+        R.PutInt (0, I * 7);
+
+        F.Append (R);
+    end
+
+    var Into := Buffer (Width);
+
+    for var I := 0; I < 4; I := I + 1 do
+    begin
+        AssertEqual (Width, F.Read (I, Into));
+        AssertEqual (F.Read (I).GetInt (0), Into.GetInt (0));
+        AssertEqual (I * 7, Into.GetInt (0));
+    end
+
+    // A larger buffer is filled from its start and the rest left alone.
+    var Big := Buffer (Width + 4);
+
+    Big.PutInt (Width, 1234);
+
+    AssertEqual (Width, F.Read (1, Big));
+    AssertEqual (7, Big.GetInt (0));
+    AssertEqual (1234, Big.GetInt (Width));
+
+    F.Close ();
+    Erase (Path);
+end
+
+/// Every refusal a record file makes, since each is a way a caller gets the
+/// index or the buffer wrong.
+test 'RecordFile Refuses What It Cannot Do';
+begin
+    var Path  := 'alg-rec3.dat';
+    var Width := 8;
+    var Count := 0;
+
+    try RecordFile (Path, 0);     except on E : String do Count := Count + 1; end
+    try RecordFile (Path, 0 - 8); except on E : String do Count := Count + 1; end
+
+    AssertEqual (2, Count);
+
+    var F := RecordFile (Path, Width);
+    var R := Buffer (Width);
+
+    F.Append (R);
+
+    var Refused := 0;
+
+    try F.Read (1);                 except on E : String do Refused := Refused + 1; end
+    try F.Read (0 - 1);             except on E : String do Refused := Refused + 1; end
+    try F.Read (0, nil);            except on E : String do Refused := Refused + 1; end
+    try F.Read (0, Buffer (4));     except on E : String do Refused := Refused + 1; end
+    try F.Write (2, R);             except on E : String do Refused := Refused + 1; end
+    try F.Write (0, nil);           except on E : String do Refused := Refused + 1; end
+    try F.Write (0, Buffer (4));    except on E : String do Refused := Refused + 1; end
+
+    AssertEqual (7, Refused);
+
+    // Writing AT the count appends rather than refusing, which is what
+    // Append does more plainly.
+    F.Write (1, R);
+    AssertEqual (2, F.Count ());
+
+    F.Close ();
+
+    var Closed := 0;
+
+    try F.Count ();      except on E : String do Closed := Closed + 1; end
+    try F.Read (0);      except on E : String do Closed := Closed + 1; end
+    try F.Append (R);    except on E : String do Closed := Closed + 1; end
+
+    AssertEqual (3, Closed);
 
     Erase (Path);
 end

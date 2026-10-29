@@ -453,17 +453,17 @@ Run Code is interpreted only, deliberately; the extension's own **Run File
 | `testing` | `AssertNear` | 9 | complete |
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` carried in `randomffi.c` rather than taken from libc, bit-identical and so portable, seeding via `randomffi.c` | 17 | complete |
-| `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 298 | complete |
+| `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 299 | complete |
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |
 | `sound` | `Sound`, `NoSound`, `SetVolume`, `SoundAvailable`; BASIC's `Play` with `Score` answering the notes without sounding them; `LoadSound`, `PlaySound`, `SoundLength`, `SoundPlaying`, `StopSounds`, `FreeSound`, `CloseSound`; `soundffi.c` is SDL2 audio -- a square wave mixed with up to sixteen decoded samples, WAV only | 14 | complete |
-| `file` | whole-file: `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; streaming: the `InFile` reader (`ReadLine`, `AtEnd`, `ReadBytes`, `Close`) and the `OutFile` writer (`Write`, `WriteLine`, `WriteBytes`, `Flush`, `Close`) with `AppendFile` inheriting it, no free-function aliases on any of them; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 25 | complete |
-| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 47 | complete |
+| `file` | whole-file: `ReadAll`, `WriteAll`, `AppendAll`, `ReadLines`, `WriteLines`, `Exists`, `IsDirectory`, `FileSize`, `Erase`, `Rename`, `CopyFile`; streaming: the `InFile` reader (`ReadLine`, `AtEnd`, `ReadBytes`) and the `OutFile` writer (`Write`, `WriteLine`, `WriteBytes`, `Flush`) with `AppendFile` inheriting it, each with `Position`, `Seek`, `Size` and an idempotent `Close`, no free-function aliases on any of them; `RecordFile` indexes fixed-width records by number — Turbo Pascal's `file of Record` with the width given rather than computed; `fileffi.c` is plain C99 and the library's first foreign code that builds anywhere | 33 | complete |
+| `strings` | `Trim`, `Upper`, `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert`, `Replace` — every one an `extension`, so each may be written `Trim (S)` or `S.Trim ()`; `Join`'s receiver is a List rather than a String; ASCII-only case, `Delete` and `Insert` total over any index, no C at all | 48 | complete |
 | `time` | `Now`, `UtcNow`, `At`, `UtcAt` answering a `DateTime` with `Text`; `UtcOffset`, `IsDaylightSaving`; `timeffi.c` is C89 `localtime_r`. `GetDate`/`GetTime`'s four `var` parameters become one returned object; `SetDate`/`SetTime` are absent, needing root | 9 | complete |
 | `dos` | `DiskFree`, `DiskSize` by path rather than drive number and unbounded rather than `LongInt`; `GetEnv`, `HasEnv`, `Environment` answering a List, `EnvName`/`EnvValue`; `Exec` through `posix_spawn` with an argument List and **no shell**; `dosffi.c` is POSIX, not C99 | 13 | complete |
 
-The Tests column is the unit's own `test` blocks, 537 in all. `./test.sh`
-reports what `--test` can reach instead, imports included, so it prints 402
-for `graph` (its 298, plus `math`'s 69, `file`'s 26 and `testing`'s 9) and 92
+The Tests column is the unit's own `test` blocks, 546 in all. `./test.sh`
+reports what `--test` can reach instead, imports included, so it prints 410
+for `graph` (its 299, plus `math`'s 69, `file`'s 33 and `testing`'s 9) and 92
 for `sound`. `graph` reaches `file` because `InstallUserFont` reads its glyph
 file through it.
 
@@ -648,6 +648,33 @@ together.** Both take a carriage return before a newline as part of the
 newline, treat a final line with no terminator as a line, and refuse to
 invent an empty last line after a trailing one. The test asserts they answer
 identically across five bodies plus the empty file, so neither can drift.
+
+⚠️ **`InFile.Position` is where the CALLER is, not where the handle is.** A
+reader buys 65536 bytes at a time, so the handle runs ahead by whatever is
+still in its window; `Position` subtracts that, and `Seek` throws the window
+away. Reporting the handle's own figure would be wrong by up to a window --
+which on a small file is wrong by the whole file. A test pins it.
+
+⚠️ **`AppendFile.Seek` is refused, not ignored.** A file opened for appending
+writes at the end whatever its position says, so a `Seek` would appear to work
+and change nothing. That is the operating system's rule and the override exists
+to stop it reading as this unit's bug.
+
+⚠️ **`RecordFile` takes its width as an argument because there is no
+`sizeof`.** Turbo Pascal's `Seek (F, 5)` worked because the compiler knew the
+record's size; a class instance here is a reference with no byte layout, so the
+caller states the width and owns the field layout -- a `Buffer` is the record.
+Pascal's `string[30]` was already a fixed-width field a programmer chose, so
+this is less of a concession than it looks. It opens read-write without
+emptying (`ModeUpdate`, falling back to `ModeCreate`), which is the one thing
+`Reset`, `Rewrite` and `Append` cannot do between them and the reason
+`alg_libfile_open` grew two modes.
+
+⚠️ **`RecordFile.Read` has two forms on purpose.** `Read (N)` answers a fresh
+Buffer and reads better; `Read (N, Into)` fills the caller's and allocates
+nothing, which is what a walk over thousands of records needs. Distinct
+arities, so they settle statically. A test asserts the two answer the same
+bytes.
 
 ⚠️ **A class gets ONE reference entry, with its members in the Declaration
 block** -- not an entry per method. That is the specification's own convention

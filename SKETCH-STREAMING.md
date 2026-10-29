@@ -1,9 +1,10 @@
 # Sketch: streaming, and what sits on top of it
 
-**Status:** groups 1 to 3 are **built** -- the handle, reading and writing,
-with the names as proposed below. Groups 4 (position and seeking) and 5
-(`Buffer.PutDouble`) are **not**, and are still open questions. Written
-2026-10-25; status updated the same day.
+**Status:** **BUILT, all five groups.** Groups 1 to 3 (the handle, reading,
+writing) and group 4 (`Position`, `Seek`, `Size`) are in `file`, with
+`RecordFile` on top of them. Group 5 was `Buffer.PutDouble`, which this
+sketch argued belonged in the core rather than here -- it shipped in 0.1.6
+and is what makes a record able to hold a balance.
 
 What was built differs from this document in one place: `ReadBytes` takes an
 **offset** as well as a count, which this sketch did not propose. That is what

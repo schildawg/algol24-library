@@ -119,6 +119,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ReadEvent`](#readevent) | functions | `graph` and `crt` |
 | [`ReadKey`](#readkey) | function | `graph` and `crt` |
 | [`ReadLines`](#readlines) | function and procedure | `file` |
+| [`RecordFile`](#recordfile) | class | `file` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
 | [`Repeat`](#repeat) | extension function | `strings` |
 | [`Replace`](#replace) | extension function | `strings` |
@@ -292,7 +293,8 @@ A file open for writing at the end, keeping what is already there.
 constructor AppendFile (Path : String);
 
 // every OutFile member, inherited: Write, WriteLine, WriteBytes,
-// Flush, Close
+// Flush, Position, Size, Close
+procedure Seek (Offset : Integer)               refused -- see below
 ```
 
 **Remarks**
@@ -302,6 +304,12 @@ of the difference, so it **inherits** rather than restating five methods.
 
 This is Turbo Pascal's `Append` to `OutFile`'s `Rewrite`. A file that does not
 exist yet is created, so appending to nothing is not an error.
+
+⚠️ **[`Seek`](#outfile) is refused here rather than ignored.** A file opened
+for appending writes at the end whatever its position says — the operating
+system's rule, not this unit's — so a `Seek` would appear to work and then
+change nothing. It raises `Seek: an AppendFile always writes at the end.`
+Use [`OutFile`](#outfile) where writing to a position matters.
 
 Raises `AppendFile: cannot open '<Path>'.` when the file cannot be opened for
 appending.
@@ -4074,6 +4082,9 @@ function  ReadLine () : String                  the next line, no terminator
 function  AtEnd () : Boolean                    nothing left to give
 function  ReadBytes (Into : Any, Offset : Integer,
                      Count : Integer) : Integer
+function  Position () : Integer                 bytes from the beginning
+procedure Seek (Offset : Integer)               move the next read
+function  Size () : Integer                     bytes the file holds
 procedure Close ()                              released, and idempotent
 ```
 
@@ -4106,6 +4117,20 @@ pipe.
 `Offset`, and answers **0** at end of file rather than raising. The offset is
 what lets a caller fill a growing buffer across several reads, which is how
 `ReadAll` is built on this.
+
+`Position`, `Seek` and `Size` index by **byte**, not by line and not by
+record — there being no `sizeof` in this language, so no width the unit could
+assume. For records indexed by record, see [`RecordFile`](#recordfile).
+
+⚠️ **`Position` is where the CALLER is, not where the handle is.** A reader
+takes 65536 bytes from the operating system at a time, so the handle runs
+ahead by whatever is still in its window; `Position` subtracts that. And
+`Seek` discards the window, or the next read would answer bytes from where the
+reader used to be.
+
+⚠️ **None of the three works on a pipe**, which can only go forwards. Each
+raises `<Member>: this file cannot be positioned.` — or `… measured.` for
+`Size` — rather than letting a `-1` read as "position zero".
 
 `Close` **may be called more than once**, the second doing nothing. That is the
 bargain `Buffer.Free` and the core's `TextFile.Close` already make [RT-023]: a
@@ -5756,6 +5781,9 @@ procedure Write (Text : String)                 as it stands, adding nothing
 procedure WriteLine (Text : String)             and a newline
 procedure WriteBytes (From : Any, Count : Integer)
 procedure Flush ()                              push what is buffered
+function  Position () : Integer                 bytes from the beginning
+procedure Seek (Offset : Integer)               move the next write
+function  Size () : Integer                     bytes the file holds
 procedure Close ()                              flushed, released, idempotent
 ```
 
@@ -5789,6 +5817,15 @@ without closing may lose the tail, which is the one real cost of writing this
 way instead of with `WriteAll`. `Flush` makes what was written readable without
 closing, which is what a long-running program keeping a log wants; `Close`
 flushes too, so a program that closes need not call it.
+
+`Position`, `Seek` and `Size` are byte-indexed, as [`InFile`](#infile)'s are.
+`Size` counts what is still buffered as well as what has reached the disk,
+because it asks the handle rather than the path. Seeking back and writing is
+how a record is replaced in place without rewriting the file —
+[`RecordFile`](#recordfile) is that, done by record index.
+
+Writing past the end leaves a hole, which reads back as zero bytes. That is
+the operating system's behaviour rather than this unit's choice.
 
 `Close` **may be called more than once**, on the same terms as
 [`InFile`](#infile)'s. Every other member of a closed file raises
@@ -6985,6 +7022,125 @@ carriage returns:    true
 
 
 ---
+
+## RecordFile
+
+*class* — unit `file`
+
+**Function**
+
+A file of fixed-size records, indexed by record rather than by byte.
+
+**Declaration**
+
+```algol24
+constructor RecordFile (Path : String, Width : Integer);
+
+function  Count () : Integer                    whole records held
+function  Read (N : Integer) : Any              record N, as a new Buffer
+function  Read (N : Integer, Into : Any) : Integer
+procedure Write (N : Integer, From : Any)       replaces record N
+procedure Append (From : Any)                   adds one at the end
+procedure Flush ()                              push what is buffered
+procedure Close ()                              flushed, released, idempotent
+```
+
+**Remarks**
+
+Turbo Pascal's `file of Record`, as close as this language can come to it.
+
+⚠️ **The record *type* cannot carry over, and that is the whole of the
+difference.** Pascal's `Seek (F, 5)` worked because the compiler knew
+`sizeof(Customer)`; there is no `sizeof` here, and a class instance is a
+reference with no defined byte layout. So the width is given at construction
+and the field layout is the caller's — a `Buffer` is the record, with
+`PutInt`, `PutDouble` and byte indexing laying the fields out. That is less of
+a concession than it sounds: Pascal's `string[30]` was already a fixed-width
+field a programmer chose.
+
+What does carry over is the useful half — random access by index, a file
+larger than memory, and **updating one record in place**, which a whole-file
+read and write cannot do without rewriting everything.
+
+`Count` answers **records**, as Pascal's `FileSize` did for a typed file. A
+trailing part-record is not counted.
+
+**The two `Read` forms differ only in allocation.** `Read (N)` answers a Buffer
+of its own and reads better; `Read (N, Into)` fills one the caller owns and
+allocates nothing, which is what a walk over many thousands of records wants.
+`Into` must hold at least a record; a larger one is filled from its start and
+the rest left alone.
+
+`Write` at an index equal to `Count ()` appends, which is what `Append` does
+more plainly. Anything past that is refused rather than leaving a hole.
+
+The file is opened for reading **and** writing without being emptied, and is
+created if absent — so a record file is opened the same way whether or not it
+exists yet.
+
+Raises `RecordFile: a record must have a positive size.`,
+`RecordFile: cannot open '<Path>'.`, `Read: there is no record <N>.` and its
+`Write` counterpart, `<Member>: needs a buffer.`,
+`<Member>: the buffer is smaller than a record.`, and
+`<Member>: the file is closed.` once closed.
+
+**See also**
+
+[`InFile`](#infile), [`OutFile`](#outfile), [`FileSize`](#filesize)
+
+**Example**
+
+```algol24
+uses file;
+
+const Width := 16;                  // an Integer at 0, a Double at 8
+
+var F := RecordFile ('stock.dat', Width);
+
+for var I := 0; I < 3; I := I + 1 do
+begin
+    var R := Buffer (Width);
+
+    R.PutInt (0, 100 + I);
+    R.PutDouble (8, 1.5 * I);
+
+    F.Append (R);
+end
+
+WriteLn ('records: ', F.Count ());
+
+// One record changes; the others are not rewritten.
+var Upd := Buffer (Width);
+
+Upd.PutInt (0, 999);
+Upd.PutDouble (8, 4.25);
+
+F.Write (1, Upd);
+
+// The allocation-free form, one buffer reused down the file.
+var Into := Buffer (Width);
+
+for var I := 0; I < F.Count (); I := I + 1 do
+begin
+    F.Read (I, Into);
+
+    WriteLn (I, ': ', Into.GetInt (0), '  ', Str (Into.GetDouble (8), 2));
+end
+
+F.Close ();
+
+WriteLn ('bytes: ', FileSize ('stock.dat'));
+
+Erase ('stock.dat');
+```
+
+```console
+records: 3
+0: 100  0.00
+1: 999  4.25
+2: 102  3.00
+bytes: 48
+```
 
 ## Rectangle
 
