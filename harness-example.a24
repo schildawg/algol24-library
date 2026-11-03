@@ -1,0 +1,46 @@
+/// How a test reads under the harness, shown with four of math's own.
+///
+/// ⚠️ This DUPLICATES tests that already live in math.a24 and is not coverage:
+/// it is here to show the migration, which is a wrapper and nothing else. The
+/// bodies are unchanged, because the assertions keep their names -- what moves
+/// is the declaration, not the test.
+///
+/// Run it with either processor and the output is the same:
+///
+///     algc  harness-example.a24
+///     algvm harness-example.a24
+uses harness;
+uses math;
+
+procedure AbsAnswersTheMagnitude ();
+begin
+    AssertEqual (5, Abs (-5));
+    AssertEqual (5, Abs (5));
+    AssertEqual (2.5, Abs (-2.5));
+    AssertEqual (2.5, Abs (2.5));
+end
+
+procedure AbsAnswersZeroForZero ();
+begin
+    AssertEqual (0, Abs (0));
+    AssertEqual (0.0, Abs (0.0));
+end
+
+procedure AbsPastTheMachineWidth ();
+begin
+    AssertEqual (99999999999999999999, Abs (-99999999999999999999));
+end
+
+procedure IsNaNKnowsANaN ();
+begin
+    AssertTrue (IsNaN (0.0 / 0.0));
+end
+
+begin
+    Register ('Abs Answers The Magnitude',          AbsAnswersTheMagnitude);
+    Register ('Abs Answers Zero For Zero',          AbsAnswersZeroForZero);
+    Register ('Abs Past The Machine Width',         AbsPastTheMachineWidth);
+    Register ('IsNaN Knows A NaN',                  IsNaNKnowsANaN);
+
+    if RunAll () > 0 then Halt (70);
+end
