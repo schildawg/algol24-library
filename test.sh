@@ -20,6 +20,13 @@ export SDL_VIDEODRIVER=dummy
 # for graph's windows.
 export ALG_SOUND=dummy
 
+# graph reads its glyph files from the working directory, and from an installed
+# library second -- named by this. Pointing it at the repository root is what
+# lets the fallback be tested at all: a test writes a probe font here under a
+# name the working directory does not hold, and resolving it proves the second
+# place was tried. A run without it skips that one test rather than failing.
+export ALGOL24_LIB="$PWD"
+
 # The units reach the library's own C through a shared library, so a stale one
 # would be tested instead of the source beside it.
 ./build.sh > /dev/null

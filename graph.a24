@@ -17,6 +17,7 @@ unit graph;
 uses math;
 uses testing;
 uses file;
+uses dos;
 
 // ------------------------------------------------------------------ SDL --
 //
@@ -262,6 +263,16 @@ procedure ScrollBand (Top : Integer, Bottom : Integer, DY : Integer,
 /// replaced.
 function UnhexWords (Hex : String, Group : Integer, Out : Pointer) : Integer;
     external 'alg_unhex_words' in 'libgraphffi.so';
+
+/// The environment variable naming where an installed library's data lives.
+///
+/// A glyph file is read by this unit rather than resolved by the compiler, so
+/// an installed one has to be named: the compiler's own search finds installed
+/// `.a24` units, and nothing in it is asked about a font.  Set by whatever
+/// installs the library -- a package manager's wrapper -- and unset when the
+/// library is run from its own directory, which is why the working directory
+/// is tried first and this second.
+const LIB_VARIABLE := 'ALGOL24_LIB';
 
 const SDL_INIT_VIDEO             := 32;
 const WINDOWPOS_CENTERED         := 805240832;
@@ -834,7 +845,28 @@ begin
     try
         Lines := ReadLines (Path);
     except
-        raise 'InstallUserFont: cannot open ''' + Path + '''.';
+        // An INSTALLED library's data, second, so the working directory still
+        // wins and nothing a program already does changes meaning.  A bare
+        // name is all a package manager can make reachable: the units it
+        // installs are found by the compiler's own search, and a glyph file is
+        // read by this unit rather than resolved by the compiler, so the
+        // directory has to be named.  ALGOL24_LIB names it.
+        var Installed := '';
+
+        if HasEnv (LIB_VARIABLE) then
+            Installed := GetEnv (LIB_VARIABLE) + '/' + Path;
+
+        if Installed = '' then
+            raise 'InstallUserFont: cannot open ''' + Path + '''.';
+
+        // The DOCUMENTED message either way, naming the path the caller gave:
+        // where this looked is its own business, and the diagnostic is a
+        // contract a test and the reference both pin.
+        try
+            Lines := ReadLines (Installed);
+        except
+            raise 'InstallUserFont: cannot open ''' + Path + '''.';
+        end
     end
 
     FontGlyphs   := [:];
@@ -924,8 +956,9 @@ begin
     try
         InstallUserFont ('graphfont.hex');
     except
-        raise 'No font is installed: ''graphfont.hex'' is not in the working '
-            + 'directory, and InstallUserFont has not named another.';
+        raise 'No font is installed: ''graphfont.hex'' is in neither the '
+            + 'working directory nor ' + LIB_VARIABLE
+            + ', and InstallUserFont has not named another.';
     end
 end
 
@@ -6067,6 +6100,51 @@ begin
     OutTextXY (-10, -10, 'and before it');
 
     AssertTrue (True);
+
+    CloseGraph ();
+end
+
+/// A glyph file an installed library owns, which is what makes `graph` usable
+/// from a directory that is not the library's own.
+test 'InstallUserFont Falls Back To ALGOL24_LIB';
+begin
+    CloseGraph ();
+    InitGraph (200, 100, 'installed', False);
+
+    // The fallback is only reachable when the variable names a directory, and
+    // the test run sets it to this one -- so a copy under a name the working
+    // directory does NOT hold is what proves the second place was tried.
+    if not HasEnv (LIB_VARIABLE) then
+    begin
+        CloseGraph ();
+
+        Exit;
+    end
+
+    var Where := GetEnv (LIB_VARIABLE) + '/alg-font-probe.hex';
+
+    WriteLines (Where, ReadLines ('romfont.hex'));
+
+    InstallUserFont ('alg-font-probe.hex');
+
+    // Resolved, and it is the ROM font that arrived rather than the default.
+    AssertEqual (16, FontHeight);
+    AssertEqual (8, FontWidths[Ord ('A')]);
+
+    Erase (Where);
+
+    // A name in neither place still fails, and the message names both.
+    try
+        InstallUserFont ('alg-font-probe.hex');
+
+        Fail ('A font in neither place should not install.');
+    except
+        on e : String do AssertTrue (Pos (e, 'alg-font-probe.hex') >= 0);
+    end
+
+    // Put the default back so no later test inherits the ROM look.
+    InstallUserFont ('graphfont.hex');
+    AssertEqual (32, FontHeight);
 
     CloseGraph ();
 end

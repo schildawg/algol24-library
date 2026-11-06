@@ -4670,9 +4670,14 @@ Chinese, Korean and Spanish glyphs and a handful of emoji. The example
 repository's `makefont.py` generates files in this format from any font the
 machine has, which is how coverage grows.
 
-A path resolves against the working directory, as any data file does. A new
-font replaces the old entirely; a font that cannot be opened **leaves the old
-one installed** and raises `InstallUserFont: cannot open '...'.`
+A path resolves against the working directory first, and then against the
+directory `ALGOL24_LIB` names if it is set — which is how a library installed
+somewhere else keeps its own glyph files reachable. The working directory wins,
+so a font beside the program always beats an installed one of the same name,
+and a run with the variable unset behaves exactly as it did before. A new font
+replaces the old entirely; a font that cannot be opened **leaves the old one
+installed** and raises `InstallUserFont: cannot open '...'.`, naming the path
+given rather than the places searched.
 
 In Turbo Pascal this registered a `.CHR` stroked-font file for `SetTextStyle`
 to select later; here the glyph file itself is the font, so installing is
