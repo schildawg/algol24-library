@@ -22,6 +22,13 @@ Three kinds of thing, and the distinction matters:
 2026-10-24, where it acquired a second and likelier trigger — see below. No
 longer the narrow remainder it was.
 
+⚠️ **0.1.6 added a THIRD trigger**, and a common one: handing an Integer to
+`and` or `or` warns, naming the new bitwise operators, and that warning goes
+to stdout like the others. Measured 2026-10-28 — `WriteLn (6 and 3)` prints
+the warning on **stdout** and `3` after it, with stderr empty. The warning
+itself is a good addition and closes most of H-3; its stream is this defect.
+No unit here triggers it, checked by compiling each of the ten.
+
 An overload the compiler cannot settle statically still warns — correctly,
 since [ERR-010]'s dynamic selection really does happen when argument *types*
 decide — but the warning is written to **stdout**:
@@ -162,10 +169,14 @@ one, and `this.Ping` names the method.
 
 ### H-3 — `and` and `or` look like bitwise operators and are not
 
-**Status:** hazard, not a defect. Recorded 2026-10-24. Specified by [EXP-010],
-checked before being written up here.
+**Status:** **mostly closed by 0.1.6**, which added `&`, `|`, `^`, `~`, `<<`
+and `>>` [EXP-023, EXP-024] and a warning when `and` or `or` is handed an
+Integer. Recorded 2026-10-24 as a hazard; what remains is narrow and is
+described at the foot of this entry. Specified by [EXP-010], checked before
+being written up.
 
-The language has **no bitwise operations of any kind**, and the two operators
+The hazard as recorded, which 0.1.5 and earlier had in full: the language had
+**no bitwise operations of any kind**, and the two operators
 that look like they would do the job quietly do something else. `and` and `or`
 test truthiness and yield an *operand* rather than a Boolean, so the obvious
 thing a reader writes compiles and answers a plausible wrong number:
@@ -181,8 +192,8 @@ terms. The hazard is that the *absence* of bitwise operators is concealed by the
 presence of two operators wearing their names — so the failure is a wrong number
 rather than `Undefined`.
 
-**And every other spelling is absent**, which is what makes the trap worth
-recording rather than merely noting. Measured on 0.1.5:
+**And on 0.1.5 every other spelling was absent**, which is what made the trap
+worth recording rather than merely noting:
 
 | Written | Result |
 | --- | --- |
@@ -191,9 +202,34 @@ recording rather than merely noting. Measured on 0.1.5:
 | `6 xor 3`, `6 band 3`, `6 bitxor 3` | parse errors |
 | `Xor (6, 3)`, `Shl (1, 4)` | `Undefined variable` |
 
-The word "bitwise" does not appear in the specification.
+The word "bitwise" did not appear in the specification.
 
-#### How the library defends against it
+#### What 0.1.6 changed, measured
+
+`PROPOSAL-BITWISE-OPERATORS.md` was accepted. Verified on 0.1.6:
+
+| Written | Answers |
+| --- | --- |
+| `6 & 3`, `6 \| 3`, `6 ^ 3`, `~6` | `2`, `7`, `5`, `-7` |
+| `1 << 4`, `256 >> 4` | `16`, `16` |
+| `1 << 70` | `1180591620717411303424` — grows rather than wrapping [EXP-007] |
+| `-7 >> 1` | `-4`, the floor — the shift is **arithmetic** |
+| `-7 div 2` | `-3`, truncated toward zero, so a shift is not a division |
+| `1.5 & 2`, `True & True`, `~1.5` | refused: `& expects Integers.` |
+| `6 and 3` | still `3`, and now **warns** and names `&`, `\|` and `~` |
+
+⚠️ **The remaining hazard is the warning's stream, not the arithmetic.** The
+new warning is written to **stdout**, so a unit using `and` on an Integer would
+add a line to every consumer's output. That is L-4, not a separate fault.
+Measured: no unit in this library triggers it, because this entry already had
+them avoiding the construct.
+
+⚠️ **A right shift is still not a division**, which is the one trap that
+survives. The old note that `div` truncates where a shift floors now matters
+*more* rather than less, because both spellings are available and they disagree
+on exactly the negative values where it is easy not to look.
+
+#### How the library defended against it before 0.1.6, none of which remains
 
 1. **Reach for C, and say so.** `graph` declares
    `XorWords … external 'alg_xor'` with a doc block naming the gap. That is the
@@ -212,7 +248,62 @@ The word "bitwise" does not appear in the specification.
 4. **Arithmetic, where the quantity is small.** `crt`'s `ByteAt` picks a byte
    with `div` and `mod`, and both units split colors into channels the same
    way. Correct, slow, and duplicated — which is the cost this hazard actually
-   imposes.
+   imposed.
+
+#### What has been removed since
+
+**Defences 1, 2 and 3 are gone**, `alg_xor` with them. The measurement that
+decided it, three runs, bare loop subtracted:
+
+| | per call |
+| --- | --- |
+| `alg_xor`, the foreign call | 7.58 µs |
+| native `^` | **1.87 µs** |
+| the hand-rolled `div`/`mod` version | 547 µs |
+
+So the C was not a necessary evil but **four times slower** than the operator
+that replaced it — a foreign call's overhead dwarfing a one-instruction
+operation. Note 3's warning against a pure Algol-24 exclusive or was right
+about the hand-rolled loop and says nothing about a native operator.
+
+It also fixed a fault. `alg_xor` narrowed to 32 bits and sign-extended, so an
+impossible color silently drew a wrong pixel under `XorPut` where `CopyPut`
+already raised — `Buffer.PutInt` refusing anything outside int32. Measured
+before the change:
+
+```console
+CopyPut with a huge color:
+  raised: Integer 4278190079 is too large to use here.
+XorPut with the same color:
+  drew without complaint
+```
+
+`SetColor` is now bounded at `White + Blink`, so such a color is refused at
+the call rather than deep in a draw, and the two write modes agree.
+
+**Defence 4 is gone too**, and with it the last of this entry's cost. `crt`'s
+`ByteAt` is one line:
+
+```algol24
+Exit (B.GetInt ((N div 4) * 4) >> (8 * (N mod 4))) & 255;
+```
+
+where it used to add 2^32 to bring a negative word into range, then build a
+multiplier in a loop and divide by it — because `div` truncates toward zero
+and so is not a shift. **The mask makes the correction unnecessary**: `& 255`
+discards the sign-extended bits, so no `+ 4294967296` survives anywhere in
+either unit.
+
+Seven sites in all: `ByteAt`, `graph`'s `Mix`, its RRGGBBAA pixel path, its
+font colour probe, and `HighVideo`/`LowVideo` in both units.
+
+⚠️ **Equivalence was proven before any of it was changed**, not after. The old
+and new forms were run against each other over the int32 range — all four byte
+positions for `ByteAt`, every colour a bounded setter now admits for the
+channel split, and the signed pixel words including `-2147483648` — at zero
+disagreements. Then the tests: each converted path has a named one, the
+RRGGBBAA path being covered by `An Emoji Glyph Arrives In Its Own Colors`
+rather than by the formula alone.
 
 **This one has a proposal rather than only a defence.**
 `PROPOSAL-BITWISE-OPERATORS.md` asks the language project for the six

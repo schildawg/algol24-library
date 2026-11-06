@@ -1,0 +1,114 @@
+/// A test harness written in Algol-24, needing no mode of the processor.
+///
+/// The language has no reflection that can enumerate declarations, so a test
+/// registers itself: `Register` takes a name and a subprogram, which is an
+/// ordinary value [FUN-011]. That is the one thing JUnit gets from annotations
+/// and this gets from a call, and everything else it needs -- collections,
+/// closures, exceptions, first-class subprograms -- the language already has.
+///
+/// So the report is written ONCE, here, in the language, and runs identically
+/// on every processor that runs Algol-24 rather than once per back end.
+unit harness;
+
+/// Every registered test, as a two-element list of its name and its body.
+var REGISTERED_TESTS := [];
+
+/// What the running test has complained about, empty while it is passing.
+var TEST_FAILURES := [];
+
+/// Records a test under a name. The body is called with no arguments.
+procedure Register (Name : String, Body : Any);
+begin
+    REGISTERED_TESTS.Add ([Name, Body]);
+end
+
+/// Reports a failure against the running test, without ending it.
+///
+/// Declared GATHERING, and that is not a style choice: `Fail` is one of the
+/// three built-ins available only under `--test`, so a unit declaring it forms
+/// an overload set with the built-in [FUN-005]. A gathering declaration
+/// answers every call and leaves the built-in no arity to keep, which is the
+/// same idiom `crt` uses to redirect `Write` to a graphical console.
+procedure Fail (Values : List of Any);
+begin
+    var Said := '';
+    for var Each in Values do Said := Said + Str (Each);
+
+    TEST_FAILURES.Add (Said);
+end
+
+/// Fails unless the two values are equal.
+procedure AssertEqual (Values : List of Any);
+begin
+    if Values.Length <> 2 then
+    begin
+        Fail ('AssertEqual wants two values, given ' + Str (Values.Length));
+        Exit;
+    end
+
+    if Values[0] <> Values[1] then
+        Fail ('Expected ' + Str (Values[0]) + ' but got ' + Str (Values[1]));
+end
+
+/// Fails unless the value is truthy.
+procedure AssertTrue (Values : List of Any);
+begin
+    if Values.Length <> 1 then
+    begin
+        Fail ('AssertTrue wants one value, given ' + Str (Values.Length));
+        Exit;
+    end
+
+    if not Values[0] then Fail ('Expected a true value, got ' + Str (Values[0]));
+end
+
+/// Runs every registered test and answers how many failed.
+///
+/// A test that RAISES fails rather than ending the run, which is what lets one
+/// broken test leave the rest measurable. A runtime error arrives as a String
+/// [STM-020] and the bare arm takes everything else.
+function RunAll () : Integer;
+var
+    Passed : Integer;
+    Failed : Integer;
+
+begin
+    WriteLn ('Running ' + Str (REGISTERED_TESTS.Length) + ' tests...');
+    WriteLn ('');
+
+    Passed := 0;
+    Failed := 0;
+
+    for var Each in REGISTERED_TESTS do
+    begin
+        var Name := Str (Each[0]);
+        var Body := Each[1];
+
+        TEST_FAILURES := [];
+
+        try
+            Body ();
+        except
+            on E : String do Fail ('raised ' + E);
+            Fail ('raised a value that is not a String');
+        end
+
+        if TEST_FAILURES.Length = 0 then
+        begin
+            Passed := Passed + 1;
+            WriteLn ('  PASS  ' + Name);
+        end
+        else
+        begin
+            Failed := Failed + 1;
+            WriteLn ('  FAIL  ' + Name);
+
+            for var Said in TEST_FAILURES do WriteLn ('          ' + Str (Said));
+        end
+    end
+
+    WriteLn ('');
+    WriteLn (Str (Passed) + ' passed, ' + Str (Failed) + ' failed.');
+
+    Exit Failed;
+end

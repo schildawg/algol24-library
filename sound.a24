@@ -190,6 +190,15 @@ end
 /// Neither Turbo Pascal's nor BASIC's -- the PC speaker had one volume, which
 /// was all of it. A value outside the range is clamped rather than refused,
 /// there being no wrong answer to make louder than loudest.
+///
+/// It applies to the tone `Sound` and `Play` produce, not to a sample loaded
+/// by `LoadSound`, which carries its own level.
+///
+/// # Raises
+/// Nothing. Every Integer is a level, the ends being clamped.
+///
+/// # Examples
+/// `Sound And NoSound Turn A Tone On And Off`
 procedure SetVolume (Level : Integer);
 begin
     SoundVolume (Level);

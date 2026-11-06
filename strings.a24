@@ -7,9 +7,13 @@
 /// unit, which is what keeps `S.Trim ()` from meaning something different in
 /// two parts of one program.
 ///
-/// The core already answers `Length`, `Copy`, `Pos`, `Str`, indexing and `+`,
-/// and nothing here re-spells one of them. A unit that restates the core is a
-/// unit that has to be kept in step with it.
+/// The core already answers `Length`, `Copy`, `Pos` (with a start index),
+/// `Str`, `Val`, `ToUpper`, `ToLower`, indexing and `+`, and nothing here
+/// re-spells one of them. A unit that restates the core is a unit that has to
+/// be kept in step with it -- and this one did restate it for a while:
+/// `Upper` and `Lower` carried their own ASCII loops before anyone checked
+/// whether the core had them. They delegate now. Check the built-in table in
+/// the specification before adding a method here.
 ///
 /// Pure Algol-24, with no foreign code at all. That makes it the only unit
 /// besides `testing` that needs nothing of a platform -- no library name in a
@@ -60,12 +64,16 @@ end
 /// S with its ASCII lowercase letters raised, and every other character left
 /// alone.
 ///
-/// ASCII only, and deliberately: Unicode case mapping is a table rather than a
-/// rule, and not even a character-to-character one -- `ß` uppercases to `SS`,
-/// and Turkish `i` to a dotted capital that is not `I`. A routine that handled
-/// some of the exceptions and not others would be harder to reason about than
-/// one that handles none, so accented letters, Greek, Cyrillic and emoji all
-/// come back exactly as they went in.
+/// The core's own `ToUpper` [RT-025] does the work; this exists only to give
+/// it the extension spelling, so `S.Upper ()` composes in a chain where
+/// `ToUpper (S)` would not. Nothing here re-implements it -- an earlier
+/// version of this unit did, which was a duplicate of the core and against
+/// the rule stated above.
+///
+/// ASCII only, which is the core's decision and not this unit's, and the
+/// right one: Unicode case mapping is a table rather than a rule and not even
+/// character-to-character, `ß` uppercasing to `SS`. Accented letters, Greek,
+/// Cyrillic and emoji come back exactly as they went in.
 ///
 /// # Raises
 /// Nothing.
@@ -74,23 +82,14 @@ end
 /// `Upper Raises The ASCII Letters And Leaves The Rest`
 extension function Upper (S : String) : String;
 begin
-    var Out := Buffer ();
-
-    for var C in S do
-    begin
-        var N := Ord (C);
-
-        if N >= 97 and N <= 122 then Out.Append (Char (N - 32));
-        else Out.Append (C);
-    end
-
-    Exit Out.Text;
+    Exit ToUpper (S);
 end
 
 /// S with its ASCII uppercase letters lowered, and every other character left
 /// alone.
 ///
-/// ASCII only, on the same terms as `Upper` and for the same reason.
+/// The core's `ToLower` [RT-025] with the extension spelling, on the same
+/// terms as `Upper`.
 ///
 /// # Raises
 /// Nothing.
@@ -99,17 +98,7 @@ end
 /// `Lower Lowers The ASCII Letters And Leaves The Rest`
 extension function Lower (S : String) : String;
 begin
-    var Out := Buffer ();
-
-    for var C in S do
-    begin
-        var N := Ord (C);
-
-        if N >= 65 and N <= 90 then Out.Append (Char (N + 32));
-        else Out.Append (C);
-    end
-
-    Exit Out.Text;
+    Exit ToLower (S);
 end
 
 // ------------------------------------------------------------------- building
@@ -165,18 +154,21 @@ begin
     if Length (By) = 0 then raise 'Split needs a separator.';
 
     var Parts := List ();
-    var Rest  := S;
-    var At    := Pos (Rest, By);
+    var From  := 0;
+    var At    := Pos (S, By, 0);
 
+    // One pass over S, because `Pos` takes a start index. An earlier version
+    // re-sliced the remainder with `Copy` on every occurrence, which was
+    // quadratic in the length and allocated a string per separator.
     while At >= 0 do
     begin
-        Parts.Add (Copy (Rest, 0, At));
+        Parts.Add (Copy (S, From, At - From));
 
-        Rest := Copy (Rest, At + Length (By), Length (Rest));
-        At   := Pos (Rest, By);
+        From := At + Length (By);
+        At   := Pos (S, By, From);
     end
 
-    Parts.Add (Rest);
+    Parts.Add (Copy (S, From, Length (S)));
 
     Exit Parts;
 end
@@ -300,19 +292,23 @@ begin
     if Length (What) = 0 then raise 'Replace needs something to look for.';
 
     var Out  := Buffer ();
-    var Rest := S;
-    var At   := Pos (Rest, What);
+    var From := 0;
+    var At   := Pos (S, What, 0);
 
+    // One pass over S, on the same grounds as `Split`. Scanning the original
+    // rather than the output is also what keeps the routine terminating: the
+    // replacement is never looked at again, so one containing the thing it
+    // replaces cannot loop.
     while At >= 0 do
     begin
-        Out.Append (Copy (Rest, 0, At));
+        Out.Append (Copy (S, From, At - From));
         Out.Append (With);
 
-        Rest := Copy (Rest, At + Length (What), Length (Rest));
-        At   := Pos (Rest, What);
+        From := At + Length (What);
+        At   := Pos (S, What, From);
     end
 
-    Out.Append (Rest);
+    Out.Append (Copy (S, From, Length (S)));
 
     Exit Out.Text;
 end
@@ -400,6 +396,19 @@ begin
     AssertEqual (Str ('ß'), Upper ('ß'));
     AssertEqual ('Ελληνικά', Upper ('Ελληνικά'));
     AssertEqual ('CAFé', Upper ('café'));
+end
+
+/// The two are the core's own routines with the extension spelling added, so
+/// they must not drift from it. Asserted rather than assumed, because an
+/// earlier version of this unit reimplemented them and nobody noticed.
+test 'Upper And Lower Are The Core Routines With A Method Spelling';
+begin
+    AssertEqual (ToUpper ('mixed CASE 123'), Upper ('mixed CASE 123'));
+    AssertEqual (ToLower ('MIXED case 123'), Lower ('MIXED case 123'));
+
+    // Including above ASCII, where both leave the text alone.
+    AssertEqual (ToUpper ('café Ελληνικά'), Upper ('café Ελληνικά'));
+    AssertEqual (ToLower ('CAFÉ ΕΛΛΗΝΙΚΆ'), Lower ('CAFÉ ΕΛΛΗΝΙΚΆ'));
 end
 
 test 'Upper And Lower Answer The Same Either Spelling';

@@ -17,8 +17,11 @@ were decided, and the record of why is worth having.
   and `Replace` were added afterwards, on the finding below.
 - **No C**, as planned, so the unit is portable as written.
 - **ASCII-only case**, with everything else unchanged — the recommendation
-  below, taken. It is asserted and not merely documented: a test checks
-  `Upper ('café')` answers `CAFé`.
+  below, taken. ⚠️ **But the analysis below missed that the core already had
+  `ToUpper`/`ToLower` [RT-025]**, with exactly these semantics, so `Upper` and
+  `Lower` shipped as duplicates of the core and were corrected afterwards to
+  delegate to it. They are kept only for the extension spelling. The lesson is
+  in `CLAUDE.md`: read the built-in table before proposing a method.
 - **`Repeat` takes a `String`**, and a Char is accepted where one is declared.
   Measured before choosing, which is what avoided an arity-identical overload
   pair and the L-4 warning that would have come with it.
