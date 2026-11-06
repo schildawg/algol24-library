@@ -16,6 +16,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | --- | --- | --- |
 | [`Abs`](#abs) | function | `math` |
 | [`Aliases`](#aliases) | convention | `graph` and `crt` |
+| [`AppendAll`](#readall) | procedure | `file` |
 | [`AppendFile`](#appendfile) | class | `file` |
 | [`Arc`](#arc) | procedure, alias | `graph` |
 | [`ArcCoords`](#arccoords) | class | `graph` |
@@ -24,47 +25,59 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`At` `UtcAt`](#at) | functions | `time` |
 | [`Bar`](#bar) | procedure, alias | `graph` |
 | [`Bar3D`](#bar3d) | procedure, alias | `graph` |
+| [`Black` … `White`](#colors) | constants | `graph` and `crt` |
 | [`Blink`](#blink) | constant | `graph` and `crt` |
 | [`CellWidth` `CellHeight`](#cellwidth) | functions | `graph` |
 | [`Circle`](#circle) | procedure, alias | `graph` |
 | [`Clear`](#clear) | method | `graph` and `crt` |
 | [`ClearViewPort`](#clearviewport) | procedure, alias | `graph` |
+| [`CloseCrt`](#initcrt) | procedure | `crt` |
 | [`CloseGraph`](#closegraph) | procedure | `graph` |
+| [`CloseSound`](#loadsound) | procedure | `sound` |
 | [`ClrEol`](#clreol) | procedure | `graph` and `crt` |
 | [`ClrScr`](#clrscr) | procedure | `graph` and `crt` |
-| [`Black` … `White`](#colors) | constants | `graph` and `crt` |
+| [`CopyFile`](#readall) | procedure | `file` |
+| [`CopyPut` … `TransparentPut`](#putmodes) | constants | `graph` |
 | [`Cos`](#cos) | function | `math` |
 | [`Crt`](#crt) | unit | `crt` |
 | [`DateTime`](#datetime) | class | `time` |
 | [`Delay`](#delay) | procedure | `crt` and `graph` |
 | [`Delete`](#delete) | extension function | `strings` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
-| [`DiskFree` `DiskSize`](#diskfree) | functions | `dos` |
 | [`Directory`](#directory) | class | `file` |
+| [`DisableMouse`](#enablemouse) | procedure | `graph` and `crt` |
+| [`DiskFree` `DiskSize`](#diskfree) | functions | `dos` |
 | [`DrawPoly`](#drawpoly) | procedure, alias | `graph` |
 | [`Ellipse`](#ellipse) | procedure, alias | `graph` |
 | [`EnableMouse`](#enablemouse) | procedures and functions | `graph` and `crt` |
 | [`Entries`](#entries) | function | `file` |
+| [`Environment` `EnvName` `EnvValue`](#environment) | functions | `dos` |
+| [`Erase`](#readall) | procedure | `file` |
 | [`Event`](#event) | class | `graph` and `crt` |
 | [`EventKinds`](#eventkinds) | constants | `graph` and `crt` |
-| [`Environment` `EnvName` `EnvValue`](#environment) | functions | `dos` |
 | [`Exec`](#exec) | function | `dos` |
+| [`Exists`](#readall) | function | `file` |
 | [`Exp`](#exp) | function | `math` |
+| [`FileSize`](#readall) | function | `file` |
 | [`FillEllipse`](#fillellipse) | procedure, alias | `graph` |
 | [`FillPoly`](#fillpoly) | procedure, alias | `graph` |
 | [`FillSettings` `LineSettings`](#fillsettings) | classes | `graph` |
 | [`FillStyles`](#fillstyles) | constants | `graph` |
 | [`FloodFill`](#floodfill) | procedure, alias | `graph` |
 | [`Frac`](#frac) | function | `math` |
+| [`FreeSound`](#loadsound) | procedure | `sound` |
 | [`GetArcCoords`](#getarccoords) | function, alias | `graph` |
 | [`GetAspectRatio`](#getaspectratio) | function | `graph` |
 | [`GetColor`](#getcolor) | function, alias | `graph` |
 | [`GetEnv` `HasEnv`](#getenv) | functions | `dos` |
+| [`GetFillColor`](#setfillstyle) | function | `graph` |
 | [`GetFillPattern`](#getfillpattern) | function, alias | `graph` |
 | [`GetFillSettings` `GetLineSettings`](#getfillsettings) | functions, aliases | `graph` |
+| [`GetFillStyle`](#setfillstyle) | function | `graph` |
 | [`GetImage` `PutImage`](#getimage) | function and procedure, aliases | `graph` |
 | [`GetMaxX`](#getmaxx) | function | `graph` |
 | [`GetMaxY`](#getmaxy) | function | `graph` |
+| [`GetPalette`](#setpalette) | method | `graph` and `crt` |
 | [`GetPixel`](#getpixel) | function, alias | `graph` |
 | [`GetTextSettings` `GetViewSettings`](#gettextsettings) | functions, aliases | `graph` |
 | [`GetX`](#getx) | function, alias | `graph` |
@@ -82,15 +95,16 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`InstallUserFont`](#installuserfont) | procedure | `graph` |
 | [`Int`](#int) | function | `math` |
 | [`IsDaylightSaving`](#isdaylightsaving) | function | `time` |
+| [`IsDirectory`](#readall) | function | `file` |
 | [`IsInfinite`](#isinfinite) | function | `math` |
 | [`IsNaN`](#isnan) | function | `math` |
 | [`IsTerminal`](#isterminal) | function | `crt` |
 | [`Join`](#join) | extension function | `strings` |
 | [`KeyPressed`](#keypressed) | function | `graph` and `crt` |
 | [`KeyUp` … `KeyClose`](#keys) | constants | `graph` and `crt` |
+| [`LeftText` … `TopText`](#textjustify) | constants | `graph` |
 | [`Line`](#line) | procedure, alias | `graph` |
 | [`LineRel`](#linerel) | procedure, alias | `graph` |
-| [`SolidLn` … `ThickWidth`](#linestyles) | constants | `graph` |
 | [`LineTo`](#lineto) | procedure, alias | `graph` |
 | [`Ln`](#ln) | function | `math` |
 | [`LoadSound`](#loadsound) | functions and procedures | `sound` |
@@ -98,6 +112,10 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`LowVideo`](#lowvideo) | procedure | `graph` and `crt` |
 | [`Max`](#max) | function | `math` |
 | [`Min`](#min) | function | `math` |
+| [`MouseButtons`](#enablemouse) | function | `graph` and `crt` |
+| [`MouseEnabled`](#enablemouse) | function | `graph` and `crt` |
+| [`MouseX`](#enablemouse) | function | `graph` and `crt` |
+| [`MouseY`](#enablemouse) | function | `graph` and `crt` |
 | [`MoveTo`](#moveto) | procedure, alias | `graph` and `crt` |
 | [`NaN`](#nan) | constant | `math` |
 | [`NormVideo`](#normvideo) | procedure | `graph` and `crt` |
@@ -106,12 +124,14 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`OutFile`](#outfile) | class | `file` |
 | [`OutText`](#outtext) | procedure | `graph` |
 | [`OutTextXY`](#outtextxy) | procedure | `graph` |
+| [`PathParts`](#splitpath) | class | `file` |
 | [`PenRel`](#penrel) | procedure, alias | `graph` |
 | [`PenTo`](#pento) | procedure, alias | `graph` |
 | [`Pi`](#pi) | constant | `math` |
 | [`PieSlice`](#pieslice) | procedure, alias | `graph` |
 | [`Play`](#play) | procedure and function | `sound` |
-| [`CopyPut` … `TransparentPut`](#putmodes) | constants | `graph` |
+| [`PlaySound`](#loadsound) | function | `sound` |
+| [`PollEvent`](#readevent) | function | `graph` and `crt` |
 | [`PutPixel`](#putpixel) | procedure, alias | `graph` |
 | [`Random`](#random) | function | `random` |
 | [`RandomInteger`](#randominteger) | function | `random` |
@@ -123,9 +143,11 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`ReadLines`](#readlines) | function and procedure | `file` |
 | [`RecordFile`](#recordfile) | class | `file` |
 | [`Rectangle`](#rectangle) | procedure, alias | `graph` |
+| [`Rename`](#readall) | procedure | `file` |
 | [`Repeat`](#repeat) | extension function | `strings` |
 | [`Replace`](#replace) | extension function | `strings` |
 | [`Round`](#round) | function | `math` |
+| [`Score`](#play) | function | `sound` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
 | [`Sector`](#sector) | procedure, alias | `graph` |
@@ -133,6 +155,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetBkColor` `GetBkColor`](#setbkcolor) | procedures, aliases | `graph` |
 | [`SetBlinkRate`](#setblinkrate) | procedure | `graph` |
 | [`SetColor`](#setcolor) | procedure, alias | `graph` |
+| [`SetFillPattern`](#setfillstyle) | procedure | `graph` |
 | [`SetFillStyle`](#setfillstyle) | procedures, aliases | `graph` |
 | [`SetLineStyle`](#setlinestyle) | procedure, alias | `graph` |
 | [`SetPalette`](#setpalette) | procedures | `graph` and `crt` |
@@ -140,20 +163,24 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`SetTextJustify`](#settextjustify) | procedure, alias | `graph` |
 | [`SetTextStyle`](#settextstyle) | method | `graph` |
 | [`SetUserCharSize`](#setusercharsize) | procedure, alias | `graph` |
+| [`SetVolume`](#setvolume) | procedure | `sound` |
 | [`SetWriteMode` `GetWriteMode`](#setwritemode) | procedures, aliases | `graph` |
 | [`Show`](#show) | procedure, alias | `graph` and `crt` |
 | [`Sin`](#sin) | function | `math` |
+| [`SolidLn` … `ThickWidth`](#linestyles) | constants | `graph` |
 | [`Sound`](#sound) | procedures | `sound` |
 | [`SoundAvailable`](#soundavailable) | function | `sound` |
+| [`SoundLength`](#loadsound) | function | `sound` |
+| [`SoundPlaying`](#loadsound) | function | `sound` |
 | [`Split`](#split) | extension function | `strings` |
 | [`SplitPath` `FullPath`](#splitpath) | functions | `file` |
 | [`Sqr`](#sqr) | function | `math` |
 | [`Sqrt`](#sqrt) | function | `math` |
+| [`StopSounds`](#loadsound) | procedure | `sound` |
 | [`SurfaceAt`](#surfaceat) | function | `graph` and `crt` |
 | [`TextBackground`](#textbackground) | procedure | `graph` and `crt` |
 | [`TextColor`](#textcolor) | procedure | `graph` and `crt` |
 | [`TextCols`](#textcols) | function | `graph` and `crt` |
-| [`LeftText` … `TopText`](#textjustify) | constants | `graph` |
 | [`TextMode`](#textmode) | procedure | `graph` |
 | [`TextRows`](#textrows) | function | `graph` and `crt` |
 | [`TextSettings` `ViewSettings`](#textsettings) | classes | `graph` |
@@ -167,8 +194,9 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`WhereY`](#wherey) | function | `graph` and `crt` |
 | [`Window`](#window) | class | `graph` and `crt` |
 | [`Write` `WriteLn`](#write) | procedures | `graph` and `crt` |
-
----
+| [`WriteAll`](#readall) | procedure | `file` |
+| [`WriteLines`](#readlines) | procedure | `file` |
+| [`Written`](#delline) | function | `graph` |
 
 ## Abs
 
@@ -319,7 +347,7 @@ appending.
 
 **See also**
 
-[`OutFile`](#outfile), [`AppendAll`](#appendall), [`InFile`](#infile)
+[`OutFile`](#outfile), [`AppendAll`](#readall), [`InFile`](#infile)
 
 **Example**
 
@@ -5925,7 +5953,7 @@ procedure Close ()                              flushed, released, idempotent
 
 The writing half of the streaming surface. Reach for it when output is produced
 as the program runs rather than assembled and handed over whole, which is what
-[`WriteAll`](#writeall) is for.
+[`WriteAll`](#readall) is for.
 
 Opening **empties** the file — Turbo Pascal's `Rewrite` rather than its
 `Append`. To keep what is there, use [`AppendFile`](#appendfile).
@@ -5939,7 +5967,7 @@ with nothing. `WriteLine` is spelled out for the same reason: nobody reading it
 should have to wonder which unit's `WriteLn` answered.
 
 `WriteLine`'s terminator is `#10` alone, never a carriage return pair, which is
-what [`WriteLines`](#writelines) also writes — so a file written here reads back
+what [`WriteLines`](#readlines) also writes — so a file written here reads back
 the same through [`InFile`](#infile) or [`ReadLines`](#readlines) on any
 platform.
 
@@ -5970,8 +5998,8 @@ writing.
 
 **See also**
 
-[`AppendFile`](#appendfile), [`InFile`](#infile), [`WriteAll`](#writeall),
-[`WriteLines`](#writelines)
+[`AppendFile`](#appendfile), [`InFile`](#infile), [`WriteAll`](#readall),
+[`WriteLines`](#readlines)
 
 **Example**
 
@@ -7220,7 +7248,7 @@ Raises `RecordFile: a record must have a positive size.`,
 
 **See also**
 
-[`InFile`](#infile), [`OutFile`](#outfile), [`FileSize`](#filesize)
+[`InFile`](#infile), [`OutFile`](#outfile), [`FileSize`](#readall)
 
 **Example**
 
@@ -8822,6 +8850,43 @@ unit's tests assert a tune's timing in silence, the same bargain
 The one exception is [`PlaySound`](#loadsound), which answers False because
 there is no voice for it to sound on. A program that checks that return should
 ask this first rather than treating it as a failure.
+
+### SetVolume
+
+How loud the tone is, from 0 to 255.
+
+```algol24
+procedure SetVolume (Level : Integer);
+```
+
+Neither Turbo Pascal's nor BASIC's — the PC speaker had one volume, which was
+all of it. A value outside the range is **clamped rather than refused**, there
+being no wrong answer to make louder than loudest.
+
+⚠️ **It applies to the tone, not to a sample.** A sound effect started by
+[`PlaySound`](#loadsound) carries its own level, so `SetVolume` does not touch
+one.
+
+Raises nothing — every Integer is a level.
+
+```algol24
+uses sound;
+uses crt;
+
+SetVolume (64);                 // a quarter of the way up
+Sound (440);
+Delay (50);
+NoSound ();
+
+SetVolume (900);                // clamped to 255, not refused
+
+// crt shadows WriteLn, so the console is reached through System.
+System.WriteLn ('volume accepted');
+```
+
+```console
+volume accepted
+```
 
 **See also**
 
