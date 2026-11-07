@@ -1,7 +1,7 @@
 # Proposal: Number Formatting
 
 **From:** the `algol24-library` project, as a user of the language
-**Status:** proposal, for the language project to accept, refuse or reshape
+**Status:** **ACCEPTED and shipped in 0.1.6**, as `Str (X, Decimals)` and `Str (X, Width, Decimals)`. Verified row by row against the tables below, and both open questions were resolved the way this document suggested: `Str (2.5, 0)` is `2` with no trailing point, and an Integer with decimals is refused (`Str with decimals takes a Double.`). `NaN` and `Infinity` pass through unpadded. The original ask follows, with one correction noted at the `1.0E16` rows -- this document first claimed that renders as `10000000000000002.00`, which was wrong: 10^16 is exactly representable.
 **Concerns:** two overloads of an existing built-in — no new syntax, no change
 to types or to the numeric model
 

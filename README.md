@@ -42,7 +42,7 @@ is what it printed.
 
 ## Building and testing
 
-Needs `algc` **0.1.5 or newer** on the path (`brew install algol24`), a C
+Needs `algc` **0.1.6 or newer** on the path (`brew install algol24`), a C
 compiler, and SDL2 for `graph` and `sound` (`brew install sdl2`). The version floor is
 `strings`, which uses extension functions that an earlier compiler cannot
 parse. The test run opens no windows and makes no noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`

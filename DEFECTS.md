@@ -24,10 +24,13 @@ longer the narrow remainder it was.
 
 ⚠️ **0.1.6 added a THIRD trigger**, and a common one: handing an Integer to
 `and` or `or` warns, naming the new bitwise operators, and that warning goes
-to stdout like the others. Measured 2026-10-28 — `WriteLn (6 and 3)` prints
-the warning on **stdout** and `3` after it, with stderr empty. The warning
-itself is a good addition and closes most of H-3; its stream is this defect.
-No unit here triggers it, checked by compiling each of the ten.
+to stdout like the others. The warning itself is a good addition and closes
+most of H-3; its stream is this defect. No unit here triggers it, checked by
+compiling each of the ten.
+
+**Still open on 0.2.4**, re-verified by running `WriteLn (6 and 3)` with the
+two streams captured separately: the warning arrives on **stdout** with `3`
+after it, and **stderr is empty**. Unchanged across 0.1.5, 0.1.6 and 0.2.4.
 
 An overload the compiler cannot settle statically still warns — correctly,
 since [ERR-010]'s dynamic selection really does happen when argument *types*
@@ -99,7 +102,7 @@ diagnostic on the wrong stream.
 
 The library's defence: keep an extension's name clear of the members of its own
 receiver type, and audit rather than discover. Done for `strings` and recorded
-in `PLAN-STRINGS.md`; a consumer importing `strings` beside `graph`, and using
+in `finished/PLAN-STRINGS.md`; a consumer importing `strings` beside `graph`, and using
 `List`, `Map` and `Buffer` members throughout, prints only its own output.
 
 That is a defence against a symptom, which is why the entry stays open. A
@@ -206,7 +209,7 @@ The word "bitwise" did not appear in the specification.
 
 #### What 0.1.6 changed, measured
 
-`PROPOSAL-BITWISE-OPERATORS.md` was accepted. Verified on 0.1.6:
+`finished/PROPOSAL-BITWISE-OPERATORS.md` was accepted. Verified on 0.1.6:
 
 | Written | Answers |
 | --- | --- |
@@ -306,7 +309,7 @@ RRGGBBAA path being covered by `An Emoji Glyph Arrives In Its Own Colors`
 rather than by the formula alone.
 
 **This one has a proposal rather than only a defence.**
-`PROPOSAL-BITWISE-OPERATORS.md` asks the language project for the six
+`finished/PROPOSAL-BITWISE-OPERATORS.md` asks the language project for the six
 operations over the unbounded Integer, where they can be total in a way no
 library can manage: infinite two's complement needs no width, so `not 0` is
 `-1` and `1 shl 70` grows by [EXP-007] rather than wrapping.
@@ -316,6 +319,18 @@ library can manage: infinite two's complement needs no width, so `not 0` is
 **Status:** hazard, not a defect. Recorded 2026-09-05 while building `file`.
 The library's defence is below; whether the language wants to say anything
 about it is the compiler project's call.
+
+**Still present on 0.2.4**, re-verified rather than assumed: a C function that
+reuses one static buffer was declared to answer a String, called twice, and the
+String held from the first call changed under the second —
+
+```console
+held: alpha
+after a second call, the first String is: omega
+```
+
+— so the buffer-and-count discipline this library keeps is still load-bearing
+and not a precaution against something since fixed.
 
 A foreign function declared to answer a `String` hands back a `const char *`,
 and the String that arrives **points at the C's own memory**. It is not a

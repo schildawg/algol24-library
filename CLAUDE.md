@@ -447,6 +447,20 @@ the library's own C without it.
 Run Code is interpreted only, deliberately; the extension's own **Run File
 (Compiled)** and **Run File Through Both Processors** cover the rest.
 
+## Finished documents
+
+⚠️ **A plan or proposal whose work is done moves to `finished/`, and is not
+deleted.** Each records *why* a thing is the way it is, and that reasoning
+outlives the decision — more than one has been re-read to answer "was this
+argued, or assumed?" `finished/README.md` says what each asked for and what
+became of it.
+
+Three of the five were asks made to the language project as a user of it, and
+all three were accepted — extension functions in 0.1.5, bitwise operators and
+number formatting in 0.1.6. ⚠️ **A proposal is not a record of what shipped:**
+each says what this library wanted, the compiler decided, and where the two
+differ the document says so at its top.
+
 ## Status
 
 | Unit | Members | Tests | Reference |
@@ -534,7 +548,7 @@ runs on, so their honest doc comment would read "raises unless you are root".
 question they really asked, whether Ctrl-C interrupts the program or arrives as
 a key, is termios' `ISIG` and so `crt`'s business if it is anyone's. The
 calendar went to `time` because it is its own subject; `dos` keeps what the host
-offers beyond files. `PROPOSAL-BITWISE-OPERATORS.md` records the rest of that
+offers beyond files. `finished/PROPOSAL-BITWISE-OPERATORS.md` records the rest of that
 analysis.
 
 `time` notes: the gap is the **time zone**, not the arithmetic -- leap years are
@@ -559,9 +573,12 @@ its number, which is unambiguous because an exit code cannot reach that far.
 unlike `file` it does not build anywhere; Windows would need
 `GetDiskFreeSpaceEx` and `CreateProcess` behind the same three functions.
 
-⚠️ **`strings` needs 0.1.5, and so therefore does the whole library.** It is
-the first unit to use `extension` [FUN-015], which 0.1.4 cannot parse. Before
-it there was no version floor at all; now `./test.sh` fails on anything older.
+⚠️ **The library needs compiler 0.1.6 or newer.** `strings` set the first
+floor at 0.1.5, being the first unit to use `extension` [FUN-015] which 0.1.4
+cannot parse. 0.1.6 raised it: `Str (X, Decimals)`, the bitwise operators and
+`Buffer.PutDouble` all appear in units and in `REFERENCE.md` examples now, so
+`./test.sh` fails on anything older. Verified working on **0.2.4**, which is
+current.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
 so the only one besides it that is portable as written — nothing for a
@@ -600,7 +617,7 @@ and non-transitive [MOD-015], so a unit importing `strings` does not pass
 that moves every `--test` count. Three things would reopen it: a
 consumer-visible benefit, a reason the dependency earns its cost, or a unit
 whose own code cannot be stated clearly without it. Tidier internals alone is
-not one of them, so do not make that change as cleanup. `PLAN-STRINGS.md`
+not one of them, so do not make that change as cleanup. `finished/PLAN-STRINGS.md`
 carries the reasoning.
 
 ⚠️ **`alg_` is the runtime's prefix, and a common noun after it will
@@ -651,11 +668,12 @@ handing back a borrowed pointer"; that pattern is now used three times here
 (`ReadAll`, `dos.GetEnv`, `graph`'s SDL error reader), so the obstacle is
 gone. Every other runtime makes the stream the primitive and the whole-file
 read the sugar; this unit has it the other way round.
-`SKETCH-STREAMING.md` has the whole surface, of which groups 1 to 3 -- the
-handle, reading and writing -- are now built. Groups 4 and 5 are not: `Seek`
-and `Position` carry the question of what seeking a pipe should do, and
-`Buffer` still has no `PutDouble`, so a record holding a price has no
-encoding. Those were left for a separate decision rather than guessed at.
+`finished/SKETCH-STREAMING.md` has the whole surface and **all five groups are
+built**: the handle, reading, writing, `Position`/`Seek`/`Size`, and
+`RecordFile` on top of them. Group 5 was `Buffer.PutDouble`, which this
+library declined to implement itself so that the representation could be
+specified -- it shipped in the core and is what lets a record hold a
+balance.
 
 ⚠️ **The streaming classes have NO free-function aliases, and that breaks
 the house convention deliberately.** Nearly every surface verb in `graph` and

@@ -3,7 +3,7 @@
 **Status:** **built**, 2026-10-24. `strings.a24` carries `Trim`, `Upper`,
 `Lower`, `Repeat`, `Split`, `Join`, `Delete`, `Insert` and `Replace` — with 47
 tests and nine `REFERENCE.md` entries. Written against `algc 0.1.5`, which
-brought the extension functions `PROPOSAL-EXTENSION-FUNCTIONS.md` asked for.
+brought the extension functions `finished/PROPOSAL-EXTENSION-FUNCTIONS.md` asked for.
 
 Everything measured below was measured by running the language, not by reading
 it. The plan is kept rather than deleted because the two decisions it framed
