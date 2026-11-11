@@ -461,6 +461,25 @@ number formatting in 0.1.6. ⚠️ **A proposal is not a record of what shipped:
 each says what this library wanted, the compiler decided, and where the two
 differ the document says so at its top.
 
+Two live documents sit in the root rather than in `finished/`:
+
+- `PROPOSAL-REFLECTION.md` asks the core for **one thing** — a way to list a
+  class's field table, which `alg_class_field` builds and nothing reads. Access
+  by name already works four ways, so enumeration is the only hole. Read-only
+  deliberately; the setting side is refused rather than deferred.
+- `REPORT-CONCURRENCY.md` answers the core's `PROPOSAL-CONCURRENCY.md` and
+  **asks for nothing.** It agrees with that document's conclusion and corrects
+  four of its supporting claims — chiefly that subprogram re-entry works today
+  via `ParamStr (0)` and argv dispatch, and that the 27.6 s figure which
+  deferred it is the interpreted start-up rather than the spawn cost, which
+  measures 0.8 ms.
+
+⚠️ **`fork` is hazardous in this library and the report says so.** The eight
+shims hold 25 static objects, and a forked child inherits SDL handles, `FILE`
+pointers, the saved termios mode and the `drand48` state — measured, parent and
+child then produce identical random streams in silence. Any concurrency work
+here spawns a **fresh program**, never forks.
+
 ## Status
 
 | Unit | Members | Tests | Reference |
