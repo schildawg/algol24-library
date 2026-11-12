@@ -14,7 +14,57 @@ Three kinds of thing, and the distinction matters:
 
 ## Defects
 
-*None open.*
+### L-5 — `System.WriteLn` takes one argument compiled and any number interpreted
+
+**Status:** open, found 2026-11-12 on 0.3.0 while porting a star chart into
+`examples/stars.a24`.
+
+The qualified spelling of a variadic built-in refuses more than one argument
+in the C back end, and runs interpreted:
+
+```console
+$ algc q.a24                          # System.WriteLn ('a', 42, 'b');
+a42b
+$ algc --compile --out=out q.a24
+Uncaught: A call to 'System.WriteLn' is not supported by the C back end yet.
+```
+
+Measured on 0.3.0, the boundary being exactly one argument:
+
+| | interpreted | compiled |
+| --- | --- | --- |
+| `System.WriteLn ()` | ✓ | ✓ |
+| `System.WriteLn ('a')` | ✓ | ✓ |
+| `System.WriteLn ('a', 'b')` | ✓ | **refused** |
+| `System.WriteLn ('a', 42, 'b')` | ✓ | **refused** |
+| `System.Write ('a', 'b')` | ✓ | **refused** |
+| `WriteLn ('a', 'b')` — unqualified | ✓ | ✓ |
+
+**The specification says both halves of this should work.** [RT-001] says
+`Write` and `WriteLn` "take any number of values" and so "can never fail this
+way at all", and [MOD-011] says the qualified spelling always reaches the
+built-in — "which is what makes taking a name over safe: nothing is put out of
+reach." The interpreter obeys both. The C back end puts exactly that out of
+reach, so the processors disagree and the interpreter is the one matching the
+specification. The conformance corpus has the construct already:
+`0187-declaring-a-builtins-name.a24` calls `System.Write` and
+`System.WriteLn ()`, but never with two arguments, which is why it passes.
+
+⚠️ **It lands on `graph` programs specifically, and that is not a
+coincidence.** `graph` shadows `Write` and `WriteLn`, so `CLAUDE.md` requires a
+graph program to reach the console through `System.WriteLn` — which makes this
+the one spelling such a program has, and the one the compiler refuses. A
+`graph` program that reports more than a single value to the console therefore
+runs interpreted and cannot be compiled at all. `graph`'s *own* variadic
+`WriteLn ('a', 'b')` compiles fine; it is a unit-declared subprogram rather
+than a built-in, so only the console route is affected.
+
+**The library is not working around this silently.** `examples/stars.a24`
+builds its one console line by concatenation —
+`System.WriteLn (Str (A) + ' … ' + Str (B))` — because a single argument
+compiles, and says so in a comment naming this entry. Nothing else here calls
+the qualified spelling with more than one argument; checked across all ten
+units and every example.
 
 ### L-4 — a warning goes to stdout, where it mixes with the program's output
 

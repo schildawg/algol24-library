@@ -112,6 +112,24 @@ of them want a window and a person:
 | `ide-crt.a24` | the same screen on a terminal — the celled half transfers almost verbatim, the two drawn panels cannot, `crt` having no pixels |
 | `piano.a24` | where `graph` meets `sound` — an octave of keys, Ode to Joy, each key lit as it sounds |
 | `jukebox.a24` | where the mouse pays off: each title is a ViewPort, so a click is `E.Surface = Titles[I]` rather than arithmetic |
+| `stars.a24` | 3143 real stars and 173 constellation segments, turning a degree a frame — the first example to read a data file, and the only one worth compiling |
+
+`stars.a24` is a port of a Python program that drew with `turtle` and read
+coordinates with astropy's `SkyCoord`. Its data is `stars.csv` (the Yale Bright
+Star catalog, trimmed) and `lines.csv`. Two things about it are worth knowing:
+
+- **It wants compiling.** Measured on 0.3.0: 0.18 s to load and **112 frames a
+  second** compiled, against 3.3 s to load and **0.50** interpreted. Every
+  other program here is fine interpreted; this one lays down 1813 stars a frame
+  and is the first here to be a slideshow without `algc --compile`. Compiled it
+  is now bounded by `FrameDelay` rather than by drawing.
+- **`SkyCoord` turned out to be the easy part.** The catalog writes coordinates
+  sexagesimally — `6:45:8.9`, `-16:42:58` — and all the program wanted was
+  degrees, which is two short functions. The trap is the *sign*: 39 of these
+  stars have declinations like `-0:17:57`, Mintaka in Orion's belt among them,
+  where the degrees field parses to a zero that has lost which hemisphere it
+  was in. Reading the sign from the text rather than the number is the whole
+  difficulty, and it is four lines.
 
 Three of them have caught what the test suite could not, each correct against
 every test and wrong in use: `ide.a24` found the escape-sequence race in `crt`'s

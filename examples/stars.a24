@@ -1,0 +1,362 @@
+/// A rotating star chart: the northern sky in polar projection, the pole at
+/// the center and the celestial equator four pixels to the degree out, turning
+/// one degree a frame with the constellation figures drawn in.
+///
+/// Ported from a Python program that drew with `turtle` and read the catalog's
+/// sexagesimal coordinates with astropy's `SkyCoord`. Neither has an
+/// equivalent here and neither needed one: `graph` draws, and `RaDegrees` and
+/// `DecDegrees` below are the whole of what `SkyCoord` was being asked for.
+///
+/// The catalog is 3143 of the Yale Bright Star stars, `examples/stars.csv`,
+/// and the 179 figure segments are `examples/lines.csv`.
+///
+/// Run it from the repository root:
+///
+///     algc examples/stars.a24
+///
+/// Esc or closing the window finishes. It is worth compiling -- see the note
+/// on drawing cost above `Dot`.
+
+uses graph;         // the window, the pen, the keys
+uses file;          // Exists, ReadLines
+uses strings;       // Split
+uses math;          // Abs, Cos, Pi, Round, Sin
+
+// The projection. A declination of +90 lands on the center and the equator
+// `PixelsPerDegree` * 90 out, so a degree of declination is the same number of
+// pixels everywhere -- which is what makes it azimuthal *equidistant*, and
+// what makes the constellations near the pole look as stretched as they do.
+const PixelsPerDegree := 4.0;
+
+// The chart's southern edge. The original drew the northern hemisphere alone;
+// move this to -30.0 and the window grows to suit, which brings Orion onto the
+// chart. Its belt and Rigel sit just south of the equator, so at 0.0 the most
+// recognizable constellation in the sky is missing its middle.
+const SouthLimit := 0.0;
+
+const Background := 0x0a081f;       // the night the original chose
+const FigureInk  := 0x9ea8be;       // and the gray it joined stars with
+
+const DegreesPerFrame := 1.0;
+const FrameDelay      := 30;        // milliseconds
+
+var ChartRadius := Round ((90.0 - SouthLimit) * PixelsPerDegree);
+var Span        := 2 * ChartRadius + 20;
+var CenterX     := Span div 2;
+var CenterY     := Span div 2;
+
+var Sky := nil;
+
+
+/// One star, with its place on the chart worked out for a chart angle of zero.
+///
+/// Turning the chart is then a rotation of that point rather than a fresh
+/// projection, so a frame costs two calls to libm rather than two per star.
+class Star;
+var
+    Constellation : String;
+    Designator    : String;         // 'alpha', 'beta', 'alpha1', or a number
+    X             : Double;         // chart coordinates at angle zero, the
+    Y             : Double;         //   origin central and +Y toward the top
+    Ink           : Integer;        // from the B-V color index
+    Size          : Integer;        // the dot's radius in pixels
+    Charted       : Boolean;        // False for a star south of the edge
+
+begin
+    constructor Init (Constellation : String, Designator : String,
+                      X : Double, Y : Double, Ink : Integer,
+                      Size : Integer, Charted : Boolean);
+    begin
+        this.Constellation := Constellation;
+        this.Designator    := Designator;
+        this.X             := X;
+        this.Y             := Y;
+        this.Ink           := Ink;
+        this.Size          := Size;
+        this.Charted       := Charted;
+    end
+end
+
+
+/// A segment of a constellation figure, resolved to the two stars it joins.
+///
+/// Resolving at load time rather than per frame is the one change of substance
+/// from the original, which searched the whole catalog for each endpoint of
+/// each segment on every frame -- 179 segments against 3143 stars, twice, or
+/// about 1.1 million comparisons a frame to draw 179 lines.
+class Figure;
+var
+    A : Star;
+    B : Star;
+
+begin
+    constructor Init (A : Star, B : Star);
+    begin
+        this.A := A;
+        this.B := B;
+    end
+end
+
+
+/// Right ascension, written hours:minutes:seconds, as degrees.
+///
+/// An hour of right ascension is fifteen degrees, the sky turning once in
+/// twenty-four. This is half of what `SkyCoord` was doing for the original.
+function RaDegrees (Text : String) : Double;
+begin
+    var P := Split (Text, ':');
+
+    Exit (Val (P[0]) + Val (P[1]) / 60.0 + Val (P[2]) / 3600.0) * 15.0;
+end
+
+
+/// Declination, written degrees:arcminutes:arcseconds, as degrees.
+///
+/// The sign is read from the text and not from the degrees, because it belongs
+/// to the whole measure rather than to its first field. Thirty-nine stars in
+/// this catalog are written '-0:17:57' and the like -- Mintaka, the westmost of
+/// Orion's belt, among them -- where the degrees parse to a zero that has
+/// forgotten which side of the equator it was on. Reading the sign from the
+/// number puts all thirty-nine in the wrong hemisphere.
+function DecDegrees (Text : String) : Double;
+begin
+    var P := Split (Text, ':');
+    var D := Abs (Val (P[0])) + Val (P[1]) / 60.0 + Val (P[2]) / 3600.0;
+
+    if Text[0] = '-' then Exit -D;
+
+    Exit D;
+end
+
+
+/// A star's color from its B-V index, which is a measure of its temperature:
+/// negative is hot and blue, positive is cool and red.
+function StarInk (BV : Double) : Integer;
+begin
+    if BV < -0.30 then Exit 0xd4deff;       // blue
+    if BV < -0.10 then Exit 0xadd8e6;       // blue-white
+    if BV <  0.10 then Exit 0xffffff;       // white
+    if BV <  0.30 then Exit 0xeaecff;       // yellow-white
+    if BV <  0.60 then Exit 0xf9f5ff;       // yellow
+    if BV <  1.00 then Exit 0xfff4ea;       // orange
+    if BV <  1.50 then Exit 0xfed7a2;       // red
+    if BV <  2.00 then Exit 0xffd8a5;       // deep red
+
+    Exit 0xffa500;                          // very red
+end
+
+
+/// The data, which sits beside this program rather than in the root.
+function DataPath (Name : String) : String;
+begin
+    if Exists (Name) then Exit Name;
+    if Exists ('examples/' + Name) then Exit 'examples/' + Name;
+
+    raise 'Cannot find ''' + Name + '''; run this from the repository root.';
+end
+
+
+/// The catalog, projected.
+///
+/// Fields are the identifier, constellation, Flamsteed number, designator,
+/// right ascension, declination, galactic longitude and latitude, visual
+/// magnitude, B-V index, spectral type and parallax. Only six are wanted, and
+/// all six precede the spectral type -- which matters, because one star's type
+/// is written 'S5,7e' and so splits into two fields of its own, shifting
+/// everything after it by one.
+function LoadStars (Path : String) : List;
+begin
+    var Stars := [];
+
+    for var Line in ReadLines (Path) do
+    begin
+        if Line = '' then continue;
+
+        var F := Split (Line, ',');
+        if F.Length < 10 then continue;
+
+        var Dec := DecDegrees (F[5]);
+
+        // The dot's diameter as the original priced it: a bright star has a
+        // small magnitude, and 7 is the faint end of this catalog.
+        var Size := Round (Abs (7.0 - Val (F[8])) / 2.0);
+        if Size < 1 then Size := 1;
+
+        var BV := 0.0;
+        if F[9] <> '' then BV := Val (F[9]);
+
+        var R  := (90.0 - Dec) * PixelsPerDegree;
+        var Th := (270.0 - RaDegrees (F[4])) * Pi / 180.0;
+
+        Stars.Add (Star (F[1], F[3],
+                         R * Cos (Th), R * Sin (Th),
+                         StarInk (BV), Size,
+                         Dec >= SouthLimit));
+    end
+
+    Exit Stars;
+end
+
+
+/// The figure segments, each resolved to the two stars it joins.
+///
+/// A segment naming a star the catalog does not hold is dropped, as is one
+/// whose stars are not both on the chart. The original drew those anyway, so a
+/// figure straddling the chart's edge sent lines out to stars that were never
+/// painted -- most visibly around Orion, whose belt is just south of the
+/// equator. Making the two rules agree is the only behavior here that departs
+/// from the original on purpose.
+function LoadFigures (Path : String, Stars : List) : List;
+begin
+    var ByName := [:];
+
+    for var S in Stars do
+    begin
+        var Key := S.Constellation + ' ' + S.Designator;
+
+        // First wins, which is what a scan from the top of the catalog did.
+        if not (Key in ByName) then ByName[Key] := S;
+    end
+
+    var Figures := [];
+
+    for var Line in ReadLines (Path) do
+    begin
+        if Line = '' then continue;
+
+        var F := Split (Line, ',');
+        if F.Length < 4 then continue;
+
+        var KeyA := F[0] + ' ' + F[1];
+        var KeyB := F[2] + ' ' + F[3];
+
+        if not (KeyA in ByName) then continue;
+        if not (KeyB in ByName) then continue;
+
+        var A := ByName[KeyA];
+        var B := ByName[KeyB];
+
+        if A.Charted and B.Charted then Figures.Add (Figure (A, B));
+    end
+
+    Exit Figures;
+end
+
+
+/// Just the stars the chart shows, so the drawing loop has nothing to test.
+function OnChart (Stars : List) : List;
+begin
+    var Shown := [];
+
+    for var S in Stars do
+        if S.Charted then Shown.Add (S);
+
+    Exit Shown;
+end
+
+
+/// Paints a filled disc of pixels.
+///
+/// FillEllipse is the natural verb for this, and PutPixel is the right one.
+/// Writing this example is what found the reason: every pen verb used to
+/// present the whole window on every call, so FillEllipse cost about 1.1 ms
+/// whatever its radius and 1813 stars took 2.0 s a frame even compiled. That
+/// is fixed in `graph` now -- only `Show` and the waiting verbs present -- and
+/// the same 1813 calls measure 23 ms.
+///
+/// This stays because 23 ms is still six times what the pixels cost: 11,000
+/// PutPixel calls, which is what these discs come to, measure 4 ms. A star is
+/// five to fifty pixels, so the disc is cheaper written out than asked for.
+/// Sized figures should use FillEllipse; thousands of dots should not.
+///
+/// A pixel outside the viewport is discarded silently, so there are no bounds
+/// checks to write.
+procedure Dot (X : Integer, Y : Integer, R : Integer, Ink : Integer);
+begin
+    if R <= 1 then
+    begin
+        Sky.PutPixel (X,     Y,     Ink);
+        Sky.PutPixel (X - 1, Y,     Ink);
+        Sky.PutPixel (X + 1, Y,     Ink);
+        Sky.PutPixel (X,     Y - 1, Ink);
+        Sky.PutPixel (X,     Y + 1, Ink);
+    end
+    else
+    begin
+        var RR := R * R;
+
+        for var DY := -R; DY <= R; DY := DY + 1 do
+            for var DX := -R; DX <= R; DX := DX + 1 do
+                if DX * DX + DY * DY <= RR then
+                    Sky.PutPixel (X + DX, Y + DY, Ink);
+    end
+end
+
+
+/// Draws one frame of the chart, turned `Angle` degrees.
+///
+/// The turn is a rotation of each star's precomputed place, so the two calls
+/// to libm here serve every star rather than one.
+procedure DrawSky (Stars : List, Figures : List, Angle : Double);
+begin
+    var Radians := Angle * Pi / 180.0;
+    var Ca      := Cos (Radians);
+    var Sa      := Sin (Radians);
+
+    Sky.SetFillStyle (SolidFill, Background);
+    Sky.Bar (1, 1, Span, Span);
+
+    Sky.SetColor (FigureInk);
+
+    for var F in Figures do
+        Sky.Line (CenterX + Round (F.A.X * Ca - F.A.Y * Sa),
+                  CenterY - Round (F.A.X * Sa + F.A.Y * Ca),
+                  CenterX + Round (F.B.X * Ca - F.B.Y * Sa),
+                  CenterY - Round (F.B.X * Sa + F.B.Y * Ca));
+
+    for var S in Stars do
+        Dot (CenterX + Round (S.X * Ca - S.Y * Sa),
+             CenterY - Round (S.X * Sa + S.Y * Ca),
+             S.Size, S.Ink);
+
+    Sky.Show ();
+end
+
+
+begin
+    var Stars   := LoadStars (DataPath ('stars.csv'));
+    var Figures := LoadFigures (DataPath ('lines.csv'), Stars);
+    var Shown   := OnChart (Stars);
+
+    // One argument, built by concatenation, because the qualified spelling of
+    // a variadic built-in takes only one in the C back end -- DEFECTS.md L-5.
+    // `graph` shadows WriteLn, so System.WriteLn is the only console route.
+    System.WriteLn (Str (Stars.Length) + ' stars read, ' + Str (Shown.Length) +
+                    ' on the chart, ' + Str (Figures.Length) + ' figure segments');
+
+    InitGraph (Span, Span, 'The Northern Sky', False);
+
+    Sky := ViewPort (1, 1, Span, Span, 1);
+
+    var Angle := 0.0;
+
+    while True do
+    begin
+        DrawSky (Shown, Figures, Angle);
+
+        if KeyPressed () then
+        begin
+            var K := ReadKey ();
+
+            if K = #27 then break;
+            if K = KeyClose then break;
+        end
+
+        Angle := Angle + DegreesPerFrame;
+        if Angle >= 360.0 then Angle := Angle - 360.0;
+
+        Delay (FrameDelay);
+    end
+
+    CloseGraph ();
+end
