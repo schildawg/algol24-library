@@ -1233,6 +1233,15 @@ end
 /// `Delay Waits About As Long As It Is Asked To`
 procedure Delay (Millis : Integer);
 begin
+    // A wait is the natural moment to show what has been drawn, which is why
+    // `ReadKey`, `KeyPressed`, `PollEvent` and `ReadEvent` all present here
+    // too. It is what lets an animation loop read `draw ...; Delay (n)` with
+    // no `Show` in it, now that the pen verbs no longer present per stroke.
+    //
+    // Guarded, because this is the one verb in the unit that is useful before
+    // `InitGraph` -- a program may want the nap and no window.
+    if SdlWin <> nil then PresentIfDue ();
+
     if Millis <= 0 then Exit;
 
     SDL_Delay (Millis);
@@ -1346,8 +1355,6 @@ begin
 
     for var I := 0; I < Length (Text); I := I + 1 do
         CurrentX := CurrentX + DrawGlyph (Ord (Text[I]), CurrentX, CurrentY, 16777215);
-
-    Present ();
 end
 
 /// Imposes an aspect ratio, in place of the one measured from the window.
@@ -1512,8 +1519,6 @@ begin
 
     for var I := 0; I < Length (Text); I := I + 1 do
         At := At + DrawGlyph (Ord (Text[I]), At, Y, 16777215);
-
-    Present ();
 end
 
 
@@ -2709,7 +2714,7 @@ begin
         for var V in Values do
             Emit (Str (V));
 
-        Present ();
+        PresentIfDue ();
     end
 
     /// Writes its arguments and moves to the start of the next row.
@@ -2723,7 +2728,7 @@ begin
             Emit (Str (V));
 
         NewLine ();
-        Present ();
+        PresentIfDue ();
     end
 
     /// Clears this window from its cursor to the end of its row.
@@ -2743,7 +2748,7 @@ begin
             StampCell ((Col - 1) * CellWidth (), (CurRow - 1) * FontHeight, nil,
                        CellWidth (), FontHeight, 1, Ink, Transparent);
 
-        Present ();
+        PresentIfDue ();
     end
 
 
@@ -2786,7 +2791,7 @@ begin
         StampTarget (BBuf.Address, PxW, PxH);
         ScrollBand (Top, Bottom, FontHeight, 0);
 
-        Present ();
+        PresentIfDue ();
     end
 
     /// Inserts a blank row at the cursor; the rows below move down, last lost.
@@ -2816,7 +2821,7 @@ begin
         StampTarget (BBuf.Address, PxW, PxH);
         ScrollBand (Top, Bottom, 0 - FontHeight, 0);
 
-        Present ();
+        PresentIfDue ();
     end
 
 
@@ -2908,7 +2913,7 @@ begin
         CurRow  := 1;
         Pending := False;
 
-        Present ();
+        PresentIfDue ();
     end
 
     /// Draws this window into the frame: present-time only.
@@ -3173,8 +3178,6 @@ begin
 
         StampTarget (Buf.Address, W, H);
         Flood (X, Y, Border, FillBuf.Address, FillInk);
-
-        Present ();
     end
 
 
@@ -3273,8 +3276,6 @@ begin
         PenY := 1;
         CurX := 1;
         CurY := 1;
-
-        Present ();
     end
 
 
@@ -3604,8 +3605,6 @@ begin
 
         StampTarget (Buf.Address, W, H);
         DrawImage (Img.Bits.Address, Img.W, Img.H, X, Y, Mode);
-
-        Present ();
     end
 
 
@@ -4022,8 +4021,6 @@ begin
                 PenX := X2;
                 PenY := Y2;
 
-                Present ();
-
                 Exit;
             end
 
@@ -4118,8 +4115,6 @@ begin
         end
 
         RecordArc (X, Y, Radius, Radius, StartAngle, StartAngle + Sweep);
-
-        Present ();
     end
 
 
@@ -4186,8 +4181,6 @@ begin
 
         PenX := WasX;
         PenY := WasY;
-
-        Present ();
     end
 
     /// Draws the lines joining a list of points.
@@ -4304,8 +4297,6 @@ begin
         end
 
         RecordArc (X, Y, XRadius, YRadius, StartAngle, StartAngle + Sweep);
-
-        Present ();
     end
 
 
@@ -4441,8 +4432,6 @@ begin
 
         PenX := WasX;
         PenY := WasY;
-
-        Present ();
     end
 
     /// Fills a bar and draws it in three dimensions.
@@ -4709,8 +4698,6 @@ begin
 
         StampTarget (Buf.Address, W, H);
         FillRect (Left, Top, Right, Bottom, FillBuf.Address, FillInk);
-
-        Present ();
     end
 
     /// Draws the outline of a rectangle with opposite corners at the points.
@@ -4793,8 +4780,6 @@ begin
 
         PenX := WasX;
         PenY := WasY;
-
-        Present ();
     end
 
     /// Sets the direction and size free text on this viewport is drawn in.
@@ -4920,8 +4905,6 @@ begin
 
         // The grid stamps 1:1 and upright, and never sets the style itself.
         StampStyle (1, 0);
-
-        Present ();
     end
 
     /// Draws free text at this viewport's current position, advancing it.
@@ -5238,7 +5221,7 @@ begin
           for var I := 1; I < Values.Length; I := I + 1 do
               Target.Emit (Str (Values[I]));
 
-          Present ();
+          PresentIfDue ();
 
           Exit;
       end
@@ -5248,7 +5231,7 @@ begin
     for var V in Values do
         Root.Emit (Str (V));
 
-    Present ();
+    PresentIfDue ();
 end
 
 /// Writes its arguments and moves to the start of the screen's next row.
@@ -5274,7 +5257,7 @@ begin
               Target.Emit (Str (Values[I]));
 
           Target.NewLine ();
-          Present ();
+          PresentIfDue ();
 
           Exit;
       end
@@ -5285,7 +5268,7 @@ begin
         Root.Emit (Str (V));
 
     Root.NewLine ();
-    Present ();
+    PresentIfDue ();
 end
 
 /// Clears the screen from its cursor to the end of the row.

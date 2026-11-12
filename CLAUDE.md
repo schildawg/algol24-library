@@ -533,6 +533,38 @@ one world — celled text on a grid at Order 0, Canvas objects above and below
 it — not Turbo Pascal's Crt/Graph split. Read it before adding any `graph`
 method; a method that fights it is wrong until the document says otherwise.
 
+⚠️ **Only `Show` and the verbs that WAIT present. No pen verb does, and that
+changed in November 2026.** `Present` uploads the whole window texture to SDL,
+clears and copies the renderer, and sorts the surface stack — so its cost is
+the window's **area**, not the figure's. Every drawing verb used to call it,
+which made a figure cost a full-window upload: measured at 900×900, `Line`
+1.225 ms, `OutTextXY` 1.185 ms, `FillEllipse` 2.5 ms (two presents) and
+`Rectangle` 4.82 ms, which is four `Line`s and so four uploads to draw four
+edges. `PutPixel` alone never presented, and `PutPixel` alone had an accurate
+doc comment — the reference already said drawing "is not visible until
+something presents the stack; [`Show`] is that", for all of them.
+
+So the model is now what the reference always claimed:
+
+| | presents |
+| --- | --- |
+| `Show`, `InitGraph`, `TextMode` | **yes**, unconditionally |
+| `ReadKey`, `KeyPressed`, `PollEvent`, `ReadEvent`, `Delay` | `PresentIfDue`, which throttles to 16 ms |
+| the grid text verbs — `Write`, `WriteLn`, `Clear`, `ClrEol`, `DelLine`, `InsLine` | `PresentIfDue`, because the reference promises text appears |
+| the pen and figure verbs — all 13 sites | **no** |
+
+The same verbs after the change: `Line` 0.035 ms, `OutTextXY` 0.005 ms,
+`Rectangle` 0.125 ms, `Bar` below the clock. `examples/stars.a24` went from
+9.3 to **112 frames a second** compiled.
+
+⚠️ **`Delay` presents, and that is what keeps animation loops working.** A loop
+written `draw …; Delay (n)` has no `Show` in it and used to display only
+because the pen verbs presented. A wait is the natural moment to show a frame,
+which is why the four key and event verbs already did it; `Delay` is the fifth.
+It is guarded on the window existing, being the one verb here useful before
+`InitGraph`. A program that draws and then neither waits nor calls `Show` shows
+nothing — that is the documented contract, but it is a real behavior change.
+
 `graph` notes: SDL2 comes from Homebrew (`brew install sdl2`) and is reached
 through wrappers in `graphffi.c` rather than declared, so nothing names SDL's
 own file and an SDL installed elsewhere needs no substituting — `build.sh` asks
