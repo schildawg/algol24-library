@@ -2,14 +2,36 @@
 
 **From:** the `algol24-library` project, as a user of the language
 
-**Status:** **ACCEPTED, answered with more than it asked for, and still being
-built.** The read half is specified — [RT-031] `Fields` and [RT-032] `TypeOf`,
-with conformance cases 0218, 0219 and 0220 — and the core replied with its own
-`PROPOSAL-REFLECTION.md`, which reverses this document's boundary in two places
-and says so. ⚠️ **The work is in progress and there will be a release when it
-is done.** `algc 0.3.0` answers `Undefined variable 'Fields'.`, so nothing here
-can be built on any of it yet, and the figures and spellings below may still
-move. The original ask follows, unedited. What changed is recorded next.
+**Status:** **ACCEPTED, answered with far more than it asked for, and SHIPPED
+in 0.3.1.** This document asked for one listable field table and got six
+built-ins and a method:
+
+| | | |
+| --- | --- | --- |
+| `Fields (X)` | [RT-031] | the field table this asked for, carrying the declared type |
+| `TypeOf (X)` | [RT-032] | a type as a value — `Name`, `Parent`, `Fields`, `Methods`, `Properties` |
+| `Member (X, Name)` | [RT-033] | a member read by a computed name |
+| `Invoke (X, Name, Args)` | [RT-033] | a method called by a computed name |
+| `New (T, Args)` | [RT-034] | an instance of a type held as a value |
+| `SetMember (X, Name, V)` | [RT-034] | a field written by a computed name |
+| `T.Accepts (X)` | [RT-035] | the dynamic form of `is`, over a type held as a value |
+
+Conformance cases 0218 through 0223. The core replied with its own
+`PROPOSAL-REFLECTION.md`, which reverses this document's read-only boundary and
+says so; **the reversal shipped**, so the last three rows above are things this
+document argued against asking for. What changed is recorded next, and the
+original ask follows unedited.
+
+⚠️ **Verified on 0.3.1 rather than assumed.** All six were exercised against a
+class with inheritance, an overload set, a property, a private method and an
+untyped field, and the interpreted and compiled output is **byte-identical** —
+which is the structural claim this document made for reflection over
+coroutines, now measured on the shipped thing. One exception, recorded as
+`DEFECTS.md` **L-6**: `New` does not check its argument count interpreted, and
+too many arguments is silently accepted there and refused compiled.
+
+⚠️ **Using any of it raises this library's compiler floor from 0.1.6 to
+0.3.1**, which is the one cost to weigh before a unit here depends on it.
 
 **Concerns:** one listable table and one type answer — **read-only**, no new
 machinery, and nothing a program can use to change its own shape
@@ -81,13 +103,41 @@ type is what gives that check something to check against. The type was asked
 for here to tell an Integer from a String in a serializer — it earns its place
 twice over.
 
-### Still open, and what remains library work
+### Nothing is still open, and what remains is library work
 
-Calling by name, writing a field by name and constructing by name are
-**proposed, not specified**. When they land, the unit over these built-ins is
-this library's to write — extension functions, so the names stay out of every
-program that does not `uses` it [MOD-015], and a receiver written `Any` is
-legal and reaches an instance, an Integer and a String alike [FUN-016].
+Calling by name, writing a field by name and constructing by name were
+proposed when this block was first written; all three are now specified
+[RT-033, RT-034] and shipped. The unit over these built-ins is this library's
+to write — extension functions, so the names stay out of every program that
+does not `uses` it [MOD-015].
+
+**The `Any` receiver this assumed is confirmed on 0.3.1.** An
+`extension function Describe (X : Any) : String` was written and called as
+`A.Describe ()` and `Describe (A)` both, against an instance, an Integer, a
+String and a List, exactly as [FUN-016] says. Two things the unit must handle
+that this document did not foresee:
+
+- ⚠️ **`nil` has no type, so every entry point needs a guard.** [RT-032] makes
+  `TypeOf (nil)` answer `nil`, so the natural first line of a describer —
+  `TypeOf (X).Name` — raises `Only instances have properties.` on it.
+- ⚠️ **A by-name write does NOT enforce the declared type, so the library
+  must.** [RT-034] is deliberately "exactly as permissive as
+  `X.Field := <untyped>` already is": measured, `SetMember` puts a String into
+  a field declared `Integer` and the field afterwards holds a String. The
+  declared type this document asked for is what a deserializer checks
+  *against*; it is not checked *for* it.
+
+**One hole is left, and it is the only thing a serializer still hand-writes.**
+There is no way to go from a type's name back to the type: `TypeOf` answers a
+type from a *value*, and nothing answers one from a String. So a deserializer
+needs a `['Rec' : Rec, …]` registry, since the record it reads carries
+`TypeOf (X).Name` and must turn that back into something `New` accepts. ⚠️
+**That is one table per program where the demand section below counts a codec
+per class**, so the staleness this document exists to remove is reduced by a
+large factor rather than to zero — and it goes stale loudly, a missing key
+being a failure to decode rather than a quietly dropped field. Whether it is
+worth asking the core for a lookup is a question for when something here
+actually needs it.
 
 ---
 

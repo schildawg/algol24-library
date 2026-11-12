@@ -14,10 +14,84 @@ Three kinds of thing, and the distinction matters:
 
 ## Defects
 
+### L-6 — `New` does not check its argument count, and the two processors disagree
+
+**Status:** open, found 2026-11-12 on 0.3.1 while verifying the reflection
+release against `REPORT-CONCURRENCY.md`.
+
+[RT-034] says of `New` and `SetMember` that "**both answer exactly what the
+written form answers**", and that `New` "selects among the constructors on the
+argument values like a written construction [FUN-013]". The interpreter does
+not apply the arity check to `New`. Reproduction, a class whose only
+constructor takes one argument:
+
+```console
+$ algc l6.a24                                   # interpreted
+Index 0 out of range 0..-1.
+1
+$ algc --compile --out=out l6.a24 && cc -std=c11 -O2 -o l6 out/*.c -lffi && ./l6
+Expected 1 arguments but got 0.
+Expected 1 arguments but got 2.
+```
+
+| `New (Needs, …)` where `constructor Init (Arg : Integer)` | interpreted | compiled |
+| --- | --- | --- |
+| `[]` — too few | **`Index 0 out of range 0..-1.`** | `Expected 1 arguments but got 0.` |
+| `[1, 2]` — too many | **answers an instance, `W` = 1** | `Expected 1 arguments but got 2.` |
+| `['x']` — wrong type | `No matching signature for Needs.` | `No matching signature for Needs.` |
+
+**Two faults, and the second is the worse one.** Too few arguments leaks an
+internal subscript error in place of the specified sentence — the message is a
+subscript of an empty range, `0..-1` being the shape an empty `Args` has, which
+is as much as can be said without reading the implementation. Too many
+arguments is **not refused at all** interpreted: the extra is discarded and a
+plausible instance comes back, which is the shape of fault that reports
+success. Only the wrong-*type* case goes through selection, so `New` is
+checking types and not counts.
+
+**It is `New` alone, not constructor arity generally.** The written form is
+correct interpreted, and so is `Invoke`, which is the same question asked of a
+method:
+
+| interpreted, one-argument target | answers |
+| --- | --- |
+| `Needs ()` — written | `Expected 1 arguments but got 0.` |
+| `Needs (1, 2)` — written | `Expected 1 arguments but got 2.` |
+| `Invoke (N, 'M', [])` | `Expected 1 arguments but got 0.` |
+| `Invoke (N, 'M', [1, 2])` | `Expected 1 arguments but got 2.` |
+| `New (Needs, [])` | **`Index 0 out of range 0..-1.`** |
+| `New (Needs, [1, 2])` | **silently answers an instance** |
+
+So the check exists in the interpreter and `New` is the one path that does not
+reach it.
+
+⚠️ **This is the first divergence between processors inside reflection, which
+is the thing this library argued could not happen.**
+`PROPOSAL-REFLECTION.md` made the structural case for reflection over
+coroutines on exactly this ground — reflection "lives in the shared **object
+model**", so "one implementation, which all three inherit" — and measured a
+property failure byte-identical between the two processors to show it. That
+argument holds for the other five built-ins: `Fields`, `TypeOf`, `Member`,
+`Invoke` and `SetMember` were compared across a class with inheritance, an
+overload set, a property, a private method and an untyped field, and the
+interpreted and compiled output is byte-identical. `New`'s argument handling
+is the exception, and it sits in the call machinery rather than in the object
+model, which is consistent with the argument rather than against it.
+
+**Where the library would meet it.** A deserializer built on [RT-034] calls
+`New (T, [])` to make a blank instance before filling it with `SetMember`.
+Where the class declares a constructor taking arguments, that call is the
+too-few case — so the diagnostic a library would show a user for "this class
+cannot be made blank" is currently an internal subscript error interpreted and
+the right sentence compiled. Nothing here is built on it yet; the conformance
+corpus covers a wrong type (`0222`) and a non-List (`New (Thing, 3)`) but not
+a count mismatch, which is why it passes.
+
 ### L-5 — `System.WriteLn` takes one argument compiled and any number interpreted
 
 **Status:** open, found 2026-11-12 on 0.3.0 while porting a star chart into
-`examples/stars.a24`.
+`examples/stars.a24`. Re-verified unchanged on **0.3.1**, the boundary still
+at exactly one argument.
 
 The qualified spelling of a variadic built-in refuses more than one argument
 in the C back end, and runs interpreted:
@@ -69,8 +143,26 @@ units and every example.
 ### L-4 — a warning goes to stdout, where it mixes with the program's output
 
 **Status:** open, reported 2026-09-04. Re-verified unchanged against 0.1.5 on
-2026-10-24, where it acquired a second and likelier trigger — see below. No
-longer the narrow remainder it was.
+2026-10-24, where it acquired a second and likelier trigger — see below, and
+against **0.3.1** on 2026-11-12, where reflection gave it a **fourth**: the
+extension/member clash a `reflect` unit must be named around. No longer the
+narrow remainder it was.
+
+⚠️ **The fourth trigger, measured on 0.3.1** — a consumer's own member of the
+same name as a visible extension, with the streams separated:
+
+```console
+$ algc clash.a24 2>/dev/null
+[WARN] clash.a24:14: 'Describe' is a member of Report, so the extension of that name is not reached.
+member wins: my own
+$ algc clash.a24 2>&1 >/dev/null
+                                   # stderr is empty
+```
+
+This one is the library's problem rather than a consumer's mistake: the
+reflection unit's whole surface is extensions [MOD-015], so any name it
+exports that somebody uses as a member prints a line in *their* program.
+`NOTES-REFLECTION.md` §3 records it as the governing naming constraint.
 
 ⚠️ **0.1.6 added a THIRD trigger**, and a common one: handing an Integer to
 `and` or `or` warns, naming the new bitwise operators, and that warning goes

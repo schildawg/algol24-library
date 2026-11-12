@@ -470,20 +470,32 @@ Two live documents sit in the root rather than in `finished/`:
 
 - `PROPOSAL-REFLECTION.md` asked the core for **one thing** — a way to list a
   class's field table — and was **accepted, answered with considerably more,
-  and is still being built.** [RT-031] `Fields (X)` answers a Map from each
-  field's name to its declared type, and [RT-032] `TypeOf (X)` answers a type
-  as a value, a class also answering its `Name`, `Parent`, `Methods` and
-  `Properties`. ⚠️ **None of it is in a release:** 0.3.0 answers `Undefined
-  variable 'Fields'.`, so no unit here can use it yet and a release will follow
-  when the core is done. ⚠️ **The proposal's read-only boundary was reversed
-  and this library was wrong about it** — calling and writing by name are
-  proposed, because overload selection is already a run-time decision
-  [EXP-013] and `alg_invoke` already dispatches by name. The document's own
-  Status block records all of this against what it asked, and keeps the ask
-  unedited. **When it lands, the unit over those built-ins is this library's**
-  — extension functions, so the names stay out of any file that does not
-  `uses` it [MOD-015]; a receiver written `Any` is legal and reaches an
-  instance, an Integer and a String alike, where member lookup would not.
+  and shipped in 0.3.1.** Six built-ins and a method: `Fields (X)` [RT-031]
+  answers a Map from each field's name to its declared type, parent-first;
+  `TypeOf (X)` [RT-032] answers a type as a value, a class also answering its
+  `Name`, `Parent`, `Fields`, `Methods` and `Properties`; `Member` and
+  `Invoke` [RT-033] read and call by a computed name; `New` and `SetMember`
+  [RT-034] construct and write by one; and `T.Accepts (X)` [RT-035] is the
+  dynamic form of `is`. ⚠️ **The proposal's read-only boundary was reversed,
+  this library was wrong about it, and the reversal shipped** — calling and
+  writing by name are in, because overload selection is already a run-time
+  decision [EXP-013] and `alg_invoke` already dispatches by name. The
+  document's own Status block records all of this against what it asked, and
+  keeps the ask unedited.
+
+  ⚠️ **The unit over those built-ins is this library's and is NOT YET
+  WRITTEN** — extension functions, so the names stay out of any file that does
+  not `uses` it [MOD-015]; a receiver written `Any` is legal and reaches an
+  instance, an Integer and a String alike, where member lookup would not —
+  confirmed on 0.3.1, both spellings. `NOTES-REFLECTION.md` holds what was
+  measured and the decisions the unit needs; the user names the unit and its
+  methods as always. Three things that will bite whoever writes it:
+  **`TypeOf (nil)` is `nil`**, so every entry point needs a guard or it raises
+  `Only instances have properties.`; **`SetMember` does not enforce the
+  declared type**, being deliberately as permissive as an untyped assignment,
+  so the unit checks; and **a member of a consumer's class wins over an
+  extension of the same name and warns onto stdout** [EXP-022], which is L-4 —
+  so `Describe` and `Fields` are exactly the wrong names to export.
 - `REPORT-CONCURRENCY.md` answers the core's `PROPOSAL-CONCURRENCY.md` and
   **asks for nothing.** It agrees with that document's conclusion and corrects
   four of its supporting claims — chiefly that subprogram re-entry works today
@@ -645,10 +657,14 @@ unlike `file` it does not build anywhere; Windows would need
 floor at 0.1.5, being the first unit to use `extension` [FUN-015] which 0.1.4
 cannot parse. 0.1.6 raised it: `Str (X, Decimals)`, the bitwise operators and
 `Buffer.PutDouble` all appear in units and in `REFERENCE.md` examples now, so
-`./test.sh` fails on anything older. Verified working on **0.2.4** and on
-**0.3.0**, which is current — the latter unified Char and String equality and
+`./test.sh` fails on anything older. Verified working on **0.2.4**, **0.3.0**
+and **0.3.1**, which is current — 0.3.0 unified Char and String equality and
 broke nothing here, because this library had worked around the seam at 44
-sites rather than being bitten by it a fifth time.
+sites rather than being bitten by it a fifth time, and 0.3.1 added reflection,
+which no unit uses yet. ⚠️ **The floor stays at 0.1.6 only while that remains
+true:** the first unit here to call `Fields`, `TypeOf`, `Member`, `Invoke`,
+`New` or `SetMember` raises it to **0.3.1** for every consumer of the library,
+which is the cost to weigh before the reflection unit lands.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
 so the only one besides it that is portable as written — nothing for a

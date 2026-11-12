@@ -174,21 +174,44 @@ proposal's refusal of typed channels is right, and
 close it.
 
 > **Note added 2026-11-12, after this report was sent.** That last paragraph's
-> conclusion stands and its reason no longer does. `PROPOSAL-REFLECTION.md` was
-> accepted and answered with more than it asked: [RT-031] `Fields` and [RT-032]
-> `TypeOf` are specified, so a **library** serializer over an arbitrary class
-> becomes writable and "nothing in the library will make it so" stops being
-> true. The core's reply also proposes writing and constructing by name, which
-> is what a *de*serializer needs — a field list alone would only get a value
-> out, not back in. So the copy protocol this section leaves open is on a path
-> to closing, and a task could hand back a value rather than bytes.
+> conclusion stands and its reason is now wrong. `PROPOSAL-REFLECTION.md` was
+> accepted, answered with considerably more than it asked, and **shipped in
+> 0.3.1** — `Fields` and `TypeOf` [RT-031, RT-032] for reading, `Member`,
+> `Invoke`, `New` and `SetMember` [RT-033, RT-034] for reaching and writing by
+> a computed name. So "nothing in the library will make it so" is false as of
+> that release, and the sentence to keep is only that a `List` of instances is
+> not bytes *by itself*.
+>
+> **The copy protocol is closed, and was demonstrated rather than argued.** A
+> generic `Encode`/`Decode` pair was written over the new built-ins — about 50
+> lines, naming no field of anything — and round-tripped a class with a
+> String, an Integer, a Double, a Boolean and a **nested instance** through
+> flat text and back:
+>
+> ```console
+> wire:   Rec|Name=widget|Worth=42|Ratio=1.5|Flag=true|Kid=(Inner|N=9)
+> again:  Rec|Name=widget|Worth=42|Ratio=1.5|Flag=true|Kid=(Inner|N=9)
+> equal:  true
+> typed:  Rec, kid a real Inner
+> fresh:  false (a copy, not the same object)
+> ```
+>
+> Identical interpreted and compiled. So a task **can** hand back a value
+> rather than bytes, and no user writes a codec per class.
+>
+> ⚠️ **One hand-written table survives, and it is per program rather than per
+> class.** Nothing turns a type's *name* back into a type, so a decoder needs
+> a `['Rec' : Rec, …]` registry to turn the name in a record into something
+> `New` accepts. A missing key fails the decode rather than dropping a field
+> quietly, so it goes stale loudly.
 >
 > ⚠️ **It changes nothing about what this report recommends.** The three
-> primitives in §"What the library will build" are unaffected, bytes remain the
-> right transport for art, and none of it is in a release — 0.3.0 answers
-> `Undefined variable 'Fields'.` and the core is still building. Typed channels
-> staying out of the *language* is still the right call; the copy protocol was
-> always library work, and now it is library work that can be written.
+> primitives in §"What the library will build" are unaffected, bytes remain
+> the right transport for art — 9834 MB/s against ~26 s of decoding is not a
+> figure reflection improves — and typed channels staying out of the
+> *language* is still the right call. What changed is that the copy protocol,
+> which was always library work, is now library work that has been written
+> once to prove it can be.
 
 ---
 
