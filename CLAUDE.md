@@ -468,10 +468,22 @@ differ the document says so at its top.
 
 Two live documents sit in the root rather than in `finished/`:
 
-- `PROPOSAL-REFLECTION.md` asks the core for **one thing** — a way to list a
-  class's field table, which `alg_class_field` builds and nothing reads. Access
-  by name already works four ways, so enumeration is the only hole. Read-only
-  deliberately; the setting side is refused rather than deferred.
+- `PROPOSAL-REFLECTION.md` asked the core for **one thing** — a way to list a
+  class's field table — and was **accepted, answered with considerably more,
+  and is still being built.** [RT-031] `Fields (X)` answers a Map from each
+  field's name to its declared type, and [RT-032] `TypeOf (X)` answers a type
+  as a value, a class also answering its `Name`, `Parent`, `Methods` and
+  `Properties`. ⚠️ **None of it is in a release:** 0.3.0 answers `Undefined
+  variable 'Fields'.`, so no unit here can use it yet and a release will follow
+  when the core is done. ⚠️ **The proposal's read-only boundary was reversed
+  and this library was wrong about it** — calling and writing by name are
+  proposed, because overload selection is already a run-time decision
+  [EXP-013] and `alg_invoke` already dispatches by name. The document's own
+  Status block records all of this against what it asked, and keeps the ask
+  unedited. **When it lands, the unit over those built-ins is this library's**
+  — extension functions, so the names stay out of any file that does not
+  `uses` it [MOD-015]; a receiver written `Any` is legal and reaches an
+  instance, an Integer and a String alike, where member lookup would not.
 - `REPORT-CONCURRENCY.md` answers the core's `PROPOSAL-CONCURRENCY.md` and
   **asks for nothing.** It agrees with that document's conclusion and corrects
   four of its supporting claims — chiefly that subprogram re-entry works today

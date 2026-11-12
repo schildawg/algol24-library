@@ -1,9 +1,93 @@
 # Proposal: a class's fields, listable at run time
 
 **From:** the `algol24-library` project, as a user of the language
-**Status:** proposal, for the language project to accept, refuse or reshape
+
+**Status:** **ACCEPTED, answered with more than it asked for, and still being
+built.** The read half is specified — [RT-031] `Fields` and [RT-032] `TypeOf`,
+with conformance cases 0218, 0219 and 0220 — and the core replied with its own
+`PROPOSAL-REFLECTION.md`, which reverses this document's boundary in two places
+and says so. ⚠️ **The work is in progress and there will be a release when it
+is done.** `algc 0.3.0` answers `Undefined variable 'Fields'.`, so nothing here
+can be built on any of it yet, and the figures and spellings below may still
+move. The original ask follows, unedited. What changed is recorded next.
+
 **Concerns:** one listable table and one type answer — **read-only**, no new
 machinery, and nothing a program can use to change its own shape
+
+---
+
+## What was decided, against what this asked
+
+**The enumeration this called "the only hole" is one call, and it carries the
+type.** [RT-031] `Fields (X)` answers a **Map** from each field's name to the
+type written on it — `''` where none was — so the list and the type arrive
+together rather than as the two separate asks below. An instance answers its
+class's fields, a class answers its own, and a value that is neither answers an
+**empty Map** rather than raising, on the same bargain `5 is Dog` makes.
+
+**[RT-032] goes well past this document.** `TypeOf (X)` answers a type as a
+value, interned so `TypeOf (1)` and `TypeOf (2)` are identical and comparable
+the way a class handle is, and **not constructible** — `TypeOf (42) ()` is
+refused. A class answers its `Name`, its `Parent`, its `Fields`, and its
+`Methods` and `Properties`, each a Map from name to a **List** of signatures,
+a List because two methods of one name are an overload set [FUN-013].
+
+⚠️ **`Fields` answers the whole inheritance chain where `Methods` answers only
+the class's own, and the asymmetry is deliberate.** An instance holds every
+inherited field as its own state, so a record of it needs all of them; an
+overridden method *replaces* the one above it [CLS-011], so merging the chain
+would put an override and an overload under one name indistinguishably.
+`Parent` walks.
+
+### All six open questions, answered
+
+| this document asked | the answer |
+| --- | --- |
+| do private fields appear? — *"the hardest one"* | **yes.** `private` governs what a program may *write* and is settled before it runs; nothing records it at run time, so hiding them would be new machinery in all three processors. Stated as a trapdoor rather than left to be found |
+| what order? | **declaration order, parent-first** — the order a class seeds its fields [CLS-005], reproducible because collections iterate in insertion order [COL-007] |
+| are inherited fields included? | **yes**, the whole chain — see the asymmetry above |
+| does a `property` appear? | **no**, it computes rather than stores [CLS-017], so a record built from the list can be read back. Listed separately as `Properties`, which a describer wants and a serializer must not write through |
+| what is a type, as a value? | an interned value per built-in type, compared by identity; a class answers itself |
+| a member or a built-in? | **a built-in, with the sugar left to this library as an extension** — which is what this document's own [EXP-022] risk argued for, since a member named `Fields` would silently shadow a class's own |
+
+⚠️ **One citation here is wrong and is left standing as written.** Open
+question 1 cites [MOD-006] for `private` inside a class; that rule is
+`private` on a *module's* top-level declaration, and visibility sections
+inside a class are **[DCL-011]**. The core caught it. `CLAUDE.md`'s own use of
+[MOD-006], for `strings`' private helper, is correct.
+
+### Where the core reversed this document, and why
+
+This document excluded setting by computed name and invoking a method by name
+as *"where a statically-checked language stops being checkable"* — "deliberately
+excluded rather than deferred". **Both are now proposed**, and the argument is
+that the premise does not hold here:
+
+- overload selection is **already** at run time [EXP-013], the type system
+  being gradual and an argument's declared type possibly `Any`;
+- `alg_invoke` **already** dispatches by name, and is how every method call in
+  the compiled back end works.
+
+So a call by a computed name reaches the same machinery a written one does. The
+line this document drew still holds for the one thing neither document asks
+for: **building or altering a class at run time.** That boundary was drawn too
+wide, not in the wrong place.
+
+⚠️ **Asking for the declared type turned out to be what makes the write side
+safe, which this document did not foresee.** A written field assignment widens
+[VAL-001]; a by-name write must too, or it becomes the one way to put an
+Integer where a class promised a String. The field table carrying the declared
+type is what gives that check something to check against. The type was asked
+for here to tell an Integer from a String in a serializer — it earns its place
+twice over.
+
+### Still open, and what remains library work
+
+Calling by name, writing a field by name and constructing by name are
+**proposed, not specified**. When they land, the unit over these built-ins is
+this library's to write — extension functions, so the names stay out of every
+program that does not `uses` it [MOD-015], and a receiver written `Any` is
+legal and reaches an instance, an Integer and a String alike [FUN-016].
 
 ---
 

@@ -173,6 +173,23 @@ proposal's refusal of typed channels is right, and
 `PROPOSAL-REFLECTION.md` in this repository is the narrower ask that would
 close it.
 
+> **Note added 2026-11-12, after this report was sent.** That last paragraph's
+> conclusion stands and its reason no longer does. `PROPOSAL-REFLECTION.md` was
+> accepted and answered with more than it asked: [RT-031] `Fields` and [RT-032]
+> `TypeOf` are specified, so a **library** serializer over an arbitrary class
+> becomes writable and "nothing in the library will make it so" stops being
+> true. The core's reply also proposes writing and constructing by name, which
+> is what a *de*serializer needs — a field list alone would only get a value
+> out, not back in. So the copy protocol this section leaves open is on a path
+> to closing, and a task could hand back a value rather than bytes.
+>
+> ⚠️ **It changes nothing about what this report recommends.** The three
+> primitives in §"What the library will build" are unaffected, bytes remain the
+> right transport for art, and none of it is in a release — 0.3.0 answers
+> `Undefined variable 'Fields'.` and the core is still building. Typed channels
+> staying out of the *language* is still the right call; the copy protocol was
+> always library work, and now it is library work that can be written.
+
 ---
 
 ## 5. Coroutines are not absent, which changes the refusal's framing
