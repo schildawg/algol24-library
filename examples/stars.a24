@@ -29,8 +29,8 @@ uses math;          // Abs, Cos, Pi, Round, Sin
 const PixelsPerDegree := 4.0;
 
 // The chart's southern edge. The original drew the northern hemisphere alone;
-// move this to -30.0 and the window grows to suit, which brings Orion onto the
-// chart. Its belt and Rigel sit just south of the equator, so at 0.0 the most
+// move this to -30.0 and the chart grows to suit, which brings Orion onto it.
+// Its belt and Rigel sit just south of the equator, so at 0.0 the most
 // recognizable constellation in the sky is missing its middle.
 const SouthLimit := 0.0;
 
@@ -40,10 +40,20 @@ const FigureInk  := 0x9ea8be;       // and the gray it joined stars with
 const DegreesPerFrame := 1.0;
 const FrameDelay      := 30;        // milliseconds
 
+const Margin := 24;                 // logical pixels around the chart
+
+// The window. 768 is the default font's own square grid -- 48 by 24 cells of
+// 16 by 32 -- so the logical space below lands on it one pixel to one.
+const WindowSide := 768;
+
 var ChartRadius := Round ((90.0 - SouthLimit) * PixelsPerDegree);
-var Span        := 2 * ChartRadius + 20;
-var CenterX     := Span div 2;
-var CenterY     := Span div 2;
+
+// The logical space, which the GRID fixes and not the window, so these cannot
+// be known until a window is open and the font's cell size can be asked for.
+var PlotW   := 0;
+var PlotH   := 0;
+var CenterX := 0;
+var CenterY := 0;
 
 var Sky := nil;
 
@@ -304,7 +314,7 @@ begin
     var Sa      := Sin (Radians);
 
     Sky.SetFillStyle (SolidFill, Background);
-    Sky.Bar (1, 1, Span, Span);
+    Sky.Bar (1, 1, PlotW, PlotH);
 
     Sky.SetColor (FigureInk);
 
@@ -334,9 +344,30 @@ begin
     System.WriteLn (Str (Stars.Length) + ' stars read, ' + Str (Shown.Length) +
                     ' on the chart, ' + Str (Figures.Length) + ' figure segments');
 
-    InitGraph (Span, Span, 'The Northern Sky', False);
+    InitGraph (WindowSide, WindowSide, 'The Northern Sky', False);
 
-    Sky := ViewPort (1, 1, Span, Span, 1);
+    // The space a ViewPort is measured in is the GRID, not the window:
+    // `TextCols () * CellWidth ()` by `TextRows () * CellHeight ()`, and the
+    // two are scaled to the window independently in X and Y. The default 80 by
+    // 25 is 1280 by 800, so a square window stretches X by 0.578 and Y by
+    // 0.925 -- `GetAspectRatio` answers 0.625, a circle shows as an oval, and
+    // a ViewPort sized to the window covers only 58% of its width. Both were
+    // visible here before this: the chart filled half the window and looked
+    // squashed sideways.
+    //
+    // So choose a grid whose logical space is SQUARE, and the ratio is 1.0.
+    // Rows decide it, the cell being taller than wide; the column count then
+    // follows, exactly because CellHeight is a whole multiple of CellWidth.
+    var Rows := (2 * ChartRadius + Margin + CellHeight () - 1) div CellHeight ();
+
+    TextMode (Rows * CellHeight () div CellWidth (), Rows);
+
+    PlotW   := TextCols () * CellWidth ();
+    PlotH   := TextRows () * CellHeight ();
+    CenterX := PlotW div 2;
+    CenterY := PlotH div 2;
+
+    Sky := ViewPort (1, 1, PlotW, PlotH, 1);
 
     var Angle := 0.0;
 

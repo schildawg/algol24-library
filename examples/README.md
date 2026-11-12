@@ -131,10 +131,23 @@ Star catalog, trimmed) and `lines.csv`. Two things about it are worth knowing:
   was in. Reading the sign from the text rather than the number is the whole
   difficulty, and it is four lines.
 
-Three of them have caught what the test suite could not, each correct against
+Four of them have caught what the test suite could not, each correct against
 every test and wrong in use: `ide.a24` found the escape-sequence race in `crt`'s
 key reader, `piano.a24` found the `Delay` ambiguity between `graph` and `sound`,
-and `jukebox.a24` found that `CloseGraph` was not resetting the mouse.
+`jukebox.a24` found that `CloseGraph` was not resetting the mouse, and
+`stars.a24` found that every drawing verb presented the whole window on every
+call — a figure costing an upload of the window's **area** rather than its own.
+
+⚠️ **That is four for four, and none of them was looking.** Each of these
+programs was written to exercise a vocabulary, not to test it, and each turned
+up something no assertion would have reached: the suite checks what a verb
+*computes*, and these found what one *costs*, when it *fires* and what it does
+to a terminal or a mouse. `stars.a24` is the sharpest case — the 431 `graph`
+tests read pixels through `GetPixel`, which works in logical space, so the
+chart was geometrically correct in its own coordinates the whole time and the
+drawing verbs returned the right answer however slowly they did it. A program
+somebody wants to watch is a different instrument from a test, and the cheapest
+way to find this class of fault is to write one.
 
 Which is also the gap worth naming: `check.sh` compiles and compares
 `statistics.a24` alone, so nothing reaching SDL or termios is ever built the
