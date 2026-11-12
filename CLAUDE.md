@@ -413,9 +413,14 @@ Learned here, by use:
   only things that raise on a zero divisor — `7 / 0` is `Infinity`.
 - Strings are 0-based, `Pos` answers `-1` when absent, and there are **no
   backslash escapes** — `#10` is a newline, `#27` is ESC.
-- A one-character literal is a **Char**, never a String, and the two are never
-  equal. `Str(…)` widens, which is why assertions on single characters read
-  `AssertEqual (Str ('x'), …)`.
+- A one-character literal is a **Char**, and a Char is a distinct type: `Ord`
+  and `Succ` take one where `Ord ('A' as a String)` answers `Ord failed: 'A'
+  has no ordinal.` ⚠️ **But since 0.3.0 the two COMPARE EQUAL** — `'A' =
+  Str ('A')` is true, in both directions, and a Char key matches a String
+  lookup in a Map. So `Str (…)` on the literal side of a comparison is no
+  longer needed. The existing `Str ('x')` calls in assertions are harmless and
+  stay, because removing them would raise this library's compiler floor from
+  0.1.6 to 0.3.0 for no behavioural gain; **do not add new ones.**
 - An apostrophe inside a string literal is doubled — `'Argument''s'`.
 - Truthiness: `nil`, `False`, the Integer `0` and an enum member with ordinal 0
   are falsey; `0.0`, `''` and any Char are truthy.
@@ -596,8 +601,10 @@ unlike `file` it does not build anywhere; Windows would need
 floor at 0.1.5, being the first unit to use `extension` [FUN-015] which 0.1.4
 cannot parse. 0.1.6 raised it: `Str (X, Decimals)`, the bitwise operators and
 `Buffer.PutDouble` all appear in units and in `REFERENCE.md` examples now, so
-`./test.sh` fails on anything older. Verified working on **0.2.4**, which is
-current.
+`./test.sh` fails on anything older. Verified working on **0.2.4** and on
+**0.3.0**, which is current — the latter unified Char and String equality and
+broke nothing here, because this library had worked around the seam at 44
+sites rather than being bitten by it a fifth time.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
 so the only one besides it that is portable as written — nothing for a
@@ -732,11 +739,11 @@ dot. A test asserts the round trip over thirteen shapes. `FullPath` asks the
 filesystem **nothing** -- no symlink resolution, no existence check -- which
 is what makes it usable on a name a program is about to create.
 
-⚠️ **The Char-versus-String seam bit a fourth time, in a test.** A round-trip
-assertion over a list of paths failed on `'/'` alone, because a
-one-character literal is a **Char** and a Char never equals a String. The code
-was right and the test was wrong. `Str ('/')` on the literal side; the test now
-says so in a comment, because the next person will write the same list.
+**The Char-versus-String seam bit four times here, and 0.3.0 closed it.** The
+last was a round-trip assertion over a list of paths that failed on `'/'`
+alone; the code was right and the test was wrong. `Str ('/')` is still in that
+list and still correct, but it is no longer *necessary* — kept only so the
+suite runs on 0.1.6.
 
 ⚠️ **`InFile.Position` is where the CALLER is, not where the handle is.** A
 reader buys 65536 bytes at a time, so the handle runs ahead by whatever is
@@ -885,14 +892,14 @@ Both cost a compile here.
 indexes by byte** -- `B[4]` reads and `B[4] := 200` writes, which `graph`'s
 key decoder uses and `crt`'s `ByteAt` predates (and `ByteAt` is now one shift
 and one mask rather than the `div`/`mod` loop it was written as); `end` before `else` takes **no** semicolon,
-where a simple statement before `else` takes one; a one-character map key is a
-**Char**, so `Str (C) in Map` never matches a `'C' : 0` entry; **Lists and
+where a simple statement before `else` takes one; **Lists and
 Maps compare by identity, not by content** -- `AssertEqual` on two
 equal-looking Lists always fails, so a comparison has to walk them; and the
-**Char versus String seam bites constantly** -- it has now cost this session
-three separate bugs (`sound`'s note table, `file`'s tests, `file`'s reference
-example), always as `X = 'a'` silently answering False where `X` is a String.
-Write `Str ('a')` on the literal side.
+**Char versus String seam** cost four bugs here before 0.3.0 closed it
+(`sound`'s note table, `file`'s tests, `file`'s reference example, and a path
+round-trip), always as `X = 'a'` silently answering False where `X` was a
+String. ⚠️ **That is fixed: they compare equal now, Map keys included.** The
+two remain distinct *types* — only equality was unified.
 
 `examples/piano.a24` is where `graph` and `sound` meet: one octave of keys,
 Ode to Joy, each key lit as it sounds. It is a walk over what `Score` answers

@@ -7171,10 +7171,10 @@ System.WriteLn ('no trailing newline: ', ReadLines ('poem.txt').Length, ' lines'
 WriteAll ('poem.txt', 'a' + #10 + 'b' + #10 + 'c' + #10);
 System.WriteLn ('with one:            ', ReadLines ('poem.txt').Length, ' lines');
 
-// A file written on Windows reads the same as one written here. Note the
-// Str: a one-character literal is a Char, and a Char never equals a String.
+// A file written on Windows reads the same as one written here: the carriage
+// return goes with the newline, so the first line is one character and not two.
 WriteAll ('poem.txt', 'a' + #13 + #10 + 'b' + #13 + #10);
-System.WriteLn ('carriage returns:    ', ReadLines ('poem.txt')[0] = Str ('a'));
+System.WriteLn ('carriage returns:    ', Length (ReadLines ('poem.txt')[0]), ' char');
 
 Erase ('poem.txt');
 ```
@@ -7184,7 +7184,7 @@ lines back: 3
 unchanged:  true true
 no trailing newline: 3 lines
 with one:            3 lines
-carriage returns:    true
+carriage returns:    1 char
 ```
 
 
@@ -7366,9 +7366,10 @@ extension function Repeat (S : String, Times : Integer) : String;
 
 **Remarks**
 
-A one-character literal is a Char and not a String, and a Char is accepted
-here — `Repeat ('-', 40)` is the call the routine exists for, and
-`Repeat ('ab', 3)` works the same way.
+A one-character literal is a Char rather than a String, and a Char is accepted
+where a String is declared — `Repeat ('-', 40)` is the call the routine exists
+for, and `Repeat ('ab', 3)` works the same way. (The two are distinct types but
+compare equal from 0.3.0 onward, so nothing here needs `Str ('-')`.)
 
 A `Times` of zero answers the empty string, which is what makes the routine
 usable for a width that may come to nothing. A negative `Times` raises rather

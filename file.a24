@@ -2474,9 +2474,10 @@ end
 /// # Examples cites this by name from `SplitPath`.
 ///
 /// The three parts concatenate back into the path for every input, which is
-/// what makes the split safe to undo. Note `Str` on the single-character
-/// cases: a one-character literal is a Char, and a Char never equals a
-/// String, so comparing against a bare `'/'` would fail whatever the code did.
+/// what makes the split safe to undo. The `Str` on the single-character cases
+/// is historical: before 0.3.0 a Char and a String never compared equal, so a
+/// bare `'/'` failed whatever the code did. They compare equal now, and the
+/// calls stay only so this suite still runs on 0.1.6.
 test 'SplitPath Takes A Path Apart And Puts It Back';
 begin
     for var P in ['/usr/local/bin/algc', 'notes.txt', '/tmp/archive.tar.gz',
