@@ -298,6 +298,32 @@ match the wrappers.
    (H-1). A wrapper is compiled against SDL's real headers, so a mismatch is a
    compile error instead of a plausible wrong number.
 
+## The bytecode machine is a separate install, and it carries its own copy
+
+⚠️ **`algvm` is its own Homebrew formula and it bundles a snapshot of THIS
+library.** Checked 2026-11-12 on 0.3.2:
+`/opt/homebrew/Cellar/algol24-vm/0.3.2/libexec/lib/` holds the units,
+`REFERENCE.md`, `graphfont.hex`, `beep.wav` **and every `lib*ffi.so`**. So a
+shim rebuilt here is invisible to the VM until that formula is rebuilt — a new
+`external` answers `No foreign symbol 'x' in 'lib….so'.` under `algvm` while
+working perfectly under `algc`. ⚠️ **`ALGOL24_LIB` does NOT redirect `.so`
+resolution**, so there is no way to point the VM at a working copy; it was
+tried.
+
+⚠️ **So "works on all three processors" has to be CHECKED on three, and this
+file claimed two for a while.** `algc file.a24` is the tree-walker,
+`algc --compile` plus `cc` is the C, and **`algvm file.a24` is the third** —
+there is no `--vm` flag on `algc`, which is what made it easy to miss. A unit
+with no C is testable on the VM the moment it is written: `testing`, `strings`
+and `reflect` each pass their whole suite under `algvm --test`. A unit with
+*new* C is not testable there at all until the formula moves.
+
+⚠️ **`ParamStr (0)` answers the `.a24` source path under BOTH the interpreter
+and the VM**, and the binary only when compiled. Measured on 0.3.2. Anything
+re-executing the running program therefore needs the processor's own path from
+somewhere else off the compiled path, and `dos.Exec` will not `PATH`-search for
+it.
+
 ## The Library Reference
 
 `REFERENCE.md` is patterned after Turbo Pascal's reference. Entries are

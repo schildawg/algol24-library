@@ -77,9 +77,20 @@ The proposal defers on cost:
 > It is deferred by a number in this document: a child that re-executes the
 > program **recompiles** it, and the Inn takes 27.6 s to start.
 
-That 27.6 s is the *interpreted* start-up of a program doing ~26 s of its own
-art loading. It is not the spawn cost. Measured, a compiled binary
-re-executing itself 50 times:
+That 27.6 s is not the spawn cost. It is a program doing ~26 s of its own art
+loading — decoding roughly 400 MB of artwork — and it is **measured under the
+bytecode machine**, not interpreted.
+
+⚠️ **This paragraph said "the *interpreted* start-up" until 2026-11-12, and
+that was wrong.** The author of the program corrected it: the figure is a VM
+measurement of a 400 MB decode. The error mattered, because it made
+"compile it" look like an alternative to concurrency when it is not one — the
+work is bulk decoding that wants dividing across cores, and this document had
+no business asserting a processor for somebody else's program without
+measuring it. The section's own conclusion is unaffected: the spawn cost is
+below a millisecond either way.
+
+Measured, a compiled binary re-executing itself 50 times:
 
 | | |
 | --- | --- |
@@ -87,9 +98,11 @@ re-executing itself 50 times:
 | three warm runs | **0.80, 0.80, 0.78 ms** per child |
 
 So for a compiled binary the child *is* the binary and nothing recompiles. The
-recompile objection applies only to the interpreted case — which is also the
-case `ParamStr (0)` makes awkward, so the two limitations coincide rather than
-compound.
+recompile objection applies to the interpreted case and to the **bytecode
+machine**, where `ParamStr (0)` answers the `.a24` source path rather than the
+running processor — measured on 0.3.2 under both. So a child re-executing
+itself there needs the processor's own path from somewhere else, and
+`Spawn` will not `PATH`-search for it.
 
 ⚠️ **This is a small binary's floor.** A large program's own start-up is its
 own problem, which is the argument *for* a pool rather than against the
