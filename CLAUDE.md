@@ -332,9 +332,11 @@ Learned here, by use:
   remains underneath: `and` and `or` test truthiness and yield an *operand*
   [EXP-010], so `6 and 3` is **3** where `6 & 3` is 2. Since 0.1.6 handing
   either an Integer **warns** and names the bitwise operators, which closes
-  most of `DEFECTS.md` H-3 — but ⚠️ **that warning goes to stdout**, so a unit
-  using `and` on an Integer would add a line to every consumer's output. That
-  is L-4's third trigger. No unit here does; checked by compiling all ten.
+  most of `DEFECTS.md` H-3. That warning went to **stdout** until 0.3.2 moved
+  it to stderr (L-4, closed), so a unit using `and` on an Integer no longer
+  adds a line to every consumer's output — but no unit here does it anyway,
+  checked by compiling all ten, and the semantic trap above is the reason
+  rather than the stream.
 - ⚠️ **`^` is FASTER than a foreign call, so bit work needs no C.** Measured
   over three runs: the native operator 1.87 µs a call against `alg_xor`'s
   7.6 µs, the FFI overhead dwarfing a one-instruction operation — and against
@@ -366,14 +368,18 @@ Learned here, by use:
   ordinary function fine and answers `Undefined property 'Upper'.` for the
   method spelling. This is the same non-transitivity that made `crt` duplicate
   `graph`'s constants, and it applies to method syntax too.
-- ⚠️ **A member of the name always wins, and the warning that says so goes to
-  stdout.** `x.f` resolves to a member first [EXP-022] and reaches an extension
-  only where the program was an error before, so nothing already written can
-  change meaning. Where a member hides a visible extension the compiler warns
-  and names the class — onto **stdout**, which is `DEFECTS.md` L-4. Any
-  extension this library exports must therefore be named clear of the member
-  names on its own classes, or a consumer's output gains a line it did not
-  print.
+- ⚠️ **A member of the name always wins, and the warning that says so went to
+  stdout until 0.3.2.** `x.f` resolves to a member first [EXP-022] and reaches
+  an extension only where the program was an error before, so nothing already
+  written can change meaning. Where a member hides a visible extension the
+  compiler warns and names the class; that warning is on **stderr** since
+  0.3.2 (`DEFECTS.md` L-4, closed), where it used to be on stdout. ⚠️ **So
+  naming an exported extension clear of consumers' member names is no longer a
+  correctness constraint, and it was a real one** — a clash used to add a line
+  to a consumer's own output, which is what ruled out the obvious names for a
+  reflection unit. A clash now costs a diagnostic on stderr and nothing else.
+  The check is also **receiver-type aware**: an extension on `String` does not
+  disturb `Map.Contains`.
 - ⚠️ **Extensions do not remove the surface-first aliases.** The 59 delegates
   in `graph` and `crt` go the other way — they give a *method* a free-function
   spelling, `Line (V, …)` for `V.Line (…)` — where `extension` gives a function
@@ -489,13 +495,14 @@ Two live documents sit in the root rather than in `finished/`:
   instance, an Integer and a String alike, where member lookup would not —
   confirmed on 0.3.1, both spellings. `NOTES-REFLECTION.md` holds what was
   measured and the decisions the unit needs; the user names the unit and its
-  methods as always. Three things that will bite whoever writes it:
-  **`TypeOf (nil)` is `nil`**, so every entry point needs a guard or it raises
-  `Only instances have properties.`; **`SetMember` does not enforce the
-  declared type**, being deliberately as permissive as an untyped assignment,
-  so the unit checks; and **a member of a consumer's class wins over an
-  extension of the same name and warns onto stdout** [EXP-022], which is L-4 —
-  so `Describe` and `Fields` are exactly the wrong names to export.
+  methods as always. Two things will bite whoever writes it, both specified
+  rather than faults: **`TypeOf (nil)` is `nil`**, so every entry point needs a
+  guard or it raises `Only instances have properties.`; and **`SetMember` does
+  not enforce the declared type**, being deliberately as permissive as an
+  untyped assignment, so the unit checks. A third constraint is **gone** — a
+  member of a consumer's class still wins over an extension of the same name
+  [EXP-022], but 0.3.2 put that warning on stderr, so the name no longer has
+  to dodge plausible member names to keep a consumer's output clean.
 - `REPORT-CONCURRENCY.md` answers the core's `PROPOSAL-CONCURRENCY.md` and
   **asks for nothing.** It agrees with that document's conclusion and corrects
   four of its supporting claims — chiefly that subprogram re-entry works today
@@ -657,11 +664,12 @@ unlike `file` it does not build anywhere; Windows would need
 floor at 0.1.5, being the first unit to use `extension` [FUN-015] which 0.1.4
 cannot parse. 0.1.6 raised it: `Str (X, Decimals)`, the bitwise operators and
 `Buffer.PutDouble` all appear in units and in `REFERENCE.md` examples now, so
-`./test.sh` fails on anything older. Verified working on **0.2.4**, **0.3.0**
-and **0.3.1**, which is current — 0.3.0 unified Char and String equality and
-broke nothing here, because this library had worked around the seam at 44
-sites rather than being bitten by it a fifth time, and 0.3.1 added reflection,
-which no unit uses yet. ⚠️ **The floor stays at 0.1.6 only while that remains
+`./test.sh` fails on anything older. Verified working on **0.2.4**, **0.3.0**,
+**0.3.1** and **0.3.2**, which is current — 0.3.0 unified Char and String
+equality and broke nothing here, because this library had worked around the
+seam at 44 sites rather than being bitten by it a fifth time; 0.3.1 added
+reflection, which no unit uses yet; and 0.3.2 closed **L-4, L-5 and L-6**,
+emptying `DEFECTS.md`'s open list for the first time. ⚠️ **The floor stays at 0.1.6 only while that remains
 true:** the first unit here to call `Fields`, `TypeOf`, `Member`, `Invoke`,
 `New` or `SetMember` raises it to **0.3.1** for every consumer of the library,
 which is the cost to weigh before the reflection unit lands.

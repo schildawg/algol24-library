@@ -1,8 +1,15 @@
 # Notes: reflection shipped in 0.3.1, and what finalizing it here needs
 
 **Status:** notes, not a plan. Nothing here chooses a unit or a surface — the
-user names those. What follows is what was measured against `algc 0.3.1`, the
-decisions the unit cannot be written without, and the one defect found.
+user names those. What follows is what was measured against `algc 0.3.1` and
+re-verified on **0.3.2**, plus the decisions the unit cannot be written
+without.
+
+⚠️ **0.3.2 closed all three defects this work found or depended on** — L-4,
+L-5 and L-6 — so `DEFECTS.md` has nothing open for the first time. Two of them
+mattered here: **L-6 blocked anything that constructs**, and **L-4 governed
+the unit's naming**. Both constraints are gone, and §3 and §5 are revised
+accordingly.
 
 `PROPOSAL-REFLECTION.md` has the history against what this library asked for.
 This file is the working side: what is true, what bites, and what is still a
@@ -20,7 +27,7 @@ Seven things, six built-ins and one method on a type value:
 | `TypeOf (X)` | [RT-032] | a type as a value; interned; a class answers `Name`, `Parent`, `Fields`, `Methods`, `Properties` |
 | `Member (X, Name)` | [RT-033] | reads a field, runs a property, reaches a **private** member |
 | `Invoke (X, Name, Args)` | [RT-033] | calls a method, selects among an overload set at run time, reaches a private one |
-| `New (T, Args)` | [RT-034] | constructs from a type held as a value — **see L-6** |
+| `New (T, Args)` | [RT-034] | constructs from a type held as a value; selects on count and type since 0.3.2 |
 | `SetMember (X, Name, V)` | [RT-034] | writes a field by name, finds an inherited one, folds the name |
 | `T.Accepts (X)` | [RT-035] | the dynamic form of `is`, including on a class fetched out of a Map |
 
@@ -47,22 +54,29 @@ in the shared object model, so all three processors inherit one implementation
 flag on `algc 0.3.1`, so "both processors" here means interpreted and compiled
 C; the bytecode machine is not separately reachable from the command line.
 
-## 2. One defect: `New` does not count its arguments
+## 2. The defect this found, closed in 0.3.2
 
-`DEFECTS.md` **L-6**, found here. Interpreted, `New (T, [])` against a
-constructor wanting one argument leaks `Index 0 out of range 0..-1.`, and
-`New (T, [1, 2])` is **not refused at all** — the extra is discarded and a
-plausible instance comes back. Compiled is correct on both. The written form
-and `Invoke` are correct interpreted, so it is `New` alone.
+`DEFECTS.md` **L-6**, found here and fixed. On 0.3.1, `New (T, [])` against a
+constructor wanting one argument leaked `Index 0 out of range 0..-1.`
+interpreted, and `New (T, [1, 2])` was **not refused at all** — the extra was
+discarded and a plausible instance came back. Compiled was correct on both.
 
-⚠️ **This is the one place the unit will meet it.** A deserializer calls
-`New (T, [])` to make a blank instance before filling it, so a class whose
-constructor demands arguments is exactly the too-few case. Until L-6 is fixed
-the unit cannot give a decent diagnostic for "this class cannot be made
-blank", because interpreted it gets a subscript error rather than a sentence
-it could catch and re-raise usefully.
+**0.3.2 matches the written form in both shapes**, which is more than a count
+check would have given: a class with one constructor answers
+`Expected 1 arguments but got 0.` exactly as the written call does, and an
+overload set answers `No matching signature`. Selection still works through
+`New` — `Init (A)` and `Init (A, B)` answer 105 and 1056 for `[5]` and
+`[5, 6]`, matching the written calls — and the other five built-ins are
+byte-identical to their 0.3.1 output, so the fix was narrow.
 
-## 3. Three things that will bite whoever writes the unit
+⚠️ **So a deserializer can construct now.** `New (T, [])` to make a blank
+instance is still only possible where the class's constructors accept no
+arguments; where one demands them, the unit gets a catchable sentence to
+re-raise rather than an internal subscript error. That is the difference
+between a decent diagnostic and a confusing one, and it is why the read half
+is no longer the only half worth starting.
+
+## 3. Two things that will bite whoever writes the unit, and one that no longer does
 
 ⚠️ **`TypeOf (nil)` is `nil`, so every entry point needs a guard.** [RT-032]
 is explicit about it — `nil is X` is false for every `X`, so a type value for
@@ -91,22 +105,31 @@ So the declared type `Fields` answers is what a deserializer checks
 **against**; it is not checked **for** it. A subrange and a property are
 refused; a plain type mismatch is not.
 
-⚠️ **Naming is the real constraint, because a clash warns onto stdout.** A
-member of the name wins [EXP-022] and the compiler says so on **stdout**,
-which is `DEFECTS.md` L-4 — still open on 0.3.1, verified, stderr empty:
+⚠️ **Naming WAS the real constraint, and 0.3.2 removed it.** On 0.3.1 a
+member of the name won [EXP-022] and the compiler said so on **stdout**
+(`DEFECTS.md` L-4), so any name this unit exported that a consumer also used
+as a member printed a line in *their* program's output. That ruled out the
+obvious names — `Describe`, `Equals`, `Clone` and the rest. Measured again on
+0.3.2, with the streams separated:
 
 ```console
-[WARN] clash.a24:14: 'Describe' is a member of Report, so the extension of that name is not reached.
-member wins: my own
+$ algc t4.a24 2>/dev/null
+my own                             # stdout is the program's own output
+$ algc t4.a24 2>&1 >/dev/null
+[WARN] t4.a24:12: 'Describe' is a member of Report, so the extension of that name is not reached.
 ```
 
-Any name this unit exports that a consumer also uses as a member adds a line
-to that consumer's output. So the names have to dodge plausible member names,
-and the obvious ones are the worst: **`Describe`, `Fields`, `Name`, `Parent`,
-`Methods`, `Properties`, `Accepts`, `Equals`, `Copy`, `Clone`** are each
-either a likely member on somebody's class or already a member on a class
-value [RT-032], which the spec notes "costs an extension called `Name` or
-`Accepts` the call on a class".
+The warning still fires, correctly — it is what announces the capture a class
+performs by adding a member in a later version — but on stderr. **So a clash
+now costs a diagnostic rather than a corrupted program**, and the unit may be
+named for what reads best.
+
+⚠️ **Two names are still unavailable, for a different reason.** [RT-032] makes
+`Name`, `Parent`, `Fields`, `Methods`, `Properties` and `Accepts` members of a
+class *value*, and a member wins, so an extension of one of those names could
+not be called on a class — the specification notes this costs "an extension
+called `Name` or `Accepts` the call on a class". That is a real surface
+collision rather than an output one, and it survives the L-4 fix.
 
 ## 4. What a copy protocol needs, and the one hole left
 
@@ -175,23 +198,30 @@ does not reflect on it.
    serializer. The first two are a few lines each over `Fields` and `Member`;
    the serializer is the one with real design in it, and the one the
    concurrency story wants.
-3. **The exported names**, given §3 — this is the decision with a consequence
-   a consumer can see, since a wrong choice prints a warning in somebody
-   else's program.
+3. **The exported names.** Much freer than it was: §3's stdout constraint is
+   gone, so the only names actually unavailable are the six [RT-032] puts on a
+   class value. Pick for readability.
 4. **Whether the serializer belongs here at all.** It needs a wire format,
    which is a choice this library has not had to make before, and a registry
    the *consumer* owns rather than the unit. A describer and a comparer need
    neither.
-5. **Whether to wait on L-6.** The read half — a describer, a comparer — does
-   not touch `New` and could be written today. Anything that constructs does.
+5. ~~**Whether to wait on L-6.**~~ Moot — L-6 is fixed, so the constructing
+   half is as writable as the read half. Nothing here is blocked on the
+   compiler any more.
 
 ## 6. What it costs
 
 ⚠️ **The first unit here to call any of the seven raises the library's
-compiler floor from 0.1.6 to 0.3.1** for every consumer, not just for
-programs that use reflection — `./test.sh` runs every unit. That is the whole
-cost; there is no per-program run-time cost, the tables being per class and
-already built, which is the test the shadow-stack measurement set.
+compiler floor from 0.1.6 to 0.3.2** for every consumer, not just for programs
+that use reflection — `./test.sh` runs every unit. **0.3.1 is where the
+built-ins exist and 0.3.2 is where `New` selects correctly interpreted**, so a
+unit that only reads could claim 0.3.1 and one that constructs could not;
+carrying two floors to save one patch release is not worth it, so the number
+is 0.3.2.
+
+That is the whole cost. There is no per-program run-time cost — the tables are
+per class and already built, which is the test the shadow-stack measurement
+set — and nothing a program that never reflects pays for.
 
 ## Appendix: how this was gathered
 
@@ -205,6 +235,13 @@ undeclared name and an untyped field; `New` against a stored class, a wrong
 argument type and a wrong argument count; an `extension function … (X : Any)`
 in a real unit called both spellings from a consumer; a member/extension clash
 with stdout and stderr separated; and the `Encode`/`Decode` round trip.
+
+Re-verified on 0.3.2: the seven-built-in probe byte-identical to its 0.3.1
+output and across processors; the round trip unchanged; the `nil`,
+`SetMember` and collection-boundary edges unchanged, all three being specified
+behavior rather than faults; L-4's four triggers with the streams separated;
+L-5 across the counts its old boundary cut at; and L-6 against a
+single-constructor class, an overload set and the written form of each.
 
 ⚠️ **No compiler source was read.** The specification was pulled for
 [RT-031] through [RT-035], which is reference material; behavior was

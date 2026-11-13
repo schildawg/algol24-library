@@ -22,16 +22,20 @@ says so; **the reversal shipped**, so the last three rows above are things this
 document argued against asking for. What changed is recorded next, and the
 original ask follows unedited.
 
-⚠️ **Verified on 0.3.1 rather than assumed.** All six were exercised against a
-class with inheritance, an overload set, a property, a private method and an
-untyped field, and the interpreted and compiled output is **byte-identical** —
-which is the structural claim this document made for reflection over
-coroutines, now measured on the shipped thing. One exception, recorded as
-`DEFECTS.md` **L-6**: `New` does not check its argument count interpreted, and
-too many arguments is silently accepted there and refused compiled.
+⚠️ **Verified on 0.3.1 rather than assumed, and re-verified on 0.3.2.** All
+six were exercised against a class with inheritance, an overload set, a
+property, a private method and an untyped field, and the interpreted and
+compiled output is **byte-identical** — which is the structural claim this
+document made for reflection over coroutines, now measured on the shipped
+thing. There was one exception on 0.3.1, `DEFECTS.md` **L-6**: `New` did not
+check its argument count interpreted, and too many arguments was silently
+accepted there and refused compiled. **0.3.2 closed it**, along with L-4 and
+L-5, so nothing in `DEFECTS.md` is open.
 
 ⚠️ **Using any of it raises this library's compiler floor from 0.1.6 to
-0.3.1**, which is the one cost to weigh before a unit here depends on it.
+0.3.2** — 0.3.1 for the built-ins to exist, 0.3.2 for `New` to select
+correctly interpreted — which is the one cost to weigh before a unit here
+depends on it.
 
 **Concerns:** one listable table and one type answer — **read-only**, no new
 machinery, and nothing a program can use to change its own shape

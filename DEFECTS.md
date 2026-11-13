@@ -14,10 +14,34 @@ Three kinds of thing, and the distinction matters:
 
 ## Defects
 
-### L-6 — `New` does not check its argument count, and the two processors disagree
+*None open.* L-4, L-5 and L-6 all closed in 0.3.2; see below.
 
-**Status:** open, found 2026-11-12 on 0.3.1 while verifying the reflection
-release against `REPORT-CONCURRENCY.md`.
+## Closed
+
+### L-6 — `New` did not check its argument count, and the two processors disagreed
+
+**Status:** **CLOSED in 0.3.2**, verified 2026-11-12. Found on 0.3.1 while
+verifying the reflection release against `REPORT-CONCURRENCY.md`.
+
+⚠️ **The fix matches the written form in both shapes, which is more than
+"gives an error now".** [RT-034]'s promise is that `New` answers exactly what
+a written construction answers, and that is two different sentences depending
+on whether the class has one constructor or an overload set. Both now agree,
+interpreted and compiled:
+
+| | `New`, interpreted | written form, interpreted |
+| --- | --- | --- |
+| one constructor, no arguments | `Expected 1 arguments but got 0.` | `Expected 1 arguments but got 0.` |
+| one constructor, two arguments | `Expected 1 arguments but got 2.` | `Expected 1 arguments but got 2.` |
+| an overload set, count matching neither | `No matching signature for Needs.` | `No matching signature for Needs.` |
+
+**And selection still works through it**, which a fix that merely counted
+arguments could have broken: a class with `Init (A)` and `Init (A, B)` answers
+105 through `New (Two, [5])` and 1056 through `New (Two, [5, 6])`, the same as
+the written calls. A wrong argument *type*, a non-List `Args` and a type
+rather than a class are all still refused with their own sentences, and the
+other five built-ins are byte-identical to their 0.3.1 output. What follows is
+the original report.
 
 [RT-034] says of `New` and `SetMember` that "**both answer exactly what the
 written form answers**", and that `New` "selects among the constructors on the
@@ -87,11 +111,34 @@ the right sentence compiled. Nothing here is built on it yet; the conformance
 corpus covers a wrong type (`0222`) and a non-List (`New (Thing, 3)`) but not
 a count mismatch, which is why it passes.
 
-### L-5 — `System.WriteLn` takes one argument compiled and any number interpreted
+### L-5 — `System.WriteLn` took one argument compiled and any number interpreted
 
-**Status:** open, found 2026-11-12 on 0.3.0 while porting a star chart into
-`examples/stars.a24`. Re-verified unchanged on **0.3.1**, the boundary still
-at exactly one argument.
+**Status:** **CLOSED in 0.3.2**, verified 2026-11-12. Found on 0.3.0 while
+porting a star chart into `examples/stars.a24`, and unchanged on 0.3.1.
+
+The C back end now takes the qualified spelling variadically, so [RT-001] and
+[MOD-011] hold on both processors. Measured across the counts the old boundary
+cut at, plus mixed types, with `System.Write` and the unqualified spelling
+alongside — **identical interpreted and compiled**:
+
+```console
+                          # System.WriteLn ();
+one                       # System.WriteLn ('one');
+ab                        # System.WriteLn ('a', 'b');
+a42b                      # System.WriteLn ('a', 42, 'b');
+x12.5truey                # System.WriteLn ('x', 1, 2.5, True, 'y');
+ab                        # System.Write ('a', 'b'); System.Write (#10);
+unqualified still fine
+w1
+```
+
+⚠️ **This is what unblocks compiling a `graph` program that reports to the
+console.** `graph` shadows `Write`/`WriteLn`, so the qualified spelling is the
+only console route such a program has, and it was the one the back end
+refused. `examples/stars.a24` still concatenates its one console line into a
+single argument — that is now a style rather than a workaround, and the
+comment naming this entry should go when anything else touches the file. What
+follows is the original report.
 
 The qualified spelling of a variadic built-in refuses more than one argument
 in the C back end, and runs interpreted:
@@ -140,13 +187,43 @@ compiles, and says so in a comment naming this entry. Nothing else here calls
 the qualified spelling with more than one argument; checked across all ten
 units and every example.
 
-### L-4 — a warning goes to stdout, where it mixes with the program's output
+### L-4 — a warning went to stdout, where it mixed with the program's output
 
-**Status:** open, reported 2026-09-04. Re-verified unchanged against 0.1.5 on
-2026-10-24, where it acquired a second and likelier trigger — see below, and
-against **0.3.1** on 2026-11-12, where reflection gave it a **fourth**: the
-extension/member clash a `reflect` unit must be named around. No longer the
-narrow remainder it was.
+**Status:** **CLOSED in 0.3.2**, verified 2026-11-12. Reported 2026-09-04 and
+open across 0.1.5, 0.1.6, 0.2.4, 0.3.0 and 0.3.1 — the longest-lived entry
+here, and by the end it had four triggers.
+
+⚠️ **All four moved, and the fix is narrow: every warning is still emitted,
+with the same text and the same line number, on stderr instead.** A fix that
+silenced any of them would have been worse than the defect. Measured with the
+streams separated:
+
+| trigger | stdout | stderr |
+| --- | --- | --- |
+| an overload settled at run time | `int` / `str` | `[WARN] …:6: 'Same' selects among 2 overloads at run time.` |
+| a member hiding a visible extension | `99` | `[WARN] …:12: 'Size' is a member of Box, …` |
+| an Integer handed to `and` | `3` | `[WARN] …:1: an operand of 'and' is an Integer, where '&', '|' and '~' …` |
+| an `Any`-receiver extension against a member | `my own` | `[WARN] …:12: 'Describe' is a member of Report, …` |
+
+**Two consequences worth recording, because both were live constraints.**
+
+1. ⚠️ **The reflection unit's naming is no longer governed by this.** Its
+   surface is all extensions [MOD-015], so any exported name a consumer also
+   used as a member printed a line in *their* stdout — which ruled out
+   `Describe`, `Equals` and the other obvious names. The warning still fires,
+   correctly, but on stderr, so a clash now costs a diagnostic rather than a
+   corrupted program. `NOTES-REFLECTION.md` §3 records the change.
+2. ⚠️ **`check-reference.py` and `examples/check.sh` are no longer exposed.**
+   Both compare a program's output byte for byte, so a single legitimately
+   ambiguous overload anywhere in a unit would have broken them. That is why
+   the entry mattered to this repository beyond tidiness.
+
+**H-3's last defect-shaped edge goes with it.** 0.1.6's Integer-to-`and`
+warning closed most of that hazard and its stream was the residue; the hazard
+itself stands, `6 and 3` still being **3** by [EXP-010] rather than 2, which is
+specified behavior the library defends against rather than anything to fix.
+
+What follows is the original report, kept for the four triggers' detail.
 
 ⚠️ **The fourth trigger, measured on 0.3.1** — a consumer's own member of the
 same name as a visible extension, with the streams separated:
@@ -253,8 +330,6 @@ extension-exporting unit carries the risk that a later version of some class
 starts narrating into its output.
 
 ---
-
-## Closed
 
 ### L-2 — overload selection warned even when arity made it unambiguous
 

@@ -338,9 +338,9 @@ begin
     var Figures := LoadFigures (DataPath ('lines.csv'), Stars);
     var Shown   := OnChart (Stars);
 
-    // One argument, built by concatenation, because the qualified spelling of
-    // a variadic built-in takes only one in the C back end -- DEFECTS.md L-5.
     // `graph` shadows WriteLn, so System.WriteLn is the only console route.
+    // The concatenation is now a style rather than a workaround: it was once
+    // the only form that compiled, which 0.3.2 fixed (DEFECTS.md L-5, closed).
     System.WriteLn (Str (Stars.Length) + ' stars read, ' + Str (Shown.Length) +
                     ' on the chart, ' + Str (Figures.Length) + ' figure segments');
 
