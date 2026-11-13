@@ -21,11 +21,22 @@
 /// H-4. The guard is not an optimisation; it is what makes the routines safe
 /// to call on data the caller did not construct.
 ///
-/// Needs compiler 0.3.2, which is the first release where `New` selects
-/// correctly under the interpreter, and the first where a reflection built-in
-/// exists at all. Pure Algol-24, with no foreign code and no `uses`: the third
-/// unit after `testing` and `strings` that a per-platform build has nothing to
-/// rewrite in.
+/// Needs compiler 0.3.1, the release the reflection built-ins shipped in. This
+/// unit calls `Fields`, `TypeOf` and `Member` [RT-031, RT-033], and one test
+/// calls `SetMember` [RT-034]; it does not call `New`, so `DEFECTS.md` L-6
+/// never applied to it.
+///
+/// 0.3.2 is worth having anyway, for a reason outside this unit: where a
+/// consumer's own class has a member of the same name as one of these
+/// extensions, the member wins and the compiler says so [EXP-022] -- and
+/// before 0.3.2 it said so on **stdout**, adding a line to that program's own
+/// output. That was L-4, and it is why these two could not have been called
+/// `Describe` and anything near `Equals` before it closed.
+///
+/// Pure Algol-24, with no foreign code and no `uses`: the third unit after
+/// `testing` and `strings` that a per-platform build has nothing to rewrite
+/// in, and so one of the three testable on all three processors the moment it
+/// is written.
 unit reflect;
 
 // --------------------------------------------------------------- the predicate

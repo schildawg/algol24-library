@@ -687,19 +687,37 @@ its number, which is unambiguous because an exit code cannot reach that far.
 unlike `file` it does not build anywhere; Windows would need
 `GetDiskFreeSpaceEx` and `CreateProcess` behind the same three functions.
 
-⚠️ **The library needs compiler 0.1.6 or newer.** `strings` set the first
-floor at 0.1.5, being the first unit to use `extension` [FUN-015] which 0.1.4
-cannot parse. 0.1.6 raised it: `Str (X, Decimals)`, the bitwise operators and
-`Buffer.PutDouble` all appear in units and in `REFERENCE.md` examples now, so
-`./test.sh` fails on anything older. Verified working on **0.2.4**, **0.3.0**,
-**0.3.1** and **0.3.2**, which is current — 0.3.0 unified Char and String
-equality and broke nothing here, because this library had worked around the
-seam at 44 sites rather than being bitten by it a fifth time; 0.3.1 added
-reflection, which no unit uses yet; and 0.3.2 closed **L-4, L-5 and L-6**,
-emptying `DEFECTS.md`'s open list for the first time. ⚠️ **The floor stays at 0.1.6 only while that remains
-true:** the first unit here to call `Fields`, `TypeOf`, `Member`, `Invoke`,
-`New` or `SetMember` raises it to **0.3.1** for every consumer of the library,
-which is the cost to weigh before the reflection unit lands.
+⚠️ **The floor is SPLIT as of library v0.2.0, and saying only one number gets
+it wrong.** `reflect` calls the reflection built-ins and nothing else does, so:
+
+| | needs |
+| --- | --- |
+| a consumer that does not `uses reflect` | **0.1.6** |
+| a consumer that does | **0.3.1** |
+| `./test.sh`, which runs every unit | **0.3.1** |
+
+`strings` set the first floor at 0.1.5, being the first unit to use
+`extension` [FUN-015] which 0.1.4 cannot parse. 0.1.6 raised it:
+`Str (X, Decimals)`, the bitwise operators and `Buffer.PutDouble` all appear
+in units and in `REFERENCE.md` examples. 0.3.1 is where `Fields`, `TypeOf`,
+`Member` and `SetMember` exist at all — the four `reflect` uses. It does
+**not** use `New`, so L-6 never applied to it, and claiming 0.3.2 on its
+account would be wrong.
+
+⚠️ **0.3.2 is still what to recommend to anyone using `reflect`**, for a
+reason outside the unit: before it, the extension-versus-member warning went
+to **stdout** (L-4), so a consumer whose class had a clashing member name got
+a line added to their own program's output. Advice, not a floor.
+
+The twelve units other than `reflect` are verified working on **0.2.4**,
+**0.3.0**, **0.3.1** and **0.3.2**, which is current — 0.3.0 unified Char and
+String equality and broke nothing here, because this library had worked around
+the seam at 44 sites rather than being bitten by it a fifth time; 0.3.1 added
+reflection; and 0.3.2 closed **L-4, L-5 and L-6**, emptying `DEFECTS.md`'s
+open list for the first time. ⚠️ **`reflect` has only been RUN on 0.3.2.** Its
+0.3.1 floor is read off what it calls rather than measured, no older compiler
+being installed here, so it is a claim about the built-ins' release and not a
+test result.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
 `reflect` is now the third — the three that are portable as written, with

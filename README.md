@@ -42,10 +42,16 @@ is what it printed.
 
 ## Building and testing
 
-Needs `algc` **0.1.6 or newer** on the path (`brew install algol24`), a C
-compiler, and SDL2 for `graph` and `sound` (`brew install sdl2`). The version floor is
-`strings`, which uses extension functions that an earlier compiler cannot
-parse. The test run opens no windows and makes no noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`
+Needs `algc` on the path (`brew install algol24`), a C compiler, and SDL2 for
+`graph` and `sound` (`brew install sdl2`).
+
+**The compiler floor depends on what you use.** `0.1.6` is enough for twelve
+of the thirteen units — the floor is `strings`, whose extension functions an
+earlier compiler cannot parse. `reflect` needs **`0.3.1`**, where the
+reflection built-ins shipped, and so does `./test.sh`, which runs every unit.
+`0.3.2` is what to install if you can: before it, an extension whose name
+collides with a member of your own class printed a warning on your program's
+**stdout**. The test run opens no windows and makes no noise — it sets `SDL_VIDEODRIVER=dummy` and `ALG_SOUND=dummy`, so `graph`
 draws nowhere and `sound` computes every note and plays none of them.
 
 ```sh
