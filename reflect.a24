@@ -37,8 +37,13 @@ unit reflect;
 /// and a built-in type reports `Parent`, `Fields` and `Methods` exactly as a
 /// class with no fields does -- all `nil` or empty -- so the two are
 /// indistinguishable that way. `Fields (X).Length` fails for the same reason.
-/// What separates them is `ClassName`, which only an instance carries
-/// [CLS-008], so the test is whether asking for it succeeds.
+///
+/// What separates them is that `Member` itself only looks at an instance: on
+/// anything else it finds nothing at all, whatever the name is, even where
+/// written access reaches the thing. So asking for `ClassName` -- a name every
+/// instance is guaranteed to carry [CLS-008] -- is really a test of the
+/// receiver rather than of the name, which is why it answers reliably for a
+/// class whose own members are entirely unknown here.
 private function IsInstance (X : Any) : Boolean;
 begin
     try

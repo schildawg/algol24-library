@@ -185,16 +185,20 @@ specified rather than missing. The consequence for a decoder is that it cannot
 learn from the field table what to parse a list's elements into; it has to
 either encode each element's own type beside it, or be told.
 
-⚠️ **`Member` does not reach a collection's members, though the written form
-does.** `[1, 2].Length` is 2; `Member ([1, 2], 'Length')` is
-`Undefined property 'Length'.` A collection is not a class instance [TYP-009]
-and `Fields` of one is an empty Map by [RT-031], so this is consistent with
-the rest — but it sits oddly against [RT-033]'s "both answer exactly what the
-written form answers", which is framed around a class. Not recorded as a
-defect, because the specification's framing is about declared classes
-throughout; worth a question to the core if a unit here ever wants it. The
-practical answer is that a generic writer **iterates** a collection field and
-does not reflect on it.
+⚠️ **`Member` only looks at an instance, so written access is required for a
+collection's members and for a class value's.** `[1, 2].Length` is 2 while
+`Member ([1, 2], 'Length')` is `Undefined property 'Length'.`, and
+`TypeOf (T).Parent` answers while `Member (TypeOf (T), 'Parent')` does not.
+The limit is the **receiver** and not the member: on an instance `Member`
+reaches a declared field, a declared method, a declared property *and*
+`ClassName`, which the runtime provides rather than the class declaring it.
+
+This is consistent with the specification rather than against it. [RT-033]
+promises "the diagnostic for a name **the class** has not got", and a
+collection has no class [TYP-009] while a class value's six members [RT-032]
+belong to the runtime. It is also what makes `IsInstance` possible at all —
+see §3. The practical answer for a serializer is that a generic writer
+**iterates** a collection field rather than reflecting on it.
 
 ## 5. Decisions, and which are left
 

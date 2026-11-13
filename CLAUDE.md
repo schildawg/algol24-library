@@ -716,12 +716,23 @@ re-derived:
   carries [CLS-008], so the unit's private `IsInstance` is a `try` around
   `Member (X, 'ClassName')`. An exception as a type test is unlovely and is the
   honest answer; measure before replacing it with anything cleverer.
-- ⚠️ **`Member` reaches a class's DECLARED members and not the runtime's own.**
-  `TypeOf (E).Parent` answers, where `Member (TypeOf (E), 'Parent')` is
-  `Undefined property 'Parent'.` The same holds for a collection:
-  `[1, 2].Length` is 2 and `Member ([1, 2], 'Length')` is undefined. So written
-  access is required for those, which is why the unit reads `TypeOf (X).Name`
-  directly and detects a collection by that name rather than by probing.
+- ⚠️ **`Member` only looks at an INSTANCE, and the limit is the receiver
+  rather than the member.** On an instance it reaches everything the written
+  form does, a declared field, a declared method as a bound value, a declared
+  property, **and `ClassName`** — which the runtime provides rather than the
+  class declaring it. On anything that is not an instance it finds nothing at
+  all, even where written access works: `TypeOf (T).Parent` answers `Base`
+  while `Member (TypeOf (T), 'Parent')` is `Undefined property 'Parent'.`, and
+  `[1, 2].Length` is 2 while `Member ([1, 2], 'Length')` is undefined. All six
+  of a class value's members [RT-032] and both of a collection's [COL-003]
+  behave that way. So the unit reads `TypeOf (X).Name` with written access and
+  detects a collection by that name rather than by probing.
+  ⚠️ **This is also the real reason `IsInstance` works**: not that `ClassName`
+  is special, but that `Member` fails on every non-instance, so asking for a
+  name every instance is guaranteed to have is a test of the receiver. It is
+  consistent with the specification rather than against it — [RT-033] frames
+  its promise as "the diagnostic for a name **the class** has not got", and a
+  class value and a collection have no class [TYP-009].
 - ⚠️ **Both routines carry a cycle guard, and it is load-bearing rather than
   defensive.** An unguarded recursive walk over two instances that point at
   each other ends the process with **SIGSEGV and an empty stdout** —
