@@ -1,0 +1,397 @@
+/// Running several programs at once, and collecting them as they finish.
+///
+/// `dos.Exec` starts a program and waits for it, which is the whole of what a
+/// synchronous call needs and exactly what a task cannot have. This unit
+/// separates the start from the wait: `Spawn` answers a `Task` while the child
+/// is still running, and the caller asks it `Done ()` or `Wait ()` whenever it
+/// suits. Several tasks may be alive at once.
+///
+/// A child is a FRESH PROGRAM and never a fork. That is a measured constraint
+/// rather than a preference: the library's eight shims hold 25 static objects
+/// between them -- SDL handles, `FILE` pointers, the saved termios mode, the
+/// `drand48` state -- and a fork duplicates every one, so a forked parent and
+/// child produce identical random streams in silence.
+/// `REPORT-CONCURRENCY.md` has the reproduction.
+///
+/// A task carries no data back beyond its exit status. That is deliberate and
+/// not an oversight: the measured workload for this is loading art, where the
+/// payload is already bytes -- `graph`'s `Image.Bits` is a flat `Buffer`, so a
+/// worker writes it through `file` and the parent reads it back with no
+/// serialization at all, measured at 9834 MB/s against the 26 seconds of
+/// decoding it saves. A channel is the next piece of work, not a missing part
+/// of this one.
+///
+/// There is NO `Delay` here, and that is decided. `graph` and `crt` each have
+/// one, and a third copy would make a bare `Delay` ambiguous in the two
+/// combinations worth writing. `crt.Delay` needs neither a terminal nor
+/// `InitCrt` -- it is a plain nap -- so a headless program polling `Done ()`
+/// in a loop says `uses crt` for it.
+///
+/// Needs POSIX or Windows, through `dosffi.c`, which this unit reaches rather
+/// than carrying C of its own: the argument vector is built by the same two
+/// functions `dos.Exec` uses, so the quoting and the no-shell guarantee have
+/// one implementation rather than two.
+unit tasks;
+
+/// Begins an argument vector, discarding any half-built one. Private.
+///
+/// This is `dosffi.c`'s own vector, the one `dos.Exec` uses. Sharing it is
+/// safe because building it is strictly reset-push-spawn inside a single call
+/// and the language is single-threaded, so two spawns cannot interleave their
+/// pushes however many children are alive afterwards.
+private procedure RawArgReset ();
+    external 'alg_libdos_arg_reset' in 'libdosffi.so';
+
+/// Appends one argument, answering 1 on success. Private.
+private function RawArgPush (Arg : String) : Integer;
+    external 'alg_libdos_arg_push' in 'libdosffi.so';
+
+/// Starts Path with the pushed arguments without waiting, answering the
+/// child's process id, or -1 where it could not be started. Private.
+private function RawSpawnAsync (Path : String) : Integer;
+    external 'alg_libdos_spawn_async' in 'libdosffi.so';
+
+/// Collects a child, answering its status, -1 while it still runs, or -2 for
+/// one that is not ours or was already collected. Private.
+///
+/// `Block` is 1 to wait and 0 to ask. A status cannot be negative -- at most
+/// 255 for an exit and 128 plus the signal number for a kill -- so the two
+/// sentinels cannot be confused with an answer.
+private function RawReap (Id : Integer, Block : Integer) : Integer;
+    external 'alg_libdos_reap' in 'libdosffi.so';
+
+/// Still running, as `RawReap` reports it.
+private const StillRunning := -1;
+
+/// Not a child of ours, or one already collected.
+private const NoSuchChild := -2;
+
+/// A program every POSIX system has, and the one the tests spawn.
+///
+/// `/bin/sh` is specified where `/bin/true` and `/usr/bin/true` differ by
+/// distribution, and `-c` lets one path answer whatever status a test needs.
+private const Sh := '/bin/sh';
+
+// ------------------------------------------------------------------- the task
+
+/// One running program, started and not yet waited for.
+///
+/// The status is read exactly once from the operating system and kept here
+/// afterwards, because a child may be collected only once -- asking twice is
+/// what the runtime reports as an unknown child. So `Done ()` and `Wait ()`
+/// may be called in any order and as often as wanted, and answer the same
+/// thing once the child has finished.
+///
+/// A task that is never waited for leaves the child a zombie until this
+/// program exits. Nothing here can prevent that: there is no destructor to
+/// hang a collection on, and reaping behind the caller's back would mean
+/// discarding the status they had not asked for yet. A loop that spawns should
+/// wait.
+class Task;
+var
+    /// The child's process id, as the operating system assigned it.
+    ///
+    /// On Windows this is the process id rather than the handle, the handle
+    /// being kept in C where a kernel object belongs.
+    Id : Integer;
+
+    /// The status once known, and -1 before it is.
+    ///
+    /// The exit status for a program that exited, or 128 plus the signal
+    /// number for one that was killed -- the shell's convention, and
+    /// unambiguous because an exit status of its own cannot exceed 255.
+    /// Windows has no signals and answers the NTSTATUS instead, a large
+    /// number rather than a small one.
+    Status : Integer;
+begin
+    /// Starts Path with Args and answers without waiting for it.
+    ///
+    /// # Raises
+    /// `Spawn: cannot run '<path>'.` where the program could not be started,
+    /// and `Spawn: too many arguments.` beyond the 1023 the argument vector
+    /// holds. A program that never ran is not a program that failed, which is
+    /// why the first is a raise rather than a status.
+    ///
+    /// # Examples
+    /// `Spawn Starts A Program And Wait Collects It`
+    constructor Init (Path : String, Args : List);
+    begin
+        Status := -1;
+
+        RawArgReset ();
+
+        for var A in Args do
+            if RawArgPush (Str (A)) = 0 then
+            begin
+                RawArgReset ();
+
+                raise 'Spawn: too many arguments.';
+            end
+
+        Id := RawSpawnAsync (Path);
+
+        if Id < 0 then raise 'Spawn: cannot run ''' + Path + '''.';
+    end
+
+    /// Whether the child has finished, without waiting for it.
+    ///
+    /// Answers immediately either way. Once it has answered True the status is
+    /// kept, so asking again costs nothing and answers the same.
+    ///
+    /// A loop polling this wants a nap in it -- `crt.Delay (10)` -- or it
+    /// spends a whole core asking. Measured over four tenths of a second of
+    /// waiting: a bare poll costs 0.3997 s of processor time where the same
+    /// poll with a 10 ms nap costs 0.0003 s, a factor of about 1300. `Wait ()`
+    /// needs no nap at all, the kernel parking this process for 0.0001 s.
+    ///
+    /// # Raises
+    /// `Task: lost track of child <id>.` where the operating system does not
+    /// recognise the child. That is not reachable through this unit's own
+    /// surface and means something outside it has collected the child.
+    ///
+    /// # Examples
+    /// `Done Answers Without Waiting And Then Stays True`
+    function Done () : Boolean;
+    begin
+        if Status >= 0 then Exit True;
+
+        var Answer := RawReap (Id, 0);
+
+        if Answer = StillRunning then Exit False;
+
+        if Answer = NoSuchChild then raise 'Task: lost track of child ' + Str (Id) + '.';
+
+        Status := Answer;
+
+        Exit True;
+    end
+
+    /// Waits for the child to finish and answers its status.
+    ///
+    /// Blocks, which costs nothing: the kernel parks this process until the
+    /// child is gone rather than spinning. Answers immediately where the
+    /// status is already known, so waiting twice is harmless.
+    ///
+    /// # Raises
+    /// `Task: lost track of child <id>.` as `Done` does, and for the same
+    /// reason.
+    ///
+    /// # Examples
+    /// `Spawn Starts A Program And Wait Collects It`
+    function Wait () : Integer;
+    begin
+        if Status >= 0 then Exit Status;
+
+        var Answer := RawReap (Id, 1);
+
+        if Answer < 0 then raise 'Task: lost track of child ' + Str (Id) + '.';
+
+        Status := Answer;
+
+        Exit Status;
+    end
+end
+
+// ---------------------------------------------------------------- the surface
+
+/// Starts Path with Args and answers a Task without waiting for it.
+///
+/// The same call as the constructor, and the spelling to prefer at a call
+/// site: `Spawn ('/bin/sleep', ['1'])` reads as the verb it is, where
+/// `Task (…)` reads as the noun. Both exist because the class needs a
+/// constructor and the reader needs a verb.
+///
+/// There is NO SHELL. The argument vector reaches the operating system
+/// directly, so an argument holding a space, a quote, a semicolon or a newline
+/// arrives whole and cannot become syntax. The cost is that `Path` must be a
+/// real path -- `'/bin/echo'` and not `'echo'` -- with no search, no globbing
+/// and no redirection, which is the same bargain `dos.Exec` strikes and for
+/// the same reason.
+///
+/// # Raises
+/// `Spawn: cannot run '<path>'.` and `Spawn: too many arguments.`, as the
+/// constructor does.
+///
+/// # Examples
+/// `Spawn Starts A Program And Wait Collects It`
+function Spawn (Path : String, Args : List) : Task;
+begin
+    Exit Task (Path, Args);
+end
+
+/// The statuses of every task in the list, waiting for each in turn.
+///
+/// The order is the list's rather than the order they finished, which is what
+/// makes the answer line up with what was handed in. Every task is waited for
+/// even where an earlier one failed, because leaving the rest uncollected
+/// would leave zombies behind.
+///
+/// Waiting in list order costs nothing against collecting them as they
+/// finish. The total is however long the slowest takes either way, and the
+/// kernel parks this process for each in turn for free.
+///
+/// A task whose child cannot be collected takes -1 in its slot rather than
+/// losing every other answer to a raise. A real status is never negative, so
+/// the two cannot be confused, and it is the same thing `Task.Status` means by
+/// -1: nothing is known.
+///
+/// # Raises
+/// Nothing. Every task has an answer, including one that went missing.
+///
+/// # Examples
+/// `WaitAll Answers Every Status In List Order`
+function WaitAll (Pending : List) : List;
+begin
+    var Statuses := [];
+
+    for var T in Pending do
+    begin
+        try
+            Statuses.Add (T.Wait ());
+        except
+            on E : String do Statuses.Add (-1);
+        end
+    end
+
+    Exit Statuses;
+end
+
+// ---------------------------------------------------------------------- tests
+
+test 'Spawn Starts A Program And Wait Collects It';
+begin
+    var T := Spawn (Sh, ['-c', 'exit 0']);
+
+    AssertTrue (T.Id > 0);
+    AssertEqual (-1, T.Status);
+    AssertEqual (0, T.Wait ());
+    AssertEqual (0, T.Status);
+end
+
+test 'Spawn And The Constructor Are The Same Call';
+begin
+    AssertEqual (0, Task (Sh, ['-c', 'exit 0']).Wait ());
+    AssertEqual (0, Spawn (Sh, ['-c', 'exit 0']).Wait ());
+end
+
+test 'Wait Answers A Failing Program Status';
+begin
+    AssertEqual (1, Spawn (Sh, ['-c', 'exit 1']).Wait ());
+end
+
+test 'Wait Is Harmless Twice';
+begin
+    var T := Spawn (Sh, ['-c', 'exit 0']);
+
+    AssertEqual (0, T.Wait ());
+    AssertEqual (0, T.Wait ());
+    AssertEqual (0, T.Wait ());
+end
+
+test 'Done Answers Without Waiting And Then Stays True';
+begin
+    var T := Spawn (Sh, ['-c', 'exit 0']);
+
+    // Done may answer either way the instant after a spawn, so the test is
+    // that it terminates and settles rather than what it says first.
+    while not T.Done () do
+    begin
+    end
+
+    AssertTrue (T.Done ());
+    AssertTrue (T.Done ());
+    AssertEqual (0, T.Status);
+    AssertEqual (0, T.Wait ());
+end
+
+test 'Done Is Usable Before Wait';
+begin
+    var T := Spawn (Sh, ['-c', 'exit 0']);
+
+    T.Done ();
+
+    AssertEqual (0, T.Wait ());
+end
+
+test 'Several Tasks Are Alive At Once';
+begin
+    var Started := [];
+
+    for var I := 0 ; I < 5 ; I := I + 1 do
+        Started.Add (Spawn (Sh, ['-c', 'exit 0']));
+
+    AssertEqual (5, Started.Length);
+
+    // Every id is distinct, which is what proves they are five children
+    // rather than one waited for five times.
+    var Seen := Set ();
+
+    for var T in Started do Seen.Add (T.Id);
+
+    AssertEqual (5, Seen.Length);
+
+    for var T in Started do AssertEqual (0, T.Wait ());
+end
+
+test 'WaitAll Answers Every Status In List Order';
+begin
+    var Started := [Spawn (Sh, ['-c', 'exit 0']),
+                    Spawn (Sh, ['-c', 'exit 1']),
+                    Spawn (Sh, ['-c', 'exit 0'])];
+
+    var Statuses := WaitAll (Started);
+
+    AssertEqual (3, Statuses.Length);
+    AssertEqual (0, Statuses[0]);
+    AssertEqual (1, Statuses[1]);
+    AssertEqual (0, Statuses[2]);
+end
+
+test 'WaitAll Takes An Empty List';
+begin
+    AssertEqual (0, WaitAll ([]).Length);
+end
+
+test 'Spawn Passes Its Arguments Through Whole';
+begin
+    // An argument holding a space, a quote and a semicolon survives, which is
+    // what having no shell buys. `/bin/sh -c` would make the semicolon
+    // syntax; this cannot.
+    var T := Spawn ('/bin/sh', ['-c', 'test "$1" = "a b;c" ', 'sh', 'a b;c']);
+
+    AssertEqual (0, T.Wait ());
+end
+
+test 'Spawn Refuses A Program That Is Not There';
+begin
+    var Raised := False;
+
+    try Spawn ('/no/such/program/anywhere', []); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+test 'Spawn Refuses Too Many Arguments';
+begin
+    var Many := [];
+
+    for var I := 0 ; I < 2000 ; I := I + 1 do Many.Add ('x');
+
+    var Raised := False;
+
+    try Spawn (Sh, Many); except Raised := True; end
+
+    AssertTrue (Raised);
+end
+
+test 'A Spawn After A Refused One Still Works';
+begin
+    // A refused spawn clears the argument vector, so it cannot contaminate
+    // the next one -- which is the failure a shared vector would have.
+    var Raised := False;
+
+    try Spawn ('/no/such/program/anywhere', ['a', 'b']); except Raised := True; end
+
+    AssertTrue (Raised);
+    AssertEqual (0, Spawn (Sh, ['-c', 'exit 0']).Wait ());
+end

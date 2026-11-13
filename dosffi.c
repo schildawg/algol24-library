@@ -32,6 +32,7 @@
  * need GetDiskFreeSpaceEx and CreateProcess behind the same three functions.
  */
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -371,6 +372,33 @@ static int quote_onto (char *out, size_t max, size_t *at, const char *arg)
     return 1;
 }
 
+/* Builds the command line for `path` followed by the pushed arguments, and
+ * clears the vector either way. Answers 0 where it did not fit.
+ *
+ * Shared by the two spawns so that the CommandLineToArgvW quoting rules have
+ * one implementation rather than two that can drift. A second copy of this is
+ * how a space in a path becomes two arguments in only one of the two calls.
+ */
+static int line_from_args (const char *path, char *line, size_t max)
+{
+    size_t at = 0;
+
+    line[0] = '\0';
+
+    int ok = quote_onto (line, max, &at, path);
+
+    for (int64_t i = 0; ok && i < arg_count; i++)
+        ok = quote_onto (line, max, &at, args[i]);
+
+    args_clear ();
+
+    if (!ok) return 0;
+
+    line[at] = '\0';
+
+    return 1;
+}
+
 int64_t alg_libdos_spawn (const char *path)
 {
     if (path == NULL)
@@ -380,20 +408,9 @@ int64_t alg_libdos_spawn (const char *path)
     }
 
     static char line[32768];
-    size_t      at = 0;
 
-    line[0] = '\0';
-
-    int ok = quote_onto (line, sizeof line, &at, path);
-
-    for (int64_t i = 0; ok && i < arg_count; i++)
-        ok = quote_onto (line, sizeof line, &at, args[i]);
-
-    args_clear ();
-
-    if (!ok) return -1;
-
-    line[at] = '\0';
+    if (!line_from_args (path, line, sizeof line))
+        return -1;
 
     STARTUPINFOA        si;
     PROCESS_INFORMATION pi;
@@ -465,6 +482,224 @@ int64_t alg_libdos_spawn (const char *path)
         return (int64_t) (128 + WTERMSIG (status));
 
     return -1;
+}
+
+#endif
+
+/* ------------------------------------------------ starting without waiting -- */
+
+/* Starts `path` with the pushed arguments and does NOT wait for it, and reaps
+ * a child started that way.
+ *
+ * These two are what a `tasks` unit rests on. `alg_libdos_spawn` above is the
+ * whole of Exec's story -- start, wait, answer -- and a task needs the wait
+ * separated from the start so that several children can be alive at once.
+ *
+ * NO SHELL, exactly as above: the argument vector is built the same way and
+ * handed to posix_spawn directly, so a path or an argument containing a space,
+ * a quote, a semicolon or a newline arrives as one argument and cannot become
+ * syntax.
+ *
+ * A CHILD STARTED HERE MUST BE REAPED or it stays a zombie until this process
+ * exits. Nothing in C can enforce that; the unit's Task class is what
+ * remembers, and its doc comment says so.
+ *
+ * THIS IS NOT fork. A child is a fresh program with its own copy of nothing:
+ * the eight shims here hold 25 static objects between them -- SDL handles,
+ * FILE pointers, the saved termios mode, the drand48 state -- and a fork would
+ * duplicate every one, which is measured in REPORT-CONCURRENCY.md and produces
+ * two processes drawing identical random streams in silence.
+ *
+ * `alg_libdos_reap` answers the child's status the same way `alg_libdos_spawn`
+ * does -- the exit status, or 128 + the signal number for one that was killed
+ * -- and two sentinels below zero that cannot be a status:
+ *
+ *     -1   still running, which only happens when `block` was 0
+ *     -2   not a child of ours, or one already reaped
+ *
+ * A status cannot reach either, an exit status being at most 255 and a signal
+ * at most 128 + 64, so the three answers never collide. The unit raises on -2
+ * and keeps the status once it has it, because a child may be reaped exactly
+ * once and asking twice is what -2 reports.
+ */
+#ifdef _WIN32
+
+/* Windows needs the process HANDLE to wait on, and a process id alone will not
+ * do: ids are reused, so waiting by id is a race against the next process to
+ * take that number. CreateProcess answers both, so the handle is kept here and
+ * the id is what crosses into Algol-24 -- the same division fileffi.c makes for
+ * FILE pointers, and for the same reason. A kernel handle has no business being
+ * an Integer in a program.
+ */
+#define ALG_MAX_TASKS 256
+
+static struct
+{
+    DWORD  id;
+    HANDLE process;
+} task_table[ALG_MAX_TASKS];
+
+static HANDLE task_find (DWORD id)
+{
+    for (int i = 0; i < ALG_MAX_TASKS; i++)
+        if (task_table[i].process != NULL && task_table[i].id == id)
+            return task_table[i].process;
+
+    return NULL;
+}
+
+static void task_drop (DWORD id)
+{
+    for (int i = 0; i < ALG_MAX_TASKS; i++)
+        if (task_table[i].process != NULL && task_table[i].id == id)
+        {
+            task_table[i].id      = 0;
+            task_table[i].process = NULL;
+        }
+}
+
+static int task_keep (DWORD id, HANDLE process)
+{
+    for (int i = 0; i < ALG_MAX_TASKS; i++)
+        if (task_table[i].process == NULL)
+        {
+            task_table[i].id      = id;
+            task_table[i].process = process;
+
+            return 1;
+        }
+
+    return 0;
+}
+
+int64_t alg_libdos_spawn_async (const char *path)
+{
+    if (path == NULL)
+    {
+        args_clear ();
+        return -1;
+    }
+
+    static char line[32768];
+
+    if (!line_from_args (path, line, sizeof line))
+        return -1;
+
+    STARTUPINFOA        si;
+    PROCESS_INFORMATION pi;
+
+    ZeroMemory (&si, sizeof si);
+    ZeroMemory (&pi, sizeof pi);
+
+    si.cb = sizeof si;
+
+    if (!CreateProcessA (path, line, NULL, NULL, FALSE, 0, NULL, NULL,
+                         &si, &pi))
+        return -1;
+
+    CloseHandle (pi.hThread);
+
+    /* No room in the table means the child is running and could never be
+     * waited for. Ending it is the honest answer: a task the caller cannot
+     * collect is worse than one that never started, and the caller is told
+     * which by the -1 either way. */
+    if (!task_keep (pi.dwProcessId, pi.hProcess))
+    {
+        TerminateProcess (pi.hProcess, 1);
+        CloseHandle (pi.hProcess);
+
+        return -1;
+    }
+
+    return (int64_t) pi.dwProcessId;
+}
+
+int64_t alg_libdos_reap (int64_t id, int64_t block)
+{
+    if (id <= 0) return -2;
+
+    HANDLE process = task_find ((DWORD) id);
+
+    if (process == NULL) return -2;
+
+    DWORD waited = WaitForSingleObject (process, block ? INFINITE : 0);
+
+    if (waited == WAIT_TIMEOUT) return -1;
+
+    if (waited != WAIT_OBJECT_0) return -2;
+
+    DWORD status = 1;
+
+    if (!GetExitCodeProcess (process, &status)) status = 1;
+
+    CloseHandle (process);
+    task_drop ((DWORD) id);
+
+    /* No signals here, so no 128 + n -- the same limitation alg_libdos_spawn
+     * documents. A faulting process answers its NTSTATUS, a large number
+     * rather than a small one. */
+    return (int64_t) status;
+}
+
+#else
+
+int64_t alg_libdos_spawn_async (const char *path)
+{
+    if (path == NULL)
+    {
+        args_clear ();
+        return -1;
+    }
+
+    char *argv[ALG_MAX_ARGS + 1];
+
+    argv[0] = (char *) path;
+
+    for (int64_t i = 0; i < arg_count; i++)
+        argv[i + 1] = args[i];
+
+    argv[arg_count + 1] = NULL;
+
+    pid_t child = 0;
+    int   err   = posix_spawn (&child, path, NULL, NULL, argv, ALG_ENVIRON);
+
+    args_clear ();
+
+    if (err != 0)
+        return -1;
+
+    return (int64_t) child;
+}
+
+int64_t alg_libdos_reap (int64_t id, int64_t block)
+{
+    if (id <= 0) return -2;
+
+    int   status = 0;
+    pid_t got    = 0;
+
+    /* A blocking wait is interrupted by any handled signal, which is not an
+     * answer about the child -- so EINTR is retried rather than reported.
+     * Blocking is what Result () wants: the kernel parks this process for
+     * nothing, where a WNOHANG spin costs a whole core, measured at 0.0001 s
+     * against 0.3997 s over four tenths of a second of waiting. */
+    do
+        got = waitpid ((pid_t) id, &status, block ? 0 : WNOHANG);
+    while (got < 0 && errno == EINTR);
+
+    if (got == 0) return -1;
+
+    if (got < 0)  return -2;
+
+    if (WIFEXITED (status))
+        return (int64_t) WEXITSTATUS (status);
+
+    if (WIFSIGNALED (status))
+        return (int64_t) (128 + WTERMSIG (status));
+
+    /* Stopped rather than finished, which WNOHANG can report without
+     * WUNTRACED on some systems. Not a status, and not ours to interpret. */
+    return -2;
 }
 
 #endif
