@@ -6,10 +6,17 @@ re-verified on **0.3.2**, plus the decisions the unit cannot be written
 without.
 
 ⚠️ **0.3.2 closed all three defects this work found or depended on** — L-4,
-L-5 and L-6 — so `DEFECTS.md` has nothing open for the first time. Two of them
-mattered here: **L-6 blocked anything that constructs**, and **L-4 governed
-the unit's naming**. Both constraints are gone, and §3 and §5 are revised
-accordingly.
+L-5 and L-6 — so `DEFECTS.md` has no defect open for the first time. Two of
+them mattered here: **L-6 blocked anything that constructs**, and **L-4
+governed the unit's naming**. Both constraints are gone.
+
+⚠️ **The unit exists: `reflect`, with `Describe` and `SameContent`, 30 tests,
+reference entries for both.** The serializer is deliberately **not** built —
+see §4 and §5. One hazard came out of building it, `DEFECTS.md` **H-4**:
+an unguarded recursive walk over a cyclic graph ends the process with SIGSEGV
+and an empty stdout, so both routines carry a cycle guard and five tests pin
+it. What is left of this document is the serializer's design space and the
+decisions it still needs.
 
 `PROPOSAL-REFLECTION.md` has the history against what this library asked for.
 This file is the working side: what is true, what bites, and what is still a
@@ -189,25 +196,31 @@ throughout; worth a question to the core if a unit here ever wants it. The
 practical answer is that a generic writer **iterates** a collection field and
 does not reflect on it.
 
-## 5. Decisions the unit needs, which are the user's
+## 5. Decisions, and which are left
 
-1. **The unit's name.** `reflect` is the obvious one and collides with
-   nothing in the ten units.
-2. **Which of the three motivating uses it covers.**
-   `PROPOSAL-REFLECTION.md` named a describer, a deep equality and a
-   serializer. The first two are a few lines each over `Fields` and `Member`;
-   the serializer is the one with real design in it, and the one the
-   concurrency story wants.
-3. **The exported names.** Much freer than it was: §3's stdout constraint is
-   gone, so the only names actually unavailable are the six [RT-032] puts on a
-   class value. Pick for readability.
-4. **Whether the serializer belongs here at all.** It needs a wire format,
-   which is a choice this library has not had to make before, and a registry
-   the *consumer* owns rather than the unit. A describer and a comparer need
-   neither.
-5. ~~**Whether to wait on L-6.**~~ Moot — L-6 is fixed, so the constructing
-   half is as writable as the read half. Nothing here is blocked on the
-   compiler any more.
+1. ~~**The unit's name.**~~ Decided: **`reflect`**.
+2. ~~**Which of the three motivating uses it covers.**~~ Decided: the
+   **describer and the comparer**, built. The serializer is held.
+3. ~~**The exported names.**~~ Decided: `Describe` and `SameContent`. The
+   second is deliberately not `Equals` — `=` already means identity on
+   instances, and two spellings that disagree on the same values would be
+   worse than no routine. Six names stay unavailable because [RT-032] makes
+   them members of a class value: `Name`, `Parent`, `Fields`, `Methods`,
+   `Properties`, `Accepts`.
+4. **Whether the serializer belongs here at all — still open.** It needs a
+   wire format, which is a choice this library has not had to make before, and
+   a name-to-type registry the *consumer* owns rather than the unit. The
+   describer and the comparer needed neither, which is why they went first.
+5. ~~**Whether to wait on L-6.**~~ Moot — L-6 is fixed.
+
+**The remaining question is sequencing, not capability.** Concurrency does not
+need the serializer: the measured workload's payload is `Image.Bits`, a flat
+Buffer already, moving at 9834 MB/s against ~26 s of decoding — the copy is
+0.03% of the work. What a `tasks` unit needs is three things in `dosffi.c`
+(`posix_spawn` without the `waitpid`, `waitpid` with `WNOHANG`, a pipe) plus a
+framing protocol for a pool. ⚠️ **So build `tasks` first and let its framing
+decide the wire format.** The framing is required regardless; a format chosen
+before the transport exists is chosen against a guess.
 
 ## 6. What it costs
 

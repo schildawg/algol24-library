@@ -521,6 +521,7 @@ here spawns a **fresh program**, never forks.
 | Unit | Members | Tests | Reference |
 | --- | --- | --- | --- |
 | `testing` | `AssertNear` | 9 | complete |
+| `reflect` | `Describe`, `SameContent` — both `extension`, receiver `Any`, over `Fields`/`TypeOf`/`Member` [RT-031..RT-033]; a cycle guard in each, no C and no `uses` | 30 | complete |
 | `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` carried in `randomffi.c` rather than taken from libc, bit-identical and so portable, seeding via `randomffi.c` | 17 | complete |
 | `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 300 | complete |
@@ -531,7 +532,7 @@ here spawns a **fresh program**, never forks.
 | `time` | `Now`, `UtcNow`, `At`, `UtcAt` answering a `DateTime` with `Text`; `UtcOffset`, `IsDaylightSaving`; `timeffi.c` is C89 `localtime_r`. `GetDate`/`GetTime`'s four `var` parameters become one returned object; `SetDate`/`SetTime` are absent, needing root | 9 | complete |
 | `dos` | `DiskFree`, `DiskSize` by path rather than drive number and unbounded rather than `LongInt`; `GetEnv`, `HasEnv`, `Environment` answering a List, `EnvName`/`EnvValue`; `Exec` through `posix_spawn` with an argument List and **no shell**; `dosffi.c` is POSIX, not C99 | 13 | complete |
 
-The Tests column is the unit's own `test` blocks, 554 in all. `./test.sh`
+The Tests column is the unit's own `test` blocks, 584 in all. `./test.sh`
 reports what `--test` can reach instead, imports included, so it prints 431
 for `graph` (its 300, plus `math`'s 69, `file`'s 40, `dos`'s 13 and
 `testing`'s 9) and 92 for `sound`. `graph` reaches `file` because
@@ -675,9 +676,9 @@ true:** the first unit here to call `Fields`, `TypeOf`, `Member`, `Invoke`,
 which is the cost to weigh before the reflection unit lands.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
-so the only one besides it that is portable as written — nothing for a
-per-platform build to rewrite. ⚠️ **`Upper` and `Lower` delegate to the core's
-`ToUpper`/`ToLower` [RT-025] and must not be reimplemented** -- they were, at
+`reflect` is now the third — the three that are portable as written, with
+nothing for a per-platform build to rewrite. ⚠️ **`Upper` and `Lower` delegate
+to the core's `ToUpper`/`ToLower` [RT-025] and must not be reimplemented** -- they were, at
 first, because nobody checked the built-in table before adding them, and two
 of the unit's nine methods were a duplicate of the core for a while. A test
 now asserts they agree with the core routines so they cannot drift. They exist
@@ -702,6 +703,41 @@ order is **not** Turbo Pascal's — the string inserted into comes first, becaus
 an extension's receiver must. The private whitespace helper uses the language's `private`
 [MOD-006], which no other unit here does yet; `crt`'s `ByteAt` says "private
 to this unit" in a comment and is in fact exported.
+
+`reflect` notes: two extensions, `Describe` and `SameContent`, over the 0.3.1
+reflection built-ins. Three things in it were not obvious and should not be
+re-derived:
+
+- ⚠️ **There is no built-in "is this an instance?" and it cannot be derived
+  from `TypeOf`.** A built-in type value reports `Parent`, `Fields` and
+  `Methods` *identically* to a class with no fields — all `nil` or empty — so
+  the two are indistinguishable that way, and `Fields (X).Length` fails for the
+  same reason. The only separator is `ClassName`, which only an instance
+  carries [CLS-008], so the unit's private `IsInstance` is a `try` around
+  `Member (X, 'ClassName')`. An exception as a type test is unlovely and is the
+  honest answer; measure before replacing it with anything cleverer.
+- ⚠️ **`Member` reaches a class's DECLARED members and not the runtime's own.**
+  `TypeOf (E).Parent` answers, where `Member (TypeOf (E), 'Parent')` is
+  `Undefined property 'Parent'.` The same holds for a collection:
+  `[1, 2].Length` is 2 and `Member ([1, 2], 'Length')` is undefined. So written
+  access is required for those, which is why the unit reads `TypeOf (X).Name`
+  directly and detects a collection by that name rather than by probing.
+- ⚠️ **Both routines carry a cycle guard, and it is load-bearing rather than
+  defensive.** An unguarded recursive walk over two instances that point at
+  each other ends the process with **SIGSEGV and an empty stdout** —
+  `DEFECTS.md` H-4. Five tests pin it, because every natural fixture is acyclic
+  and an unguarded walker would pass a whole suite.
+
+The naming was decided after 0.3.2 and not before: on 0.3.1 an extension whose
+name a consumer also used as a member printed a warning on that consumer's
+**stdout** (L-4), which ruled out `Describe` outright. With L-4 closed the
+warning goes to stderr, so the names could be chosen for how they read.
+⚠️ **`SameContent` is deliberately NOT `Equals`** — `=` already means identity
+on instances, which is exactly why the hand-written walks existed, and two
+spellings that disagree on the same values would be worse than no routine at
+all. Six names remain genuinely unavailable: `Name`, `Parent`, `Fields`,
+`Methods`, `Properties` and `Accepts` are members of a class *value* [RT-032],
+so an extension of one could not be called on a class.
 
 ⚠️ **The units do not `uses strings`, and that is decided rather than
 pending.** Adopting it inside `graph`, `crt` or `sound` would tidy their

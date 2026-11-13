@@ -387,6 +387,73 @@ one, and `this.Ping` names the method.
 
 ## Hazards
 
+### H-4 — unbounded recursion ends the process with a signal, and takes buffered output with it
+
+**Status:** recorded 2026-11-12 on 0.3.2, while designing `reflect`. A hazard
+rather than a defect: the specification says nothing about stack exhaustion,
+and a language that keeps live state on the C stack in two of its three
+processors has nothing obvious to promise instead. The library defends itself.
+
+**Why it is recorded now.** Before reflection a generic walk over somebody
+else's data could not be written at all, so this was only reachable by writing
+an obviously non-terminating function. `Fields` and `Member` make a generic
+recursive walk four lines long, and a cyclic object graph is ordinary data —
+a parent pointer, a doubly linked list, two nodes that know each other. So the
+hazard went from theoretical to the first thing a describer meets.
+
+**Measured.** Two instances pointing at each other, walked by the obvious
+recursive describer:
+
+```algol24
+var A := Node ('a');
+var B := Node ('b');
+A.Peer := B;
+B.Peer := A;
+
+function Naive (X : Any) : String;
+begin
+    if X = nil then Exit 'nil';
+
+    var Out := TypeOf (X).Name + '(';
+    for var F in Fields (X) do Out := Out + F + '=' + Naive (Member (X, F)) + ' ';
+    Exit Out + ')';
+end
+```
+
+```console
+$ algc cycle.a24 ; echo "exit: $?"
+exit: 139
+```
+
+⚠️ **Exit 139 is SIGSEGV, and stdout came back EMPTY.** Three `WriteLn` calls
+ran to completion before the recursion started and **none of their output
+appeared** — the buffer died with the process. Nothing on stderr either. That
+is the sharp part: not that infinite recursion fails, which is unremarkable,
+but that it fails with no diagnostic and destroys the record of how far the
+program got. A `try … except` cannot catch it, so a library cannot turn it into
+a raised error.
+
+#### How the library defends against it
+
+`reflect` carries the set of containers it has already entered, and both its
+routines stop on arriving somewhere twice. Instances and collections are
+identity-comparable and usable as `Set` members, deduping by identity, which is
+what makes the guard cheap and exact:
+
+```console
+cycle-safe:  Node(Tag='a' Peer=Node(Tag='b' Peer=<Node seen>))
+self-ref:    Node(Tag='s' Peer=<Node seen>)
+```
+
+⚠️ **Any future generic walk here needs the same guard, and no test will tell
+you it is missing.** Every natural fixture is acyclic, so an unguarded walker
+passes its whole suite and takes down the first consumer that owns a back
+pointer. `reflect`'s `Describe Terminates On A Cycle`,
+`Describe Terminates On A Self Reference`,
+`Describe Terminates On A Collection Holding Itself`,
+`SameContent Terminates On Two Cycles Of The Same Shape` and
+`SameContent Terminates On A Self Reference` exist to keep that from rotting.
+
 ### H-3 — `and` and `or` look like bitwise operators and are not
 
 **Status:** **mostly closed by 0.1.6**, which added `&`, `|`, `^`, `~`, `<<`

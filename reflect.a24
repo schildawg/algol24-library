@@ -1,0 +1,645 @@
+/// Describing a value and comparing two by content, over the reflection
+/// built-ins.
+///
+/// Both routines here are an `extension`, so each may be written either way --
+/// `Describe (X)` or `X.Describe ()`. The permission is per file: a program
+/// reaches the method spelling only where its own `uses` clause names this
+/// unit [MOD-015], so neither name leaks into a file that did not ask for it.
+///
+/// The receiver is written `Any` and really does take anything -- an instance,
+/// an Integer, a String, a collection or `nil`. That is what makes these
+/// generic in the way a hand-written walk per class is not: the field list
+/// comes from the class itself through `Fields` [RT-031] rather than from
+/// whoever typed the walk, so adding a field cannot leave a describer or a
+/// comparer quietly behind.
+///
+/// Both walk an object graph, and a graph may contain a cycle. Each therefore
+/// carries the set of containers it has already entered and stops when it
+/// arrives somewhere twice. Without that guard the walk recurses until the
+/// call stack is exhausted, which on this platform ends the process with a
+/// signal and loses whatever output was still buffered -- see `DEFECTS.md`
+/// H-4. The guard is not an optimisation; it is what makes the routines safe
+/// to call on data the caller did not construct.
+///
+/// Needs compiler 0.3.2, which is the first release where `New` selects
+/// correctly under the interpreter, and the first where a reflection built-in
+/// exists at all. Pure Algol-24, with no foreign code and no `uses`: the third
+/// unit after `testing` and `strings` that a per-platform build has nothing to
+/// rewrite in.
+unit reflect;
+
+// --------------------------------------------------------------- the predicate
+
+/// Whether X is a class instance.
+///
+/// This is the one question the reflection built-ins do not answer directly,
+/// and it cannot be derived from them. `TypeOf` answers a type for every value
+/// and a built-in type reports `Parent`, `Fields` and `Methods` exactly as a
+/// class with no fields does -- all `nil` or empty -- so the two are
+/// indistinguishable that way. `Fields (X).Length` fails for the same reason.
+/// What separates them is `ClassName`, which only an instance carries
+/// [CLS-008], so the test is whether asking for it succeeds.
+private function IsInstance (X : Any) : Boolean;
+begin
+    try
+        var Ignored := Member (X, 'ClassName');
+
+        Exit True;
+    except
+        on E : String do Exit False;
+    end
+end
+
+/// Whether a type's name is one of the collections that iterate in order.
+///
+/// A `Set` is deliberately absent: it iterates in insertion order [COL-007]
+/// like the rest, but two sets holding the same values are the same set
+/// whatever order they were filled in, so comparing them position by position
+/// would answer a question nobody asked.
+private function IsOrdered (Kind : String) : Boolean;
+begin
+    Exit ['List', 'Stack', 'Array'].Contains (Kind);
+end
+
+/// S wrapped in apostrophes, so text is distinguishable from a number.
+private function Quoted (S : String) : String;
+begin
+    Exit Str (#39) + S + Str (#39);
+end
+
+// ------------------------------------------------------------- the two walkers
+
+/// X rendered, with Seen holding every container already entered.
+///
+/// Text and a Char are quoted, which is what lets a reader tell the String
+/// `'42'` from the Integer `42` and makes an empty string visible rather than
+/// absent. A `Buffer` renders as its size alone: it holds bytes rather than
+/// values, and a thousand of them in a diagnostic would bury the fields that
+/// matter.
+private function Rendered (X : Any, Seen : Set) : String;
+begin
+    if X = nil then Exit 'nil';
+
+    if IsInstance (X) then
+    begin
+        if Seen.Contains (X) then Exit '<' + TypeOf (X).Name + ' seen>';
+
+        Seen.Add (X);
+
+        var Out   := TypeOf (X).Name + ' (';
+        var First := True;
+
+        for var F in Fields (X) do
+        begin
+            if not First then Out := Out + ', ';
+
+            Out   := Out + F + ': ' + Rendered (Member (X, F), Seen);
+            First := False;
+        end
+
+        Exit Out + ')';
+    end
+
+    var Kind := TypeOf (X).Name;
+
+    if Kind = 'String' then Exit Quoted (X);
+
+    if Kind = 'Char' then Exit Quoted (Str (X));
+
+    if Kind = 'Map' then
+    begin
+        if Seen.Contains (X) then Exit '<Map seen>';
+
+        Seen.Add (X);
+
+        var Out   := '[';
+        var First := True;
+
+        for var K in X do
+        begin
+            if not First then Out := Out + ', ';
+
+            Out   := Out + Rendered (K, Seen) + ': ' + Rendered (X.Get (K), Seen);
+            First := False;
+        end
+
+        Exit Out + ']';
+    end
+
+    if IsOrdered (Kind) or Kind = 'Set' then
+    begin
+        if Seen.Contains (X) then Exit '<' + Kind + ' seen>';
+
+        Seen.Add (X);
+
+        var Out   := '[';
+        var First := True;
+
+        for var V in X do
+        begin
+            if not First then Out := Out + ', ';
+
+            Out   := Out + Rendered (V, Seen);
+            First := False;
+        end
+
+        Exit Out + ']';
+    end
+
+    Exit Str (X);
+end
+
+/// Whether A and B hold the same content, with Seen holding every container
+/// already entered on A's side.
+///
+/// Arriving at a container twice answers True rather than descending again,
+/// which is the only answer that terminates: two cyclic graphs of the same
+/// shape are equal, and the walk has already committed to every field that
+/// could distinguish them.
+private function Matched (A : Any, B : Any, Seen : Set) : Boolean;
+begin
+    if A = nil then Exit B = nil;
+
+    if B = nil then Exit False;
+
+    if TypeOf (A) <> TypeOf (B) then Exit False;
+
+    if IsInstance (A) then
+    begin
+        if Seen.Contains (A) then Exit True;
+
+        Seen.Add (A);
+
+        for var F in Fields (A) do
+          if not Matched (Member (A, F), Member (B, F), Seen) then Exit False;
+
+        Exit True;
+    end
+
+    var Kind := TypeOf (A).Name;
+
+    if Kind = 'Buffer' then
+    begin
+        if A.Length <> B.Length then Exit False;
+
+        for var I := 0 ; I < A.Length ; I := I + 1 do
+          if A[I] <> B[I] then Exit False;
+
+        Exit True;
+    end
+
+    if Kind = 'Map' then
+    begin
+        if A.Length <> B.Length then Exit False;
+
+        if Seen.Contains (A) then Exit True;
+
+        Seen.Add (A);
+
+        for var K in A do
+        begin
+            if not B.Contains (K) then Exit False;
+
+            if not Matched (A.Get (K), B.Get (K), Seen) then Exit False;
+        end
+
+        Exit True;
+    end
+
+    if Kind = 'Set' then
+    begin
+        if A.Length <> B.Length then Exit False;
+
+        for var V in A do
+          if not B.Contains (V) then Exit False;
+
+        Exit True;
+    end
+
+    if IsOrdered (Kind) then
+    begin
+        if Seen.Contains (A) then Exit True;
+
+        Seen.Add (A);
+
+        var Left := [];
+
+        for var V in A do Left.Add (V);
+
+        var Right := [];
+
+        for var V in B do Right.Add (V);
+
+        if Left.Length <> Right.Length then Exit False;
+
+        for var I := 0 ; I < Left.Length ; I := I + 1 do
+          if not Matched (Left[I], Right[I], Seen) then Exit False;
+
+        Exit True;
+    end
+
+    Exit A = B;
+end
+
+// ------------------------------------------------------------------ the surface
+
+/// X written out with its fields, whatever X is.
+///
+/// An instance renders as its class name and every field the class declares,
+/// parent-first and in declaration order [RT-031], recursing into a field that
+/// holds another instance or a collection. That is the answer `Str` cannot
+/// give: an instance stringifies as `Prop instance`, which names the class and
+/// says nothing about the state, and a List of instances stringifies as a list
+/// of those words.
+///
+/// A value that is not an instance answers something useful rather than
+/// failing. `nil` is `nil`, a collection is bracketed with its elements
+/// rendered the same way, text and a Char are quoted, and anything else is its
+/// `Str`.
+///
+/// Private fields appear, because `private` is settled before the program runs
+/// and nothing records it at run time [DCL-011]. A `property` does not, having
+/// no stored value behind it [CLS-017].
+///
+/// # Raises
+/// Nothing. Every value has a rendering, `nil` included.
+///
+/// # Safety
+/// Terminates on a cyclic graph. A container entered a second time renders as
+/// `<Name seen>` rather than being descended again, so the output of a diamond
+/// shows the second reference as seen rather than repeating it.
+///
+/// # Examples
+/// `Describe Writes An Instance With Its Fields`
+extension function Describe (X : Any) : String;
+begin
+    Exit Rendered (X, Set ());
+end
+
+/// Whether A and B hold the same content, field by field and element by
+/// element.
+///
+/// This is the comparison `=` does not make. Instances, Lists and Maps compare
+/// by identity, so two separately built values that hold the same things are
+/// unequal under `=` and equal here. The two spellings are deliberately
+/// different words: `=` keeps its meaning, and nothing about this routine
+/// changes what an existing comparison answers.
+///
+/// Types must match before content is examined, so the Integer `5` and the
+/// Double `5.0` are not the same content. Widening is an assignment rule
+/// [VAL-001] rather than an equality one, and `TypeOf` is compared by identity
+/// [RT-032].
+///
+/// A `Set` is compared by membership rather than by position, two sets holding
+/// the same values being the same set. Its members are matched with the
+/// language's own equality, so a set of instances compares those by identity --
+/// the one place this routine stops short of content.
+///
+/// # Raises
+/// Nothing. Any two values have an answer.
+///
+/// # Safety
+/// Terminates on a cyclic graph. Arriving at a container already entered
+/// answers True, so two cycles of the same shape are the same content.
+///
+/// # Examples
+/// `SameContent Sees Past Identity To Content`
+extension function SameContent (A : Any, B : Any) : Boolean;
+begin
+    Exit Matched (A, B, Set ());
+end
+
+// -------------------------------------------------------------------- the tests
+
+class Simple;
+var
+    Name  : String;
+    Worth : Integer;
+begin
+    constructor Init (N : String, W : Integer);
+    begin
+        Name  := N;
+        Worth := W;
+    end
+end
+
+class Parent;
+var
+    Tag : String;
+begin
+    constructor Init (T : String); begin Tag := T; end
+end
+
+class Child (Parent);
+var
+    Extra : Integer;
+begin
+    constructor Init (T : String, E : Integer);
+    begin
+        super.Init (T);
+
+        Extra := E;
+    end
+end
+
+class Holder;
+var
+    Kid : Any;
+begin
+    constructor Init (); begin end
+end
+
+class Hidden;
+var
+    Shown : Integer;
+
+    private:
+    Secret : Integer;
+begin
+    constructor Init ();
+    begin
+        Shown  := 1;
+        Secret := 2;
+    end
+end
+
+class Computed;
+var
+    Stored : Integer;
+begin
+    constructor Init (); begin Stored := 5; end
+
+    property Doubled : Integer;
+    begin
+        Exit Stored * 2;
+    end
+end
+
+class Bare;
+begin
+end
+
+test 'Describe Writes An Instance With Its Fields';
+begin
+    AssertEqual ('Simple (Name: ''widget'', Worth: 42)',
+                 Describe (Simple ('widget', 42)));
+end
+
+test 'Describe Is Reachable Both Spellings';
+begin
+    var S := Simple ('a', 1);
+
+    AssertEqual (Describe (S), S.Describe ());
+end
+
+test 'Describe Renders A Class With No Fields';
+begin
+    AssertEqual ('Bare ()', Describe (Bare ()));
+end
+
+test 'Describe Puts Inherited Fields First';
+begin
+    AssertEqual ('Child (Tag: ''t'', Extra: 7)', Describe (Child ('t', 7)));
+end
+
+test 'Describe Includes A Private Field And Omits A Property';
+begin
+    AssertEqual ('Hidden (Shown: 1, Secret: 2)', Describe (Hidden ()));
+    AssertEqual ('Computed (Stored: 5)', Describe (Computed ()));
+end
+
+test 'Describe Recurses Into A Nested Instance';
+begin
+    var H := Holder ();
+
+    H.Kid := Simple ('inner', 9);
+
+    AssertEqual ('Holder (Kid: Simple (Name: ''inner'', Worth: 9))',
+                 Describe (H));
+end
+
+test 'Describe Quotes Text So It Is Not Confused With A Number';
+begin
+    AssertEqual ('''42''', Describe ('42'));
+    AssertEqual ('42', Describe (42));
+    AssertEqual ('''''', Describe (''));
+    AssertEqual ('''a''', Describe ('a'));
+end
+
+test 'Describe Answers Something For Every Kind Of Value';
+begin
+    AssertEqual ('nil', Describe (nil));
+    AssertEqual ('5', Describe (5));
+    AssertEqual ('1.5', Describe (1.5));
+    AssertEqual ('true', Describe (True));
+end
+
+test 'Describe Renders A Collection And Its Elements';
+begin
+    AssertEqual ('[1, 2]', Describe ([1, 2]));
+    AssertEqual ('[]', Describe ([]));
+    AssertEqual ('[''a'': 1]', Describe (['a' : 1]));
+    AssertEqual ('[[1], [2]]', Describe ([[1], [2]]));
+end
+
+test 'Describe Renders Instances Held In A Collection';
+begin
+    AssertEqual ('[Simple (Name: ''x'', Worth: 1), Simple (Name: ''y'', Worth: 2)]',
+                 Describe ([Simple ('x', 1), Simple ('y', 2)]));
+end
+
+test 'Describe Terminates On A Cycle';
+begin
+    var A := Holder ();
+    var B := Holder ();
+
+    A.Kid := B;
+    B.Kid := A;
+
+    AssertEqual ('Holder (Kid: Holder (Kid: <Holder seen>))', Describe (A));
+end
+
+test 'Describe Terminates On A Self Reference';
+begin
+    var S := Holder ();
+
+    S.Kid := S;
+
+    AssertEqual ('Holder (Kid: <Holder seen>)', Describe (S));
+end
+
+test 'Describe Terminates On A Collection Holding Itself';
+begin
+    var L := [];
+
+    L.Add (1);
+    L.Add (L);
+
+    AssertEqual ('[1, <List seen>]', Describe (L));
+end
+
+test 'Describe Renders A Buffer As Its Size';
+begin
+    AssertEqual ('Buffer(3)', Describe (Buffer (3)));
+end
+
+test 'SameContent Sees Past Identity To Content';
+begin
+    var A := Simple ('widget', 42);
+    var B := Simple ('widget', 42);
+
+    AssertTrue (not (A = B));
+    AssertTrue (SameContent (A, B));
+    AssertTrue (A.SameContent (B));
+end
+
+test 'SameContent Answers False On A Differing Field';
+begin
+    AssertTrue (not SameContent (Simple ('a', 1), Simple ('a', 2)));
+    AssertTrue (not SameContent (Simple ('a', 1), Simple ('b', 1)));
+end
+
+test 'SameContent Requires The Types To Match';
+begin
+    AssertTrue (not SameContent (5, 5.0));
+    AssertTrue (not SameContent (5, '5'));
+    AssertTrue (not SameContent (Simple ('a', 1), Child ('a', 1)));
+end
+
+test 'SameContent Compares An Instance Against Itself';
+begin
+    var S := Simple ('a', 1);
+
+    AssertTrue (SameContent (S, S));
+end
+
+test 'SameContent Handles Nil On Either Side';
+begin
+    AssertTrue (SameContent (nil, nil));
+    AssertTrue (not SameContent (nil, 1));
+    AssertTrue (not SameContent (1, nil));
+end
+
+test 'SameContent Recurses Into A Nested Instance';
+begin
+    var A := Holder ();
+    var B := Holder ();
+
+    A.Kid := Simple ('x', 1);
+    B.Kid := Simple ('x', 1);
+
+    AssertTrue (SameContent (A, B));
+
+    B.Kid := Simple ('x', 2);
+
+    AssertTrue (not SameContent (A, B));
+end
+
+test 'SameContent Compares Lists By Position';
+begin
+    AssertTrue (SameContent ([1, 2], [1, 2]));
+    AssertTrue (not SameContent ([1, 2], [2, 1]));
+    AssertTrue (not SameContent ([1, 2], [1, 2, 3]));
+    AssertTrue (SameContent ([], []));
+end
+
+test 'SameContent Compares Lists Of Instances';
+begin
+    AssertTrue (SameContent ([Simple ('a', 1)], [Simple ('a', 1)]));
+    AssertTrue (not SameContent ([Simple ('a', 1)], [Simple ('a', 2)]));
+end
+
+test 'SameContent Compares Maps By Key And Value';
+begin
+    AssertTrue (SameContent (['a' : 1, 'b' : 2], ['a' : 1, 'b' : 2]));
+    AssertTrue (SameContent (['a' : 1, 'b' : 2], ['b' : 2, 'a' : 1]));
+    AssertTrue (not SameContent (['a' : 1], ['a' : 2]));
+    AssertTrue (not SameContent (['a' : 1], ['b' : 1]));
+    AssertTrue (not SameContent (['a' : 1], ['a' : 1, 'b' : 2]));
+end
+
+test 'SameContent Compares Sets By Membership Not Position';
+begin
+    var A := Set ();
+    var B := Set ();
+
+    A.Add (1);
+    A.Add (2);
+    B.Add (2);
+    B.Add (1);
+
+    AssertTrue (SameContent (A, B));
+
+    B.Add (3);
+
+    AssertTrue (not SameContent (A, B));
+end
+
+test 'SameContent Compares Buffers Byte By Byte';
+begin
+    var A := Buffer (3);
+    var B := Buffer (3);
+
+    A[0] := 1; A[1] := 2; A[2] := 255;
+    B[0] := 1; B[1] := 2; B[2] := 255;
+
+    AssertTrue (SameContent (A, B));
+
+    B[2] := 254;
+
+    AssertTrue (not SameContent (A, B));
+    AssertTrue (not SameContent (Buffer (2), Buffer (3)));
+end
+
+test 'SameContent Compares Scalars';
+begin
+    AssertTrue (SameContent (5, 5));
+    AssertTrue (SameContent ('text', 'text'));
+    AssertTrue (SameContent (True, True));
+    AssertTrue (not SameContent (True, False));
+end
+
+test 'SameContent Terminates On Two Cycles Of The Same Shape';
+begin
+    var A1 := Holder ();
+    var A2 := Holder ();
+
+    A1.Kid := A2;
+    A2.Kid := A1;
+
+    var B1 := Holder ();
+    var B2 := Holder ();
+
+    B1.Kid := B2;
+    B2.Kid := B1;
+
+    AssertTrue (SameContent (A1, B1));
+end
+
+test 'SameContent Terminates On A Self Reference';
+begin
+    var A := Holder ();
+    var B := Holder ();
+
+    A.Kid := A;
+    B.Kid := B;
+
+    AssertTrue (SameContent (A, B));
+end
+
+test 'SameContent Is True For A Class With No Fields';
+begin
+    AssertTrue (SameContent (Bare (), Bare ()));
+end
+
+test 'SameContent Reads A Private Field';
+begin
+    var A := Hidden ();
+    var B := Hidden ();
+
+    AssertTrue (SameContent (A, B));
+
+    SetMember (B, 'Secret', 99);
+
+    AssertTrue (not SameContent (A, B));
+end

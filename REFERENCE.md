@@ -44,6 +44,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Delay`](#delay) | procedure | `crt` and `graph` |
 | [`Delete`](#delete) | extension function | `strings` |
 | [`DelLine` `InsLine`](#delline) | procedures | `graph` and `crt` |
+| [`Describe`](#describe) | extension function | `reflect` |
 | [`Directory`](#directory) | class | `file` |
 | [`DisableMouse`](#enablemouse) | procedure | `graph` and `crt` |
 | [`DiskFree` `DiskSize`](#diskfree) | functions | `dos` |
@@ -147,6 +148,7 @@ Each example assumes the unit is reachable — run from the directory holding th
 | [`Repeat`](#repeat) | extension function | `strings` |
 | [`Replace`](#replace) | extension function | `strings` |
 | [`Round`](#round) | function | `math` |
+| [`SameContent`](#samecontent) | extension function | `reflect` |
 | [`Score`](#play) | function | `sound` |
 | [`ScreenHeight`](#screenheight) | function | `graph` |
 | [`ScreenWidth`](#screenwidth) | function | `graph` |
@@ -1860,6 +1862,93 @@ written: true true true false
 deleted: true true false false
 inserted:false true true false
 cursor at 1, 1
+```
+
+---
+
+## Describe
+
+*extension function* — unit `reflect`
+
+**Function**
+
+Returns a value written out with its fields, whatever the value is.
+
+**Declaration**
+
+```algol24
+extension function Describe (X : Any) : String;
+```
+
+**Remarks**
+
+An instance renders as its class name and every field the class declares,
+parent-first and in declaration order — the order the core's `Fields` answers,
+which is the order a class seeds its fields. A field holding another instance or a
+collection is recursed into, so one call describes a whole graph.
+
+This is the answer `Str` cannot give. An instance stringifies as
+`Point instance`, naming the class and saying nothing about the state, and a
+List of instances stringifies as a list of those words. That is a poor thing to
+be shown at the moment a test fails, which is why this exists.
+
+A value that is not an instance answers something useful rather than failing.
+`nil` is `nil`, a collection is bracketed with its elements rendered the same
+way, and anything else is its `Str`. Text and a `Char` are **quoted**, which is
+what lets a reader tell the String `'42'` from the Integer `42`, and makes an
+empty string visible rather than absent. A `Buffer` renders as its size alone,
+holding bytes rather than values.
+
+A **private** field appears. `private` governs what a program may write and is
+settled before the program runs, so nothing records it at run time and a class
+whose state is private is still describable. A `property` does **not** appear,
+computing rather than storing.
+
+Terminates on a cyclic graph. A container entered a second time renders as
+`<Name seen>` rather than being descended again, so a diamond shows its second
+reference as seen rather than repeating it. Without that guard the walk would
+recurse until the call stack was exhausted.
+
+Both spellings work: `Describe (X)` and `X.Describe ()`.
+
+Never raises. Every value has a rendering, `nil` included.
+
+**See also**
+
+[`SameContent`](#samecontent)
+
+**Example**
+
+```algol24
+uses reflect;
+
+class Point;
+var
+    X : Integer;
+    Y : Integer;
+begin
+    constructor Init (AX : Integer, AY : Integer);
+    begin
+        X := AX;
+        Y := AY;
+    end
+end
+
+var P := Point (3, 4);
+
+WriteLn (Str (P));
+WriteLn (P.Describe ());
+WriteLn (Describe ([Point (1, 2), Point (3, 4)]));
+WriteLn (Describe (['name' : 'widget', 'tags' : [1, 2]]));
+WriteLn (Describe (nil));
+```
+
+```console
+Point instance
+Point (X: 3, Y: 4)
+[Point (X: 1, Y: 2), Point (X: 3, Y: 4)]
+['name': 'widget', 'tags': [1, 2]]
+nil
 ```
 
 ---
@@ -7525,6 +7614,96 @@ for var V in [0.5, 1.5, 2.5, 3.5] do
 1.5 rounds to 2
 2.5 rounds to 2
 3.5 rounds to 4
+```
+
+---
+
+## SameContent
+
+*extension function* — unit `reflect`
+
+**Function**
+
+Returns whether two values hold the same content, field by field and element by
+element.
+
+**Declaration**
+
+```algol24
+extension function SameContent (A : Any, B : Any) : Boolean;
+```
+
+**Remarks**
+
+This is the comparison `=` does not make. Instances, Lists and Maps compare by
+**identity**, so two separately built values holding the same things are
+unequal under `=` and equal here. The two spellings are deliberately different
+words: `=` keeps its meaning, and nothing about this routine changes what an
+existing comparison answers.
+
+An instance is compared against the field list its class declares, so adding a
+field cannot leave the comparison quietly behind — which is what a hand-written
+walk per class could not promise. A **private** field is read, for the same
+reason [`Describe`](#describe) renders one.
+
+Types must match before content is examined, so the Integer `5` and the Double
+`5.0` are not the same content, and neither are two instances of different
+classes. Widening is an assignment rule rather than an equality one.
+
+An ordered collection — a `List`, a `Stack` or an `Array` — is compared by
+position. A `Map` is compared by key and value and not by insertion order, two
+maps holding the same pairs being the same map. A `Set` is compared by
+**membership**, two sets holding the same values being the same set; its
+members are matched with the language's own equality, so a set of instances
+compares those by identity, which is the one place this routine stops short of
+content. A `Buffer` is compared byte by byte.
+
+Terminates on a cyclic graph. Arriving at a container already entered answers
+`True` rather than descending again, which is the only answer that terminates:
+two cycles of the same shape are the same content, and the walk has already
+committed to every field that could distinguish them.
+
+Both spellings work: `SameContent (A, B)` and `A.SameContent (B)`.
+
+Never raises. Any two values have an answer.
+
+**See also**
+
+[`Describe`](#describe)
+
+**Example**
+
+```algol24
+uses reflect;
+
+class Point;
+var
+    X : Integer;
+    Y : Integer;
+begin
+    constructor Init (AX : Integer, AY : Integer);
+    begin
+        X := AX;
+        Y := AY;
+    end
+end
+
+var A := Point (1, 2);
+var B := Point (1, 2);
+
+WriteLn (A = B);
+WriteLn (A.SameContent (B));
+WriteLn (SameContent ([1, 2], [1, 2]));
+WriteLn ([1, 2] = [1, 2]);
+WriteLn (SameContent (5, 5.0));
+```
+
+```console
+false
+true
+true
+false
+false
 ```
 
 ---
