@@ -218,18 +218,26 @@ claim about this library should be compiled rather than reasoned about.
   binary, and building the compiler is outside this repository's remit — so the
   Algol-24 half of every unit is unexercised off macOS. Compiling the C is the
   most this project can honestly check by itself.
-- ⚠️ **Windows is not supported and is not close.** `crtffi.c` wants the Win32
-  console API in place of termios and `ioctl`; `dosffi.c` wants
-  `GetDiskFreeSpaceEx` and `CreateProcess` in place of `statvfs` and
-  `posix_spawn`. Both are real backends behind the same function signatures,
-  not a flag.
-- ⚠️ **Windows compiles and has never been run.** Every shim cross-compiles
-  with `x86_64-w64-mingw32-gcc`, 0 warnings, so the `#ifdef _WIN32` branches
-  are at least well-formed against the real Win32 headers. Nothing beyond
-  that is known: no unit has executed on Windows, and the parts most likely
-  to need work on real hardware are `crt`'s virtual-terminal flags and its
-  non-blocking console poll. Treat the Windows branches as a scaffold that
-  compiles, not as support.
+- ⚠️ **Windows has been RUN, once, and what that covers is narrower than
+  "supported".** On 2026-11-14, on a Windows 11 machine under MSYS2 MINGW64
+  (gcc 16.2, SDL2 2.32, libffi 3.8), with `algc` 0.4.0 built `--ffi` from the
+  compiler's `windows-fixes` branch (schildawg/algol24#23): every unit's
+  suite passes, `check-reference.py` runs 120 examples with 0 wrong and skips
+  `Exec`'s as POSIX-only, and `examples/check.sh` agrees three ways. Getting
+  there took six fixes here and three in the compiler's runtime; the
+  library's own were `trunc`/`llrint` moving into `mathffi.c`, `FullPath`
+  learning drive letters, `DiskFree` refusing a missing path, UTF-8 in
+  `check-reference.py`, and `--export-all-symbols` for the static example.
+- ⚠️ **What that run did NOT exercise.** `crt`'s tests run with no terminal
+  attached, so its virtual-terminal flags and non-blocking console poll —
+  the parts most likely to need work on real hardware — have still never
+  driven a real console. `Exec`'s Windows quoting is untested: Windows ships
+  no program that reports its argv as `CommandLineToArgvW` splits it, so that
+  test skips there, as does the signal test, Windows having no signals. And
+  `graph` and `sound` ran under SDL's dummy drivers only.
+- ⚠️ **The run went through Git for Windows' default `core.autocrlf=true`**,
+  so every source was CRLF on disk. Nothing here minded, but a Windows
+  result is a result for that checkout.
 
 ### The Windows branches, and what they cost
 
