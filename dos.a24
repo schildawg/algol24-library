@@ -394,17 +394,51 @@ begin
         AssertEqual (GetEnv (EnvName (Str (Entry))), EnvValue (Str (Entry)));
 end
 
-/// `/usr/bin/true` and `/usr/bin/false` exist on every system this builds on
-/// and do nothing but answer a status, which is exactly what is being tested.
+/// Whether the tests below are running on Windows, where the POSIX programs
+/// they name do not exist. `OS` is `Windows_NT` on every Windows the
+/// library builds for, and is set by nothing else.
+private function OnWindows () : Boolean;
+begin
+    Exit HasEnv ('OS') and GetEnv ('OS') = 'Windows_NT';
+end
+
+/// `/usr/bin/true` and `/usr/bin/false` exist on every POSIX system this
+/// builds on and do nothing but answer a status, which is exactly what is being
+/// tested. Windows has neither, so there the command interpreter `ComSpec`
+/// names is told to exit with each status instead.
 test 'Exec Runs A Program And Answers Its Status';
 begin
+    if OnWindows () then
+    begin
+        var Zero := List ();
+        Zero.Add ('/c');
+        Zero.Add ('exit');
+        Zero.Add ('0');
+
+        var Seven := List ();
+        Seven.Add ('/c');
+        Seven.Add ('exit');
+        Seven.Add ('7');
+
+        AssertEqual (0, Exec (GetEnv ('ComSpec'), Zero));
+        AssertEqual (7, Exec (GetEnv ('ComSpec'), Seven));
+
+        Exit;
+    end
+
     AssertEqual (0, Exec ('/usr/bin/true', List ()));
     AssertTrue (Exec ('/usr/bin/false', List ()) <> 0);
 end
 
 /// The arguments have to arrive, which a program that reports them can show.
+///
+/// Not checked on Windows, where no program the system ships reports its
+/// arguments as `CommandLineToArgvW` splits them -- `cmd` reparses its own
+/// line -- so the quoting `dosffi.c` does there is unexercised by this suite.
 test 'Exec Passes Its Arguments To The Program';
 begin
+    if OnWindows () then Exit;
+
     var Args := List ();
 
     Args.Add ('-c');
@@ -430,8 +464,13 @@ end
 
 /// A program killed by a signal is distinguishable from one that exited,
 /// because an exit code cannot exceed 255.
+///
+/// Not checked on Windows, which has no signals: a faulting process answers
+/// its NTSTATUS there, as `Exec`'s own documentation says.
 test 'Exec Reports A Signal As 128 Plus Its Number';
 begin
+    if OnWindows () then Exit;
+
     var Args := List ();
 
     Args.Add ('-c');

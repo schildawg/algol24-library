@@ -2627,6 +2627,7 @@ Raises `Exec: cannot run '<path>'.` where the program could not be started, and
 
 **Example**
 
+<!-- check-reference: posix-only -->
 ```algol24
 uses dos;
 

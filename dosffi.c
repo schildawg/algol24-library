@@ -80,6 +80,12 @@ static int64_t disk_bytes (const char *path, int total)
 {
     if (path == NULL) return -1;
 
+    /* GetVolumePathName asks the filesystem nothing: it maps ANY path to the
+     * volume it would be on, so '/no/such/path/anywhere' answered C:\'s free
+     * space where statvfs refuses it. The unit documents a refusal for a path
+     * that is not there, so ask whether this one is before mapping it. */
+    if (GetFileAttributesA (path) == INVALID_FILE_ATTRIBUTES) return -1;
+
     char volume[MAX_PATH + 1];
 
     if (!GetVolumePathNameA (path, volume, (DWORD) sizeof volume))

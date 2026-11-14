@@ -950,6 +950,39 @@ begin
     Exit PathParts (Dir, Copy (Rest, 0, Dot), Copy (Rest, Dot, Length (Rest)));
 end
 
+/// The drive a Windows path is rooted at, such as `C:`, or the empty string.
+///
+/// A letter and a colon count only when a separator or the end follows, so
+/// `C:/x`, `C:\x` and `C:` are drives and `C:x` is not -- that one names a
+/// place relative to a drive's own working directory, which nothing here can
+/// ask for, and a POSIX name may begin that way anyway.
+private function DriveOf (Path : String) : String;
+begin
+    if Length (Path) < 2 or Path[1] <> ':' then Exit '';
+
+    var N := Ord (Path[0]);
+
+    if not ((N >= 65 and N <= 90) or (N >= 97 and N <= 122)) then Exit '';
+
+    if Length (Path) > 2 and Path[2] <> '/' and Path[2] <> '\' then Exit '';
+
+    Exit Copy (Path, 0, 2);
+end
+
+/// Path with every `\` made a `/`, for the drive paths FullPath walks.
+private function Slashed (Path : String) : String;
+begin
+    if Length (Path) = 0 then Exit '';
+
+    var Out := Buffer ();
+
+    for var I := 0; I < Length (Path); I := I + 1 do
+        if Path[I] = '\' then Out.Append ('/');
+        else Out.Append (Path[I]);
+
+    Exit Out.Text;
+end
+
 /// A path made absolute, with `.` and `..` resolved away.
 ///
 /// Turbo Pascal's `FExpand`. A relative path is taken against the working
@@ -959,6 +992,12 @@ end
 /// Tidying means what it says: repeated separators collapse, a `.` component
 /// goes, and a `..` component removes the one before it. A `..` at the root
 /// stays at the root rather than climbing past it.
+///
+/// A Windows drive is a root too. A path beginning with a letter and a colon,
+/// then a separator or nothing, is absolute: `C:` stays at its front, a `..`
+/// cannot climb past it, and within it `\` separates as `/` does. The answer
+/// is written with `/`, which every Windows call accepts. A `\` in any other
+/// path is left alone, being a character a POSIX name may hold.
 ///
 /// This asks the filesystem nothing. It does not resolve symbolic links and
 /// does not require the path to exist, which is what makes it usable on a
@@ -977,7 +1016,15 @@ begin
     var Base := Path;
 
     if Length (Path) = 0 then Base := GetDir ();
-    else if Path[0] <> '/' then Base := GetDir () + '/' + Path;
+    else if Path[0] <> '/' and DriveOf (Path) = '' then
+        Base := GetDir () + '/' + Path;
+
+    // The working directory is a drive path on Windows, so the drive is
+    // asked of Base rather than of Path -- a relative path has acquired one.
+    var Drive := DriveOf (Base);
+
+    if Drive <> '' then
+        Base := Slashed (Copy (Base, 2, Length (Base) - 2));
 
     // Walked rather than split, because `List` has no Remove and `..` needs
     // one -- so a depth counter stands in for popping, and entries beyond it
@@ -1014,9 +1061,11 @@ begin
         At := Stop + 1;
     end
 
-    if Depth = 0 then Exit '/';
+    if Depth = 0 then Exit Drive + '/';
 
     var Out := Buffer ();
+
+    Out.Append (Drive);
 
     for var I := 0; I < Depth; I := I + 1 do
     begin
@@ -2541,4 +2590,26 @@ begin
 
     // It asks the filesystem nothing, so a name that does not exist is fine.
     AssertEqual ('/no/such/place', FullPath ('/no/./such/../such/place'));
+end
+
+/// Asks nothing of the filesystem either, so it holds on every platform: a
+/// drive path is tidied the same way on macOS as on Windows.
+test 'FullPath Keeps A Drive Letter As Its Root';
+begin
+    AssertEqual ('C:/a/c', FullPath ('C:/a/b/../c'));
+    AssertEqual ('C:/a/b/c', FullPath ('C:\a\.\b\\c'));
+    AssertEqual ('d:/x', FullPath ('d:\x\'));
+
+    // The drive is the root, so a climb stops there.
+    AssertEqual ('C:/', FullPath ('C:/..'));
+    AssertEqual ('C:/', FullPath ('C:\a\..\..'));
+    AssertEqual ('C:/', FullPath ('C:'));
+
+    // Not drives: no separator after the colon, or no letter before it. Each
+    // is relative and lands under the working directory.
+    AssertEqual (GetDir () + '/C:x', FullPath ('C:x'));
+    AssertEqual (GetDir () + '/1:/y', FullPath ('1:/y'));
+
+    // A backslash outside a drive path is a character, not a separator.
+    AssertEqual ('/a\b', FullPath ('/a\b'));
 end
