@@ -346,12 +346,50 @@ match the wrappers.
 ⚠️ **`algvm` is its own Homebrew formula and it bundles a snapshot of THIS
 library.** Checked 2026-11-12 on 0.3.2:
 `/opt/homebrew/Cellar/algol24-vm/0.3.2/libexec/lib/` holds the units,
-`REFERENCE.md`, `graphfont.hex`, `beep.wav` **and every `lib*ffi.so`**. So a
-shim rebuilt here is invisible to the VM until that formula is rebuilt — a new
-`external` answers `No foreign symbol 'x' in 'lib….so'.` under `algvm` while
-working perfectly under `algc`. ⚠️ **`ALGOL24_LIB` does NOT redirect `.so`
-resolution**, so there is no way to point the VM at a working copy; it was
-tried.
+`REFERENCE.md`, `graphfont.hex`, `beep.wav` **and every `lib*ffi.so`**. The
+`algol24` formula ships **no** `.so` at all, which is the whole reason `algc`
+never meets any of this and `algvm` always will.
+
+⚠️ **The two kinds of file resolve in OPPOSITE orders, and that is the fault.**
+Measured 2026-11-14 on 0.3.2:
+
+| | searched first |
+| --- | --- |
+| a `.a24` unit | the **working directory** |
+| a `.so` shared object | the VM's **bundled `lib/`** |
+
+So the VM pairs *new* Algol-24 source with *old* C. Neither half is wrong
+alone; the pairing is. A shim rebuilt here is invisible to the VM until the
+formula is rebuilt, and a new `external` answers
+`No foreign symbol 'x' in 'lib….so'.` under `algvm` while working perfectly
+under `algc`.
+
+⚠️ **It is PRECEDENCE and not blindness, which this file got wrong at first.**
+It used to say "there is no way to point the VM at a working copy"; that is too
+strong. The VM reads the working directory perfectly well — a `.so` whose
+*name* the bundle does not carry resolves there under `algvm` exactly as under
+`algc`, measured with a throwaway `libprobeffi.so`. The failure needs the
+**filename to collide** with a bundled one: the VM finds the bundled file,
+`dlopen`s it, `dlsym` misses, and it reports failure instead of trying the next
+candidate directory — stopping at the first *file* rather than searching on for
+the *symbol*. ⚠️ **`ALGOL24_LIB` does not redirect `.so` resolution either**,
+so there is no environment variable out of it.
+
+⚠️ **There is no library-side fix, and the dodge that works is not one.** An
+`in` clause takes a string literal and cannot ask what host it is on, so a
+declaration cannot branch. Naming new symbols into a *new* `.so` the bundle
+does not carry would resolve — for exactly the reason above — and is a trick
+rather than an answer. The fix is the VM's search order, in the compiler
+project.
+
+⚠️ **This bit for real in library v0.2.1.** Windows needed `Int` and `Round`
+to stop resolving `trunc`/`llrint` out of the running program, so they moved
+behind `alg_libmath_int`/`alg_libmath_round` in `mathffi.c` — correct, and it
+broke four units under `algvm` until the formula moved: `math` 17 of 78 failing,
+`random` 17 of 95, `graph` 64 of 435, `sound` 29 of 92, every one of them
+`No foreign symbol 'alg_libmath_int'`. The units that reach `math` are exactly
+the ones that broke. **So a release that adds a shim symbol has an ordering
+requirement:** the library ships, then `algol24-vm` is rebuilt against it.
 
 ⚠️ **So "works on all three processors" has to be CHECKED on three, and this
 file claimed two for a while.** `algc file.a24` is the tree-walker,
@@ -558,20 +596,15 @@ Two live documents sit in the root rather than in `finished/`:
   document's own Status block records all of this against what it asked, and
   keeps the ask unedited.
 
-  ⚠️ **The unit over those built-ins is this library's and is NOT YET
-  WRITTEN** — extension functions, so the names stay out of any file that does
-  not `uses` it [MOD-015]; a receiver written `Any` is legal and reaches an
-  instance, an Integer and a String alike, where member lookup would not —
-  confirmed on 0.3.1, both spellings. `NOTES-REFLECTION.md` holds what was
-  measured and the decisions the unit needs; the user names the unit and its
-  methods as always. Two things will bite whoever writes it, both specified
-  rather than faults: **`TypeOf (nil)` is `nil`**, so every entry point needs a
-  guard or it raises `Only instances have properties.`; and **`SetMember` does
-  not enforce the declared type**, being deliberately as permissive as an
-  untyped assignment, so the unit checks. A third constraint is **gone** — a
-  member of a consumer's class still wins over an extension of the same name
-  [EXP-022], but 0.3.2 put that warning on stderr, so the name no longer has
-  to dodge plausible member names to keep a consumer's output clean.
+  **The unit over those built-ins is `reflect`, and it is written** —
+  `Describe` and `SameContent`, both extension functions with an `Any`
+  receiver, shipped in library v0.2.0. See the `reflect` notes below for the
+  three things in it that were not obvious, and `NOTES-REFLECTION.md` for what
+  was measured. ⚠️ **What is still NOT written is the serializer**, the third
+  of the three uses this proposal named: it needs a wire format and a
+  consumer-owned name-to-type registry, and
+  `NOTES-REFLECTION.md` §5 holds it as the one open decision with the argument
+  for building a `tasks` unit first and letting its framing decide the format.
 - `REPORT-CONCURRENCY.md` answers the core's `PROPOSAL-CONCURRENCY.md` and
   **asks for nothing.** It agrees with that document's conclusion and corrects
   four of its supporting claims — chiefly that subprogram re-entry works today
