@@ -1092,12 +1092,30 @@ survives resampling. ⚠️ **`check-reference.py` copies `.wav` as well as `.a2
 and `.hex`** into its work directory, or the `LoadSound` example cannot find
 it.
 
-⚠️ **A `--static` binary is only as self-contained as its units.** With
-CoreAudio a `sound`-using binary needed nothing extra, the framework shipping
-with the operating system. With SDL2 it links `libSDL2.dylib`, which Homebrew
-installs and macOS does not ship -- measured. `examples/statistics.a24` reaches
-neither `graph` nor `sound`, so its own binary still needs only `libffi` and
-`libSystem`, which is why `examples/check.sh` passing does not prove this.
+⚠️ **A `--static` binary is NOT self-contained, and this file said otherwise
+until 2026-11-14.** It claimed `examples/statistics.a24` "reaches neither
+`graph` nor `sound`, so its own binary still needs only `libffi` and
+`libSystem`." Measured, that binary needs four things:
+
+```console
+$ otool -L examples/build/statistics
+  /usr/lib/libffi.dylib
+  /usr/lib/libSystem.B.dylib
+  /opt/homebrew/opt/sdl2-compat/lib/libSDL2-2.0.0.dylib
+  /System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa
+```
+
+⚠️ **The reasoning was wrong, not just the figure.** Which units the *program*
+reaches does not decide it: `--static` links `./*ffi.c` — **every shim in the
+repository** — and passes `sdl2-config --cflags --libs` unconditionally. So
+`soundffi.c` and `graphffi.c` come along whatever the program imports, and SDL
+with them. `examples/README.md` carried the same claim under the words "this
+is the mode to ship", which is the version that could cost somebody an
+afternoon: the binary runs here only because Homebrew's SDL2 is installed, and
+would fail to launch on a machine without it.
+
+`examples/check.sh` passing proves the three runs agree, not that the artifact
+travels — which is the part the old sentence got right.
 
 ⚠️ **`crt` duplicates `graph`'s constants deliberately, and must not be
 refactored to share them.** `uses` is **not transitive**: a program saying
