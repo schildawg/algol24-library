@@ -46,11 +46,18 @@ flags_for () {
     esac
 }
 
+# ⚠️ -lm SO A SHIM OWNS ITS OWN MATH RATHER THAN BORROWING THE HOST'S. A shared
+# object is allowed an undefined symbol, which is resolved at dlopen time out of
+# whatever the running program happens to have loaded -- so graphffi.c's arcs,
+# where gcc folds a sin/cos pair into one `sincos` call, linked here with that
+# symbol undefined and worked only because algc had libm. It does, since
+# compiler 0.4.1, and that is a fact about the host and not about this file. A
+# no-op on macOS, where math is part of libSystem.
 for SRC in ./*ffi.c; do
     NAME=$(basename "$SRC" .c)
     LINK=$(flags_for "$SRC")
     # shellcheck disable=SC2086
-    $CC $CFLAGS $SHARED -o "lib$NAME.so" "$SRC" $LINK
+    $CC $CFLAGS $SHARED -o "lib$NAME.so" "$SRC" $LINK -lm
     echo "lib$NAME.so"
 done
 

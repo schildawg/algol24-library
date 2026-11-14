@@ -94,6 +94,22 @@ algc math.a24             # run a program
 and then the working directory, and `external … in 'libmathffi.so'` is found
 the same way.
 
+⚠️ **THE SHIM HALF OF THAT NEEDS COMPILER 0.4.1, and on Linux it is the whole
+suite rather than a detail.** A unit was found in the working directory and its
+shim was not: macOS and Windows hid it, their loaders searching the current
+directory themselves, where Linux's does not. So every unit that calls into C
+failed at its first test — `crt` all 35 of them — with
+`Cannot open foreign library 'libcrtffi.so'`. Against an older compiler the
+way through is `LD_LIBRARY_PATH="$PWD"`; against 0.4.1 there is nothing to set.
+
+⚠️ **AND A BARE-NAMED `external` NEEDED THE SAME RELEASE.** `math` declares
+`external 'atan'` with no `in` clause, which resolves from the running program
+— libSystem on macOS, and on Linux a libm the compiler had no reference to, so
+`--as-needed` dropped it and all 78 of `math`'s tests answered
+`No foreign symbol 'atan'.` Fixed in the compiler, not here; what this
+repository owes it is the `-lm` on its own link lines, which `build.sh` and
+`examples/build.sh` now carry.
+
 Unit tests are the whole of the testing story. Conformance cases, refusals and
 interpreted-versus-compiled comparison belong to the compiler project.
 
@@ -1076,12 +1092,30 @@ survives resampling. ⚠️ **`check-reference.py` copies `.wav` as well as `.a2
 and `.hex`** into its work directory, or the `LoadSound` example cannot find
 it.
 
-⚠️ **A `--static` binary is only as self-contained as its units.** With
-CoreAudio a `sound`-using binary needed nothing extra, the framework shipping
-with the operating system. With SDL2 it links `libSDL2.dylib`, which Homebrew
-installs and macOS does not ship -- measured. `examples/statistics.a24` reaches
-neither `graph` nor `sound`, so its own binary still needs only `libffi` and
-`libSystem`, which is why `examples/check.sh` passing does not prove this.
+⚠️ **A `--static` binary is NOT self-contained, and this file said otherwise
+until 2026-11-14.** It claimed `examples/statistics.a24` "reaches neither
+`graph` nor `sound`, so its own binary still needs only `libffi` and
+`libSystem`." Measured, that binary needs four things:
+
+```console
+$ otool -L examples/build/statistics
+  /usr/lib/libffi.dylib
+  /usr/lib/libSystem.B.dylib
+  /opt/homebrew/opt/sdl2-compat/lib/libSDL2-2.0.0.dylib
+  /System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa
+```
+
+⚠️ **The reasoning was wrong, not just the figure.** Which units the *program*
+reaches does not decide it: `--static` links `./*ffi.c` — **every shim in the
+repository** — and passes `sdl2-config --cflags --libs` unconditionally. So
+`soundffi.c` and `graphffi.c` come along whatever the program imports, and SDL
+with them. `examples/README.md` carried the same claim under the words "this
+is the mode to ship", which is the version that could cost somebody an
+afternoon: the binary runs here only because Homebrew's SDL2 is installed, and
+would fail to launch on a machine without it.
+
+`examples/check.sh` passing proves the three runs agree, not that the artifact
+travels — which is the part the old sentence got right.
 
 ⚠️ **`crt` duplicates `graph`'s constants deliberately, and must not be
 refactored to share them.** `uses` is **not transitive**: a program saying

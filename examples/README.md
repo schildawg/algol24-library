@@ -53,27 +53,36 @@ bare name, which resolves against the working directory — so the shims are
 copied beside it and it must be run from there. Fine for development, awkward to
 ship.
 
-**`--static`.** One file, and for this program `otool -L` shows it needs only
-what macOS already ships:
+**`--static`.** One file, with the library's Algol-24 *and* its C linked in,
+so nothing has to sit beside it. It runs from anywhere and prints exactly what
+the interpreter prints.
+
+⚠️ **It is NOT self-contained, and this file claimed it was.** The claim here
+used to be that `otool -L` showed "only what macOS already ships", namely
+`libffi` and `libSystem`. Measured, it shows four things:
 
 ```
 /usr/lib/libffi.dylib
 /usr/lib/libSystem.B.dylib
+/opt/homebrew/opt/sdl2-compat/lib/libSDL2-2.0.0.dylib
+/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa
 ```
 
-It runs from anywhere and prints exactly what the interpreter prints. This is the
-mode to ship.
+**Homebrew installs SDL2 and macOS does not ship it**, so this binary runs on
+this machine because SDL is here, and would fail to launch on one without it.
+That is the opposite of what "the mode to ship" implied.
 
-⚠️ **How self-contained depends on which units the program reaches.**
-`statistics.a24` uses `math` and `random`, whose C needs nothing but libc, so
-the list above is the whole of it. A program reaching `graph` or `sound` links
-SDL2, which Homebrew installs and macOS does not ship — measured on a
-`sound`-using binary built the same way, where `otool -L` names
-`libSDL2.dylib`. This got slightly worse when `sound` moved off CoreAudio in
-0.1.5: a framework that shipped with the operating system became a library that
-has to travel with the binary. That is the cost of the unit making a noise on
-more than one operating system, and it is paid at ship time rather than at
-build time.
+⚠️ **The old reasoning was the real error.** It said self-containment "depends
+on which units the program reaches", and `statistics.a24` reaches neither
+`graph` nor `sound` — true, and beside the point. `--static` links
+`./*ffi.c`, **every shim in this repository**, and passes
+`sdl2-config --cflags --libs` unconditionally. So `soundffi.c` and
+`graphffi.c` are linked in whatever the program imports, and SDL comes with
+them. What the program reaches decides which *units* are in the binary; it
+does not decide which *libraries* the binary needs.
+
+`examples/check.sh` passing does not catch this. It proves the three runs
+agree, which they do — not that the artifact travels.
 
 ## Why the example seeds instead of randomizing
 
