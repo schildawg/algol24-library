@@ -94,6 +94,22 @@ algc math.a24             # run a program
 and then the working directory, and `external … in 'libmathffi.so'` is found
 the same way.
 
+⚠️ **THE SHIM HALF OF THAT NEEDS COMPILER 0.4.1, and on Linux it is the whole
+suite rather than a detail.** A unit was found in the working directory and its
+shim was not: macOS and Windows hid it, their loaders searching the current
+directory themselves, where Linux's does not. So every unit that calls into C
+failed at its first test — `crt` all 35 of them — with
+`Cannot open foreign library 'libcrtffi.so'`. Against an older compiler the
+way through is `LD_LIBRARY_PATH="$PWD"`; against 0.4.1 there is nothing to set.
+
+⚠️ **AND A BARE-NAMED `external` NEEDED THE SAME RELEASE.** `math` declares
+`external 'atan'` with no `in` clause, which resolves from the running program
+— libSystem on macOS, and on Linux a libm the compiler had no reference to, so
+`--as-needed` dropped it and all 78 of `math`'s tests answered
+`No foreign symbol 'atan'.` Fixed in the compiler, not here; what this
+repository owes it is the `-lm` on its own link lines, which `build.sh` and
+`examples/build.sh` now carry.
+
 Unit tests are the whole of the testing story. Conformance cases, refusals and
 interpreted-versus-compiled comparison belong to the compiler project.
 
