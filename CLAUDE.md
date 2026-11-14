@@ -398,14 +398,22 @@ does not carry would resolve — for exactly the reason above — and is a trick
 rather than an answer. The fix is the VM's search order, in the compiler
 project.
 
-⚠️ **This bit for real in library v0.2.1.** Windows needed `Int` and `Round`
-to stop resolving `trunc`/`llrint` out of the running program, so they moved
-behind `alg_libmath_int`/`alg_libmath_round` in `mathffi.c` — correct, and it
-broke four units under `algvm` until the formula moved: `math` 17 of 78 failing,
+⚠️ **This bit for real in library v0.3.0, and was resolved by the 0.4.1
+formulae.** Windows needed `Int` and `Round` to stop resolving `trunc`/`llrint`
+out of the running program, so they moved behind
+`alg_libmath_int`/`alg_libmath_round` in `mathffi.c` — correct, and it broke
+four units under `algvm` until the formula moved: `math` 17 of 78 failing,
 `random` 17 of 95, `graph` 64 of 435, `sound` 29 of 92, every one of them
 `No foreign symbol 'alg_libmath_int'`. The units that reach `math` are exactly
 the ones that broke. **So a release that adds a shim symbol has an ordering
 requirement:** the library ships, then `algol24-vm` is rebuilt against it.
+`algol24-vm` 0.4.1 bundles library v0.3.1 and all four units pass there again,
+checked 2026-11-14.
+
+⚠️ **An earlier version of this paragraph said "v0.2.1", which is a release
+that does not exist.** The number was written while that was the plan and not
+corrected when the release went out as v0.3.0 instead. A version named in this
+file should be checked against `git tag`.
 
 ⚠️ **So "works on all three processors" has to be CHECKED on three, and this
 file claimed two for a while.** `algc file.a24` is the tree-walker,
@@ -802,14 +810,23 @@ to **stdout** (L-4), so a consumer whose class had a clashing member name got
 a line added to their own program's output. Advice, not a floor.
 
 The twelve units other than `reflect` are verified working on **0.2.4**,
-**0.3.0**, **0.3.1** and **0.3.2**, which is current — 0.3.0 unified Char and
-String equality and broke nothing here, because this library had worked around
-the seam at 44 sites rather than being bitten by it a fifth time; 0.3.1 added
-reflection; and 0.3.2 closed **L-4, L-5 and L-6**, emptying `DEFECTS.md`'s
-open list for the first time. ⚠️ **`reflect` has only been RUN on 0.3.2.** Its
-0.3.1 floor is read off what it calls rather than measured, no older compiler
-being installed here, so it is a claim about the built-ins' release and not a
-test result.
+**0.3.0**, **0.3.1**, **0.3.2** and **0.4.1**, which is current — 0.3.0 unified
+Char and String equality and broke nothing here, because this library had
+worked around the seam at 44 sites rather than being bitten by it a fifth time;
+0.3.1 added reflection; 0.3.2 closed **L-4, L-5 and L-6**, emptying
+`DEFECTS.md`'s open list for the first time; and 0.4.1 carried the Linux
+linking half, the working-directory shim search and the bare-named `external`.
+`reflect` has been run on **0.3.2 and 0.4.1**; its 0.3.1 floor is still read
+off what it calls rather than measured, no older compiler being installed here,
+so that number is a claim about the built-ins' release and not a test result.
+
+⚠️ **0.4.1 is the first release where the WHOLE library has been run on all
+three processors.** Checked 2026-11-14: `./test.sh` green under `algc` and
+byte-identical to its 0.3.2 run, and every one of the thirteen units green
+under `algvm` as well. Before this the VM could not run anything with a shim
+symbol newer than its bundled snapshot, so "all three" had never been true of
+more than the units with no C. The three closed defects were re-checked on
+0.4.1 and remain closed.
 
 `strings` notes: it is the second unit after `testing` with no `*ffi.c`, and
 `reflect` is now the third — the three that are portable as written, with
@@ -1072,7 +1089,13 @@ that should be in one.
 
 `sound` notes: `ALG_SOUND=dummy` computes everything and plays nothing, which
 `test.sh` and `check-reference.py` both set -- the same bargain
-`SDL_VIDEODRIVER=dummy` strikes for `graph`. Under it `Play` still takes
+`SDL_VIDEODRIVER=dummy` strikes for `graph`. ⚠️ **Two tests FAIL without it
+rather than skipping**, which is unlike `graph`'s `ALGOL24_LIB` test: run
+`--test sound.a24` bare and `A Loaded Sound Reports Its Own Length` and
+`A Silent Device Still Keeps Time` both fail, on a real audio device, under
+every processor alike. That is not a fault and not VM-specific -- `algc` and
+`algvm` fail the identical two -- but it reads like one when a unit is run
+directly, so set the variable or expect them. Under it `Play` still takes
 exactly as long and `LoadSound` still decodes, but `PlaySound` answers False,
 there being no voice to start on a device that was never opened. `Score`
 answers an MML string's notes without sounding them, which is what makes the
