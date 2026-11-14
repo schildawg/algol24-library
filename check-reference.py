@@ -18,6 +18,15 @@ An entry pairs a program with its output:
 A ```algol24 block NOT followed by a ```console block is a Declaration excerpt
 rather than a program, and is skipped.
 
+An example that can only run on a POSIX host -- `Exec` naming `/bin/echo` --
+carries `<!-- check-reference: posix-only -->` on the line before its program,
+and is skipped on Windows. A skip is counted and printed, never silent: the run
+says how many examples it did not check.
+
+Every file is read and written as UTF-8, which is what REFERENCE.md and the
+units are. Python's default is the locale's encoding, cp1252 on Windows, where
+the first non-ASCII byte in the reference stopped the run before any example.
+
 This script exits non-zero if any example is wrong, and also if it finds fewer
 examples than there are ```console blocks -- a check that silently verifies
 nothing is worse than no check, which this script learned the hard way.
@@ -38,18 +47,24 @@ REFERENCE = os.path.join(ROOT, 'REFERENCE.md')
 
 FENCE = re.compile(r'```(algol24|console)\n(.*?)^```\n', re.S | re.M)
 
+POSIX_ONLY = '<!-- check-reference: posix-only -->'
+ON_WINDOWS = os.name == 'nt' or sys.platform in ('win32', 'cygwin', 'msys')
+
 
 def examples(text):
-    """Each (program, expected) pair: an algol24 block immediately followed by a console one."""
-    blocks = [(m.group(1), m.group(2)) for m in FENCE.finditer(text)]
+    """Each (program, expected, posix_only) triple: an algol24 block
+    immediately followed by a console one, and whether it is marked as
+    needing a POSIX host."""
+    blocks = [(m.group(1), m.group(2), m.start()) for m in FENCE.finditer(text)]
 
-    for (kind, body), (next_kind, next_body) in zip(blocks, blocks[1:]):
+    for (kind, body, at), (next_kind, next_body, _) in zip(blocks, blocks[1:]):
         if kind == 'algol24' and next_kind == 'console':
-            yield body, next_body
+            before = text[:at].rstrip('\n').rsplit('\n', 1)[-1]
+            yield body, next_body, before.strip() == POSIX_ONLY
 
 
 def main():
-    text = open(REFERENCE).read()
+    text = open(REFERENCE, encoding='utf-8').read()
     expected_count = text.count('```console\n')
     pairs = list(examples(text))
 
@@ -65,9 +80,14 @@ def main():
                 shutil.copy(os.path.join(ROOT, name), work)
 
         failed = 0
-        for i, (program, expected) in enumerate(pairs):
+        skipped = 0
+        for i, (program, expected, posix_only) in enumerate(pairs):
+            if posix_only and ON_WINDOWS:
+                skipped += 1
+                continue
+
             path = os.path.join(work, f'example{i}.a24')
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(program)
 
             # An example using the built-in assertions only runs under --test:
@@ -78,6 +98,7 @@ def main():
             # graph examples open windows; the dummy driver opens them nowhere.
             env = dict(os.environ, SDL_VIDEODRIVER='dummy', ALG_SOUND='dummy')
             result = subprocess.run(argv, capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace',
                                     cwd=work, env=env)
 
             got = result.stdout
@@ -98,7 +119,8 @@ def main():
                       f'{program}\nexpected:\n{expected}got:\n{got}'
                       f'{result.stderr}', file=sys.stderr)
 
-        print(f'reference: {len(pairs)} examples run, {failed} wrong')
+        note = f', {skipped} skipped as POSIX-only on this host' if skipped else ''
+        print(f'reference: {len(pairs) - skipped} examples run, {failed} wrong{note}')
         return 1 if failed else 0
     finally:
         shutil.rmtree(work)

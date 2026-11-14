@@ -27,6 +27,12 @@ export ALG_SOUND=dummy
 # place was tried. A run without it skips that one test rather than failing.
 export ALGOL24_LIB="$PWD"
 
+# A variable whose value is not ASCII, for dos to read back. Windows' narrow
+# getenv decodes by the ANSI code page, so this is what showed GetEnv answering
+# something other than what was set there. A run without it skips that one
+# test rather than failing, as with ALGOL24_LIB above.
+export ALGOL24_TEST_TEXT='café ✓'
+
 # The units reach the library's own C through a shared library, so a stale one
 # would be tested instead of the source beside it.
 ./build.sh > /dev/null

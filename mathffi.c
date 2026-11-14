@@ -63,3 +63,34 @@ int64_t alg_float_exponent (double x)
 
     return exponent - 53;                     /* to match the scaling above */
 }
+
+/* libm's own `trunc` and `llrint`, carried here so `math` does not have to
+ * find them in the running program.
+ *
+ * Both were declared with no `in` clause, which resolves out of whatever the
+ * process already holds -- fine on macOS and Linux, where libm is there, and
+ * fatal on Windows: the runtime looks in the program and in msvcrt.dll, and
+ * mingw-w64 links these two C99 functions in statically rather than taking
+ * them from msvcrt, so `Int` and `Round` answered `No foreign symbol` and took
+ * `graph`, `sound` and `random` down with them.  `random` lost `drand48` the
+ * same way and was fixed the same way.  `sqrt`, `exp`, `log`, `sin`, `cos`
+ * and `atan` predate C99 and msvcrt exports them, so they stay as they are.
+ */
+double alg_libmath_int (double x)
+{
+    return trunc (x);
+}
+
+/* Rounds by the current direction -- to nearest, ties to even, since nothing
+ * here changes it.  `llrint` of NaN or of a value outside int64 is
+ * unspecified, so those answer a defined value instead; math.a24's Round
+ * refuses them before calling, and this only keeps a wrong caller out of UB.
+ */
+int64_t alg_libmath_round (double x)
+{
+    if (isnan (x))                       return 0;
+    if (x >=  9223372036854775808.0)     return INT64_MAX;
+    if (x <   -9223372036854775808.0)    return INT64_MIN;
+
+    return (int64_t) llrint (x);
+}

@@ -218,18 +218,59 @@ claim about this library should be compiled rather than reasoned about.
   binary, and building the compiler is outside this repository's remit — so the
   Algol-24 half of every unit is unexercised off macOS. Compiling the C is the
   most this project can honestly check by itself.
-- ⚠️ **Windows is not supported and is not close.** `crtffi.c` wants the Win32
-  console API in place of termios and `ioctl`; `dosffi.c` wants
-  `GetDiskFreeSpaceEx` and `CreateProcess` in place of `statvfs` and
-  `posix_spawn`. Both are real backends behind the same function signatures,
-  not a flag.
-- ⚠️ **Windows compiles and has never been run.** Every shim cross-compiles
-  with `x86_64-w64-mingw32-gcc`, 0 warnings, so the `#ifdef _WIN32` branches
-  are at least well-formed against the real Win32 headers. Nothing beyond
-  that is known: no unit has executed on Windows, and the parts most likely
-  to need work on real hardware are `crt`'s virtual-terminal flags and its
-  non-blocking console poll. Treat the Windows branches as a scaffold that
-  compiles, not as support.
+- ⚠️ **Windows has been RUN, once, and what that covers is narrower than
+  "supported".** On 2026-11-14, on a Windows 11 machine under MSYS2 MINGW64
+  (gcc 16.2, SDL2 2.32, libffi 3.8), with `algc` 0.4.0 built `--ffi` from the
+  compiler's `windows-fixes` branch (schildawg/algol24#23): every unit's
+  suite passes, `check-reference.py` runs 120 examples with 0 wrong and skips
+  `Exec`'s as POSIX-only, and `examples/check.sh` agrees three ways. Getting
+  there took six fixes here and three in the compiler's runtime; the
+  library's own were `trunc`/`llrint` moving into `mathffi.c`, `FullPath`
+  learning drive letters, `DiskFree` refusing a missing path, UTF-8 in
+  `check-reference.py`, and `--export-all-symbols` for the static example.
+- ⚠️ **`crt` has painted a real console, and its keys are half-checked.**
+  Its tests run with no terminal attached, so the first real run was
+  `examples/ide-crt.a24` in a Windows 11 console — and every frame drew as
+  mojibake, `╔═══` as `â•”â•â•`. Not ANSI, which was on: the CODE PAGE, the
+  console decoding crt's UTF-8 as OEM 437. `tty_raw` now switches both code
+  pages to UTF-8 and restores them on leaving. Verified by attaching to the
+  running program's console from outside and reading modes, code pages and
+  the painted rows back. The key reader was then checked by hand on
+  2026-11-14 — arrows dragging Watch over Notes, Tab, Home, a resized window
+  and Esc — and behaved, so `crt` has now driven a real Windows console end
+  to end.
+- ⚠️ **`Exec`'s Windows quoting is TESTED now, by a child built for it.**
+  No program Windows ships reports its argv as `CommandLineToArgvW` splits
+  it, so `./build.sh` compiles `dosargs.c` there into one that does, and
+  `Exec Passes Its Arguments To The Program` hands it fourteen hard cases —
+  spaces, an empty string, a lone quote, backslash runs before quotes and at
+  the end, cmd's metacharacters, `%PATH%`, and `café ✓`. Every ASCII case
+  survived the existing quoting; the non-ASCII one did not, because
+  `CreateProcessA` decodes by the ANSI code page, and `dosffi.c` now widens
+  the line and calls `CreateProcessW`. A deliberately wrong argument answers
+  `114`, so the test cannot pass vacuously. The signal test still skips on
+  Windows, which has no signals. And `graph` and `sound` ran under SDL's
+  dummy drivers only.
+- ⚠️ **Every Windows call that takes or answers text is WIDE now.** The
+  narrow ones — `fopen`, `stat`, `remove`, `rename`, `opendir`, `getenv`,
+  `_environ` and the `A` entry points — decode by the ANSI code page under
+  msvcrt, so a non-ASCII path or variable meant something else. `fileffi.c`
+  routes every path through seven wrappers (`path_stat`, `path_fopen`, …) that
+  widen once and call the `_w` form; `dosffi.c` does the same for the disk,
+  the environment and `Exec`. The compiler's runtime had the identical fault
+  in `TextFile`, `MkDir`/`ChDir`/`GetDir`, `Entries`, `FileExists`,
+  `LoadLibrary` and `main`'s `argv`, fixed on the same branch.
+- ⚠️ **A round trip CANNOT catch this, which is the lesson.** Mangling every
+  name the same way, the narrow `file` found, read, renamed and listed its own
+  files perfectly — `A Non-ASCII Name Means The Same File Throughout` passed
+  against the broken shims. Only a name made by someone else shows it: git
+  checks `testdata/日本 ✓.txt` out under its real name, and the narrow calls
+  looked for `æ—¥æœ¬ âœ“.txt`. That fixture is what holds the fix, and it is why
+  `testdata/**` is byte-exact in `.gitattributes`. Likewise `GetEnv` is held by
+  a value `test.sh` exports, and `Exec` by `dosargs.exe`.
+- ⚠️ **The run went through Git for Windows' default `core.autocrlf=true`**,
+  so every source was CRLF on disk. Nothing here minded, but a Windows
+  result is a result for that checkout.
 
 ### The Windows branches, and what they cost
 
@@ -254,7 +295,9 @@ Three things in that port are worth knowing:
   takes a command *line* and offers no vector form, which is the exact hazard
   `Exec` exists to avoid — so `dosffi.c` rebuilds the line with
   `CommandLineToArgvW`'s quoting rules, doubling backslash runs before a quote
-  so the child reconstructs the arguments that went in. And Windows has no
+  so the child reconstructs the arguments that went in — measured exact by
+  `dosargs.exe`, and passed through `CreateProcessW` so UTF-8 text survives
+  too. And Windows has no
   signals, so the documented "128 plus the signal number" has no meaning
   there: a faulting process answers its NTSTATUS, a large number rather than a
   small one.
@@ -303,12 +346,50 @@ match the wrappers.
 ⚠️ **`algvm` is its own Homebrew formula and it bundles a snapshot of THIS
 library.** Checked 2026-11-12 on 0.3.2:
 `/opt/homebrew/Cellar/algol24-vm/0.3.2/libexec/lib/` holds the units,
-`REFERENCE.md`, `graphfont.hex`, `beep.wav` **and every `lib*ffi.so`**. So a
-shim rebuilt here is invisible to the VM until that formula is rebuilt — a new
-`external` answers `No foreign symbol 'x' in 'lib….so'.` under `algvm` while
-working perfectly under `algc`. ⚠️ **`ALGOL24_LIB` does NOT redirect `.so`
-resolution**, so there is no way to point the VM at a working copy; it was
-tried.
+`REFERENCE.md`, `graphfont.hex`, `beep.wav` **and every `lib*ffi.so`**. The
+`algol24` formula ships **no** `.so` at all, which is the whole reason `algc`
+never meets any of this and `algvm` always will.
+
+⚠️ **The two kinds of file resolve in OPPOSITE orders, and that is the fault.**
+Measured 2026-11-14 on 0.3.2:
+
+| | searched first |
+| --- | --- |
+| a `.a24` unit | the **working directory** |
+| a `.so` shared object | the VM's **bundled `lib/`** |
+
+So the VM pairs *new* Algol-24 source with *old* C. Neither half is wrong
+alone; the pairing is. A shim rebuilt here is invisible to the VM until the
+formula is rebuilt, and a new `external` answers
+`No foreign symbol 'x' in 'lib….so'.` under `algvm` while working perfectly
+under `algc`.
+
+⚠️ **It is PRECEDENCE and not blindness, which this file got wrong at first.**
+It used to say "there is no way to point the VM at a working copy"; that is too
+strong. The VM reads the working directory perfectly well — a `.so` whose
+*name* the bundle does not carry resolves there under `algvm` exactly as under
+`algc`, measured with a throwaway `libprobeffi.so`. The failure needs the
+**filename to collide** with a bundled one: the VM finds the bundled file,
+`dlopen`s it, `dlsym` misses, and it reports failure instead of trying the next
+candidate directory — stopping at the first *file* rather than searching on for
+the *symbol*. ⚠️ **`ALGOL24_LIB` does not redirect `.so` resolution either**,
+so there is no environment variable out of it.
+
+⚠️ **There is no library-side fix, and the dodge that works is not one.** An
+`in` clause takes a string literal and cannot ask what host it is on, so a
+declaration cannot branch. Naming new symbols into a *new* `.so` the bundle
+does not carry would resolve — for exactly the reason above — and is a trick
+rather than an answer. The fix is the VM's search order, in the compiler
+project.
+
+⚠️ **This bit for real in library v0.2.1.** Windows needed `Int` and `Round`
+to stop resolving `trunc`/`llrint` out of the running program, so they moved
+behind `alg_libmath_int`/`alg_libmath_round` in `mathffi.c` — correct, and it
+broke four units under `algvm` until the formula moved: `math` 17 of 78 failing,
+`random` 17 of 95, `graph` 64 of 435, `sound` 29 of 92, every one of them
+`No foreign symbol 'alg_libmath_int'`. The units that reach `math` are exactly
+the ones that broke. **So a release that adds a shim symbol has an ordering
+requirement:** the library ships, then `algol24-vm` is rebuilt against it.
 
 ⚠️ **So "works on all three processors" has to be CHECKED on three, and this
 file claimed two for a while.** `algc file.a24` is the tree-walker,
@@ -515,20 +596,15 @@ Two live documents sit in the root rather than in `finished/`:
   document's own Status block records all of this against what it asked, and
   keeps the ask unedited.
 
-  ⚠️ **The unit over those built-ins is this library's and is NOT YET
-  WRITTEN** — extension functions, so the names stay out of any file that does
-  not `uses` it [MOD-015]; a receiver written `Any` is legal and reaches an
-  instance, an Integer and a String alike, where member lookup would not —
-  confirmed on 0.3.1, both spellings. `NOTES-REFLECTION.md` holds what was
-  measured and the decisions the unit needs; the user names the unit and its
-  methods as always. Two things will bite whoever writes it, both specified
-  rather than faults: **`TypeOf (nil)` is `nil`**, so every entry point needs a
-  guard or it raises `Only instances have properties.`; and **`SetMember` does
-  not enforce the declared type**, being deliberately as permissive as an
-  untyped assignment, so the unit checks. A third constraint is **gone** — a
-  member of a consumer's class still wins over an extension of the same name
-  [EXP-022], but 0.3.2 put that warning on stderr, so the name no longer has
-  to dodge plausible member names to keep a consumer's output clean.
+  **The unit over those built-ins is `reflect`, and it is written** —
+  `Describe` and `SameContent`, both extension functions with an `Any`
+  receiver, shipped in library v0.2.0. See the `reflect` notes below for the
+  three things in it that were not obvious, and `NOTES-REFLECTION.md` for what
+  was measured. ⚠️ **What is still NOT written is the serializer**, the third
+  of the three uses this proposal named: it needs a wire format and a
+  consumer-owned name-to-type registry, and
+  `NOTES-REFLECTION.md` §5 holds it as the one open decision with the argument
+  for building a `tasks` unit first and letting its framing decide the format.
 - `REPORT-CONCURRENCY.md` answers the core's `PROPOSAL-CONCURRENCY.md` and
   **asks for nothing.** It agrees with that document's conclusion and corrects
   four of its supporting claims — chiefly that subprogram re-entry works today
@@ -548,7 +624,7 @@ here spawns a **fresh program**, never forks.
 | --- | --- | --- | --- |
 | `testing` | `AssertNear` | 9 | complete |
 | `reflect` | `Describe`, `SameContent` — both `extension`, receiver `Any`, over `Fields`/`TypeOf`/`Member` [RT-031..RT-033]; a cycle guard in each, no C and no `uses` | 30 | complete |
-| `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan`, `Int`, `Round` as `external` onto libm; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
+| `math` | `Abs`, `Sqr`, `Min`, `Max`, `Odd`, `Frac`, `Pi` in Algol-24; `Sqrt`, `Exp`, `Ln`, `Sin`, `Cos`, `ArcTan` as `external` onto libm; `Int` and `Round` onto libm's `trunc`/`llrint` through `mathffi.c`, which Windows needs; `Trunc` exact over any finite Double via `mathffi.c`; `IsNaN`, `IsInfinite`, `NaN`, `Infinity` | 69 | complete |
 | `random` | `Random`, `RandomInteger`, `RandomReal`, `Randomize`, `SetSeed`; `drand48` carried in `randomffi.c` rather than taken from libc, bit-identical and so portable, seeding via `randomffi.c` | 17 | complete |
 | `graph` | `InitGraph`, `CloseGraph`, `Delay`, `GetMaxX`, `GetMaxY`, `GetAspectRatio`, `ScreenWidth`, `ScreenHeight`, `OutText`, `OutTextXY`, `InstallUserFont`; text mode: `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `Clear` (on both surface kinds, aliased `ClrScr` and `ClearViewPort`), `ClrEol`, `DelLine`, `InsLine`, `TextCols/Rows`, `TextMode` (logical 80×25 grid, any size, GPU-scaled), `HighVideo/LowVideo/NormVideo`, `Blink` (bit 24, on the language's `clock ()`), `SetBlinkRate`, `KeyPressed`, `ReadKey`, 24 key constants incl `KeyClose`; the `Window` and `ViewPort` surface classes, stacked by `Order` around the root grid, every method also a surface-first alias; `ViewPort.SetTextStyle` turns and magnifies free text, `TextWidth`/`TextHeight` measure it in the turn and size in force, `SetTextJustify` places it about a point, `SetBkColor` says what `Clear` returns a viewport to, `GetFillPattern`, `GetFillSettings` and `GetLineSettings` read the pens back, `GetImage`/`PutImage` lift and lay a rectangle of pixels with six put modes (`TransparentPut` being the library's own) and `ImageSize` prices one, `SetWriteMode` puts the pen in XOR so a figure drawn twice leaves no mark, `SetUserCharSize` scales text by a ratio either way, `GetTextSettings`/`GetViewSettings` and `GraphDefaults` complete the pen state, `SetAspectRatio` overrides the measured stretch, `SetPalette`/`GetPalette` rebind the sixteen names per surface (a color equal to one of them is a name, anything else a literal; `PutPixel` and `PutImage` bypass); the pen — `Line`, `LineTo`, `LineRel`, `Rectangle`, `PenTo`, `PenRel`, `GetX/Y`, `SetColor`, `GetColor`, `SetLineStyle` with five styles and any thickness, `Arc`, `Circle`, `Ellipse`, `DrawPoly`, `FillPoly` (scanline in Algol-24, spans in C), `SetFillStyle`/`SetFillPattern` with the thirteen fill patterns, `Bar`, `Bar3D`, `PieSlice`, `Sector`, `FillEllipse` (filled in C, the run being what C is for), `FloodFill` (a boundary fill, the one figure that reads the surface back) and its companion `GetPixel`, `GetArcCoords` answering an `ArcCoords` recorded by all six curve verbs; `CellWidth`/`CellHeight` and `Window.PixelLeft/PixelTop` place a ViewPort against a Window's cells, 16 CGA colors, `Transparent`; `graphffi.c` carries the hex decoder, cell stamper and scroller | 300 | complete |
 | `crt` | `graph`'s text mode on a terminal: `InitCrt`, `CloseCrt`, `IsTerminal`, `TextCols/Rows` (the real terminal, following a resize), `Write`, `WriteLn` (variadic, shadowing the built-ins), `GotoXY`, `WhereX/Y`, `TextColor`, `TextBackground`, `HighVideo/LowVideo/NormVideo`, `Clear` (aliased `ClrScr`), `ClrEol`, `DelLine`, `InsLine`, `SetPalette`/`GetPalette`, `KeyPressed`, `ReadKey` with the same 23 key constants, the `Window` class stacked by `Order`, `MoveTo`, `Show`; the sixteen colors, `Transparent` and `Blink` declared a second time rather than shared; `crtffi.c` carries the tty and termios calls, the compositor, the escape transcoder and the nap that keeps `ReadKey` from spinning; the mouse through SGR reports, with the same `Event`, `SurfaceAt` and verbs `graph` has | 35 | complete |

@@ -317,11 +317,13 @@ end
 /// finite Double.
 ///
 /// libm's `trunc` is exactly this function, and declaring it with the return
-/// type C really gives it is all this takes.
+/// type C really gives it is all this takes. It is reached through
+/// `mathffi.c` rather than by its own name, because Windows has no `trunc` in
+/// the running program to resolve.
 ///
 /// # Examples
 /// `Int Answers The Integer Part As A Double`
-function Int (X : Double) : Double; external 'trunc';
+function Int (X : Double) : Double; external 'alg_libmath_int' in 'libmathffi.so';
 
 /// The fractional part of X, carrying X's sign.
 ///
@@ -358,7 +360,9 @@ end
 ///
 /// The primitive is libm's `llrint`, which rounds by the current floating-point
 /// rounding direction. Nothing here changes that direction and its default is
-/// to-nearest-with-ties-to-even, which is the rule above.
+/// to-nearest-with-ties-to-even, which is the rule above. It is reached through
+/// `mathffi.c` rather than by its own name, because Windows has no `llrint` in
+/// the running program to resolve.
 ///
 /// # Raises
 /// `Round of NaN.` and `Round of an infinity.`, which are the only values it
@@ -368,7 +372,7 @@ end
 ///
 /// # Examples
 /// `Round Answers The Nearest Integer`
-function RoundTo64 (X : Double) : Integer; external 'llrint';
+function RoundTo64 (X : Double) : Integer; external 'alg_libmath_round' in 'libmathffi.so';
 
 function Round (X : Double) : Integer;
 begin

@@ -75,9 +75,20 @@ if [ "$STATIC" = yes ]; then
     # alone, and this unit is meant to make a noise anywhere.
     AUDIO=$(sdl2-config --cflags --libs)
 
+    # Resolving "from the executable" means the executable's EXPORTS on
+    # Windows, where the runtime asks GetProcAddress of the program's own
+    # module -- and a mingw executable exports nothing unless told to, so every
+    # shim linked in answered `No foreign symbol`. vm/build.sh in the compiler
+    # repository passes the same flag for the same reason. ELF and Mach-O need
+    # nothing: dlsym on the program finds its symbols as they are.
+    EXPORT=''
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) EXPORT='-Wl,--export-all-symbols' ;;
+    esac
+
     # shellcheck disable=SC2086
     $CC $CFLAGS -DALG_FFI -o "$OUT/statistics" \
-        "$SRC"/emitted/*.c ./*ffi.c -lffi $AUDIO
+        "$SRC"/emitted/*.c ./*ffi.c -lffi $AUDIO $EXPORT
 
     echo "$OUT/statistics  (self-contained)"
 else

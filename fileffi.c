@@ -10,7 +10,8 @@
  * This is the library's first foreign code that builds anywhere. soundffi.c
  * and graphffi.c want SDL2; crtffi.c and dosffi.c are POSIX and rule out
  * Windows. Nothing here is worse than fopen, so `file` should port wherever a
- * C compiler goes.
+ * C compiler goes. On Windows the paths go through the wide calls instead --
+ * see "the paths" below -- which is the one place it says <windows.h>.
  *
  * NOTHING HERE RETURNS A POINTER TO ALGOL-24
  *
@@ -56,14 +57,165 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+/* ------------------------------------------------------------- the paths -- */
+/*
+ * Every path this file touches goes through the seven below, and they are
+ * the whole of what differs between hosts.
+ *
+ * ⚠️ ON WINDOWS THEY ARE WIDE, because the language's text is UTF-8 and the
+ * narrow C library is not. fopen, stat, remove, rename and opendir under
+ * msvcrt decode a path by the ANSI code page, so `café.txt` named a file
+ * nobody had made -- and readdir answered names in that code page coming
+ * back. `Exec` lost 'café ✓' the same way and was measured doing it; this is
+ * the same fix: widen once with MultiByteToWideChar and call the W form.
+ * A path that is not valid UTF-8 is refused rather than guessed at.
+ *
+ * _wstat64 rather than _wstat, which also mends a second thing: mingw's
+ * plain stat has a 32-bit st_size, so FileSize of a file past 2 GB was wrong
+ * there whatever its name.
+ *
+ * Elsewhere the seven are the C library's own, unchanged.
+ */
+
+#ifdef _WIN32
+
+#include <windows.h>
+#include <wchar.h>
+
+/* A UTF-8 path as UTF-16, malloc'd, or NULL if it is not valid UTF-8. */
+static wchar_t *path_wide (const char *utf8)
+{
+    int need = MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1,
+                                    NULL, 0);
+    if (need <= 0) return NULL;
+
+    wchar_t *wide = malloc ((size_t) need * sizeof *wide);
+    if (wide == NULL) return NULL;
+
+    if (!MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1,
+                              wide, need))
+    {
+        free (wide);
+        return NULL;
+    }
+
+    return wide;
+}
+
+typedef struct _stat64 path_stat_t;
+
+static int path_stat (const char *path, path_stat_t *st)
+{
+    wchar_t *wide = path_wide (path);
+    if (wide == NULL) return -1;
+
+    int answer = _wstat64 (wide, st);
+
+    free (wide);
+    return answer;
+}
+
+static FILE *path_fopen (const char *path, const char *how)
+{
+    wchar_t *wide = path_wide (path);
+    wchar_t *mode = path_wide (how);
+    FILE    *f    = (wide != NULL && mode != NULL) ? _wfopen (wide, mode) : NULL;
+
+    free (wide);
+    free (mode);
+    return f;
+}
+
+static int path_remove (const char *path)
+{
+    wchar_t *wide = path_wide (path);
+    if (wide == NULL) return -1;
+
+    int answer = _wremove (wide);
+
+    free (wide);
+    return answer;
+}
+
+static int path_rename (const char *from, const char *to)
+{
+    wchar_t *a = path_wide (from);
+    wchar_t *b = path_wide (to);
+    int      answer = (a != NULL && b != NULL) ? _wrename (a, b) : -1;
+
+    free (a);
+    free (b);
+    return answer;
+}
+
+typedef _WDIR path_dir_t;
+
+static path_dir_t *path_opendir (const char *path)
+{
+    wchar_t *wide = path_wide (path);
+    if (wide == NULL) return NULL;
+
+    _WDIR *d = _wopendir (wide);
+
+    free (wide);
+    return d;
+}
+
+/* The next name as UTF-8, or NULL when none is left. The buffer is reused,
+ * which is safe because the one caller copies the name out at once. A name
+ * that does not convert is skipped rather than answered mangled. */
+static const char *path_next_name (path_dir_t *d)
+{
+    static char name[1024];
+
+    for (;;)
+    {
+        struct _wdirent *e = _wreaddir (d);
+        if (e == NULL) return NULL;
+
+        if (WideCharToMultiByte (CP_UTF8, 0, e->d_name, -1, name,
+                                 (int) sizeof name, NULL, NULL) > 0)
+            return name;
+    }
+}
+
+static void path_closedir (path_dir_t *d)
+{
+    _wclosedir (d);
+}
+
+#else
+
+typedef struct stat path_stat_t;
+
+static int path_stat (const char *path, path_stat_t *st) { return stat (path, st); }
+static FILE *path_fopen (const char *path, const char *how) { return fopen (path, how); }
+static int path_remove (const char *path) { return remove (path); }
+static int path_rename (const char *from, const char *to) { return rename (from, to); }
+
+typedef DIR path_dir_t;
+
+static path_dir_t *path_opendir (const char *path) { return opendir (path); }
+
+static const char *path_next_name (path_dir_t *d)
+{
+    struct dirent *e = readdir (d);
+
+    return e == NULL ? NULL : e->d_name;
+}
+
+static void path_closedir (path_dir_t *d) { closedir (d); }
+
+#endif
+
 /* Whether a path exists at all, directory or not. */
 int64_t alg_libfile_exists (const char *path)
 {
-    struct stat st;
+    path_stat_t st;
 
     if (path == NULL) return 0;
 
-    return stat (path, &st) == 0 ? 1 : 0;
+    return path_stat (path, &st) == 0 ? 1 : 0;
 }
 
 /* Whether a path is a directory.
@@ -74,10 +226,10 @@ int64_t alg_libfile_exists (const char *path)
  */
 int64_t alg_libfile_isdir (const char *path)
 {
-    struct stat st;
+    path_stat_t st;
 
     if (path == NULL) return 0;
-    if (stat (path, &st) != 0) return 0;
+    if (path_stat (path, &st) != 0) return 0;
 
     return S_ISDIR (st.st_mode) ? 1 : 0;
 }
@@ -89,10 +241,10 @@ int64_t alg_libfile_isdir (const char *path)
  */
 int64_t alg_libfile_size (const char *path)
 {
-    struct stat st;
+    path_stat_t st;
 
     if (path == NULL) return -1;
-    if (stat (path, &st) != 0) return -1;
+    if (path_stat (path, &st) != 0) return -1;
     if (S_ISDIR (st.st_mode)) return -1;
 
     return (int64_t) st.st_size;
@@ -160,7 +312,7 @@ int64_t alg_libfile_open (const char *path, int64_t mode)
 
     if (slot < 0) return -1;
 
-    FILE *f = fopen (path, how);
+    FILE *f = path_fopen (path, how);
 
     if (f == NULL) return -1;
 
@@ -291,7 +443,7 @@ int64_t alg_libfile_copy_bytes (void *dst, int64_t dst_off, const void *src,
 
 #define ALG_MAX_DIRS 16
 
-static DIR *dirs[ALG_MAX_DIRS];
+static path_dir_t *dirs[ALG_MAX_DIRS];
 
 /* Opens a directory and answers a handle, or -1. */
 int64_t alg_libdir_open (const char *path)
@@ -305,7 +457,7 @@ int64_t alg_libdir_open (const char *path)
 
     if (slot < 0) return -1;
 
-    DIR *d = opendir (path);
+    path_dir_t *d = path_opendir (path);
 
     if (d == NULL) return -1;
 
@@ -329,19 +481,19 @@ int64_t alg_libdir_next (int64_t handle, void *into, int64_t max)
 
     for (;;)
     {
-        struct dirent *e = readdir (dirs[handle]);
+        const char *name = path_next_name (dirs[handle]);
 
-        if (e == NULL) return 0;                    /* nothing left */
+        if (name == NULL) return 0;                 /* nothing left */
 
         /* Skip the two that are not really entries. */
-        if (strcmp (e->d_name, ".") == 0) continue;
-        if (strcmp (e->d_name, "..") == 0) continue;
+        if (strcmp (name, ".") == 0) continue;
+        if (strcmp (name, "..") == 0) continue;
 
-        size_t len = strlen (e->d_name);
+        size_t len = strlen (name);
 
         if ((int64_t) len > max) return -1;
 
-        memcpy (into, e->d_name, len);
+        memcpy (into, name, len);
 
         return (int64_t) len;
     }
@@ -354,7 +506,7 @@ void alg_libdir_close (int64_t handle)
     if (handle < 0 || handle >= ALG_MAX_DIRS) return;
     if (dirs[handle] == NULL) return;
 
-    closedir (dirs[handle]);
+    path_closedir (dirs[handle]);
 
     dirs[handle] = NULL;
 }
@@ -436,7 +588,7 @@ int64_t alg_libfile_read (const char *path, void *into, int64_t max)
 {
     if (path == NULL || into == NULL || max < 0) return -1;
 
-    FILE *f = fopen (path, "rb");
+    FILE *f = path_fopen (path, "rb");
 
     if (f == NULL) return -1;
 
@@ -457,7 +609,7 @@ int64_t alg_libfile_write (const char *path, const char *text, int64_t append)
 {
     if (path == NULL || text == NULL) return 0;
 
-    FILE *f = fopen (path, append ? "ab" : "wb");
+    FILE *f = path_fopen (path, append ? "ab" : "wb");
 
     if (f == NULL) return 0;
 
@@ -474,7 +626,7 @@ int64_t alg_libfile_erase (const char *path)
 {
     if (path == NULL) return 0;
 
-    return remove (path) == 0 ? 1 : 0;
+    return path_remove (path) == 0 ? 1 : 0;
 }
 
 /* Renames or moves a file. Answers 1 for moved and 0 for not. */
@@ -482,7 +634,7 @@ int64_t alg_libfile_rename (const char *from, const char *to)
 {
     if (from == NULL || to == NULL) return 0;
 
-    return rename (from, to) == 0 ? 1 : 0;
+    return path_rename (from, to) == 0 ? 1 : 0;
 }
 
 /* Copies a file, a block at a time.
@@ -495,11 +647,11 @@ int64_t alg_libfile_copy (const char *from, const char *to)
 {
     if (from == NULL || to == NULL) return 0;
 
-    FILE *in = fopen (from, "rb");
+    FILE *in = path_fopen (from, "rb");
 
     if (in == NULL) return 0;
 
-    FILE *out = fopen (to, "wb");
+    FILE *out = path_fopen (to, "wb");
 
     if (out == NULL) { fclose (in); return 0; }
 
