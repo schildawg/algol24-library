@@ -39,9 +39,53 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include <wchar.h>
 
-#define ALG_ENVIRON _environ
 #define alg_strdup  _strdup
+
+/* ⚠️ The language's text is UTF-8 and Windows' narrow calls are not: they
+ * decode by the ANSI code page, so a non-ASCII path, variable name or value
+ * meant something else on the way in and came back mangled. Exec lost
+ * 'café ✓' that way, measured; every call below that takes or answers text
+ * goes through these two and the W entry point instead. */
+
+/* UTF-8 as UTF-16, malloc'd, or NULL if it is not valid UTF-8. */
+static wchar_t *wide_of (const char *utf8)
+{
+    int need = MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1,
+                                    NULL, 0);
+    if (need <= 0) return NULL;
+
+    wchar_t *wide = malloc ((size_t) need * sizeof *wide);
+    if (wide == NULL) return NULL;
+
+    if (!MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1,
+                              wide, need))
+    {
+        free (wide);
+        return NULL;
+    }
+
+    return wide;
+}
+
+/* UTF-16 as UTF-8, malloc'd, or NULL. */
+static char *utf8_of (const wchar_t *wide)
+{
+    int need = WideCharToMultiByte (CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
+    if (need <= 0) return NULL;
+
+    char *utf8 = malloc ((size_t) need);
+    if (utf8 == NULL) return NULL;
+
+    if (!WideCharToMultiByte (CP_UTF8, 0, wide, -1, utf8, need, NULL, NULL))
+    {
+        free (utf8);
+        return NULL;
+    }
+
+    return utf8;
+}
 
 #else
 
@@ -84,18 +128,20 @@ static int64_t disk_bytes (const char *path, int total)
      * volume it would be on, so '/no/such/path/anywhere' answered C:\'s free
      * space where statvfs refuses it. The unit documents a refusal for a path
      * that is not there, so ask whether this one is before mapping it. */
-    if (GetFileAttributesA (path) == INVALID_FILE_ATTRIBUTES) return -1;
+    wchar_t *wide = wide_of (path);
+    if (wide == NULL) return -1;
 
-    char volume[MAX_PATH + 1];
-
-    if (!GetVolumePathNameA (path, volume, (DWORD) sizeof volume))
-        return -1;
-
+    wchar_t        volume[MAX_PATH + 1];
     ULARGE_INTEGER available;   /* to this caller, quotas included */
     ULARGE_INTEGER capacity;
 
-    if (!GetDiskFreeSpaceExA (volume, &available, &capacity, NULL))
-        return -1;
+    int ok = GetFileAttributesW (wide) != INVALID_FILE_ATTRIBUTES
+          && GetVolumePathNameW (wide, volume, MAX_PATH + 1)
+          && GetDiskFreeSpaceExW (volume, &available, &capacity, NULL);
+
+    free (wide);
+
+    if (!ok) return -1;
 
     return (int64_t) (total ? capacity.QuadPart : available.QuadPart);
 }
@@ -158,6 +204,117 @@ int64_t alg_libdos_disk_size (const char *path)
  * hold it, writing nothing in that case, so a caller can size and retry. The
  * unit does not retry: it asks the length first.
  */
+/* Copies UTF-8 text into a caller's buffer under the size-and-retry contract
+ * below, and answers its length. */
+static int64_t copy_out (const char *text, void *out, int64_t max)
+{
+    size_t len = strlen (text);
+
+    if (out != NULL && max >= (int64_t) len)
+        memcpy (out, text, len);
+
+    return (int64_t) len;
+}
+
+#ifdef _WIN32
+
+/* The environment block's entries one by one, in the C library's sense of
+ * "the environment": an entry starting with '=' is one of Windows' hidden
+ * per-drive directories, '=C:=C:\work', which _environ never listed and
+ * Environment therefore never has. Answers the entry at `index` as UTF-8,
+ * malloc'd, or NULL past the end; with index -1 it answers NULL and leaves
+ * the count in *count.
+ *
+ * The block rather than _wenviron, which msvcrt leaves NULL until something
+ * has asked for the wide environment -- an empty Environment for no reason. */
+static char *env_entry (int64_t index, int64_t *count)
+{
+    wchar_t *block = GetEnvironmentStringsW ();
+    int64_t  n     = 0;
+    char    *found = NULL;
+
+    if (block == NULL) { if (count) *count = 0; return NULL; }
+
+    for (wchar_t *at = block; *at != L'\0'; at += wcslen (at) + 1)
+    {
+        if (*at == L'=') continue;
+
+        if (n == index) { found = utf8_of (at); break; }
+
+        n++;
+    }
+
+    FreeEnvironmentStringsW (block);
+
+    if (count) *count = n;
+    return found;
+}
+
+int64_t alg_libdos_getenv (const char *name, void *out, int64_t max)
+{
+    if (name == NULL)
+        return -1;
+
+    wchar_t *wide = wide_of (name);
+    if (wide == NULL) return -1;
+
+    /* Asked once for the size and once for the value, which is the API's own
+     * contract; 0 from the first means the variable is not set. */
+    DWORD need = GetEnvironmentVariableW (wide, NULL, 0);
+
+    if (need == 0) { free (wide); return -1; }
+
+    wchar_t *value = malloc ((size_t) need * sizeof *value);
+    DWORD    got   = value ? GetEnvironmentVariableW (wide, value, need) : 0;
+
+    free (wide);
+
+    if (value == NULL || got >= need)
+    {
+        free (value);
+        return -1;
+    }
+
+    char *utf8 = utf8_of (value);
+    free (value);
+
+    if (utf8 == NULL) return -1;
+
+    int64_t len = copy_out (utf8, out, max);
+
+    free (utf8);
+    return len;
+}
+
+/* How many NAME=VALUE entries the environment holds. */
+int64_t alg_libdos_env_count (void)
+{
+    int64_t n = 0;
+
+    env_entry (-1, &n);
+
+    return n;
+}
+
+/* Copies entry `index` into a caller's buffer and answers its length, or -1
+ * for an index outside the environment. Same size-and-retry contract as
+ * alg_libdos_getenv. */
+int64_t alg_libdos_env_at (int64_t index, void *out, int64_t max)
+{
+    if (index < 0) return -1;
+
+    char *entry = env_entry (index, NULL);
+
+    if (entry == NULL) return -1;
+
+    int64_t len = copy_out (entry, out, max);
+
+    free (entry);
+    return len;
+}
+
+#else
+
 int64_t alg_libdos_getenv (const char *name, void *out, int64_t max)
 {
     if (name == NULL)
@@ -168,12 +325,7 @@ int64_t alg_libdos_getenv (const char *name, void *out, int64_t max)
     if (value == NULL)
         return -1;
 
-    size_t len = strlen (value);
-
-    if (out != NULL && max >= (int64_t) len)
-        memcpy (out, value, len);
-
-    return (int64_t) len;
+    return copy_out (value, out, max);
 }
 
 /* How many NAME=VALUE entries the environment holds. */
@@ -211,13 +363,10 @@ int64_t alg_libdos_env_at (int64_t index, void *out, int64_t max)
     if (entry == NULL)
         return -1;
 
-    size_t len = strlen (entry);
-
-    if (out != NULL && max >= (int64_t) len)
-        memcpy (out, entry, len);
-
-    return (int64_t) len;
+    return copy_out (entry, out, max);
 }
+
+#endif
 
 /* -------------------------------------------------- running a program ----- */
 
@@ -401,7 +550,23 @@ int64_t alg_libdos_spawn (const char *path)
 
     line[at] = '\0';
 
-    STARTUPINFOA        si;
+    /* ⚠️ WIDE, because the language's text is UTF-8 and the A entry point is
+     * not. CreateProcessA decodes by the ANSI code page, so 'café ✓' reached
+     * the child as 'cafÃ© âœ“' -- each UTF-8 byte its own cp1252 character.
+     * Measured with a child reporting CommandLineToArgvW's split: every ASCII
+     * case arrived exact, quotes and backslash runs included, and only the
+     * non-ASCII one did not. The line is built in UTF-8 as before and widened
+     * once, path and all. */
+    static wchar_t wide_line[32768];
+    static wchar_t wide_path[32768];
+
+    if (!MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, line, -1,
+                              wide_line, 32768)
+        || !MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                                 wide_path, 32768))
+        return -1;
+
+    STARTUPINFOW        si;
     PROCESS_INFORMATION pi;
 
     ZeroMemory (&si, sizeof si);
@@ -412,7 +577,7 @@ int64_t alg_libdos_spawn (const char *path)
     /* The path is passed as lpApplicationName as well as heading the line, so
      * Windows does not go searching and `C:\Program Files\x.exe` cannot be
      * read as `C:\Program` with an argument. */
-    if (!CreateProcessA (path, line, NULL, NULL, FALSE, 0, NULL, NULL,
+    if (!CreateProcessW (wide_path, wide_line, NULL, NULL, FALSE, 0, NULL, NULL,
                          &si, &pi))
         return -1;
 

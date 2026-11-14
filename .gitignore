@@ -1,6 +1,8 @@
 # The library's own C, built by ./build.sh. Generated, and platform-specific.
 lib*ffi.dylib
 lib*ffi.so
+# The Windows-only child dos's tests Exec, also built by ./build.sh.
+dosargs.exe
 
 # The example application, built by examples/build.sh.
 examples/build/

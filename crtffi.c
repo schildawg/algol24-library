@@ -50,11 +50,13 @@
  * are the whole of what it needs from an operating system. POSIX and Windows
  * answer them differently; nothing else in the file knows which it is on.
  *
- * ⚠️ The Windows half is COMPILE-VERIFIED ONLY. It builds with mingw-w64 and
- * has never been run, there being no Windows machine in reach -- see
- * CLAUDE.md. The parts most likely to want work on real hardware are
- * tty_raw's virtual-terminal flags and tty_read_byte's non-blocking poll,
- * both noted where they sit.
+ * ⚠️ The Windows half has been RUN, on Windows 11 in a real console, and
+ * needed one fix to be right: tty_raw now sets the console's code pages to
+ * UTF-8, without which every frame drew as mojibake. Verified by reading the
+ * screen back from outside the process: modes, code pages and the painted
+ * rows. The key reader -- tty_read_byte's non-blocking poll -- has received
+ * an injected Esc and nothing harder, so arrows and resizes still want a
+ * person at the keyboard. See CLAUDE.md.
  */
 
 #ifdef _WIN32
@@ -85,6 +87,8 @@ static int tty_size (int64_t *cols, int64_t *rows)
 
 static DWORD saved_in_mode  = 0;
 static DWORD saved_out_mode = 0;
+static UINT  saved_out_cp   = 0;
+static UINT  saved_in_cp    = 0;
 
 /* Raw mode, Windows' way.
  *
@@ -104,6 +108,18 @@ static DWORD saved_out_mode = 0;
  * the escapes the painter writes, rather than printing them. Both flags want
  * Windows 10 1511 or newer; on anything older SetConsoleMode fails and this
  * answers 0, which the unit reads as "no raw mode" and keeps quiet about.
+ *
+ * ⚠️ The output flag is set FIRST and on its own. It used to be reached only
+ * once the input side had succeeded, so a console refusing the input flags
+ * would also have printed every escape as text -- two failures for one cause.
+ *
+ * ⚠️ AND THE CODE PAGES, which the first run on real hardware found: with
+ * both flags on, the colors and the cursor were right and every frame was
+ * mojibake -- '╔═══' drawn as 'â•”â•â•'. The painter writes UTF-8 and a
+ * Windows console decodes by its code page, which is the OEM one (437 or
+ * 1252) unless a program asks; nothing had. Both pages go to CP_UTF8 here --
+ * output for the frames, input so a typed non-ASCII key arrives as the UTF-8
+ * the decoder reads -- and both are put back on leaving, as the modes are.
  */
 static int tty_raw (int on)
 {
@@ -114,6 +130,15 @@ static int tty_raw (int on)
 
     if (on)
     {
+        saved_out_cp = GetConsoleOutputCP ();
+        saved_in_cp  = GetConsoleCP ();
+        SetConsoleOutputCP (CP_UTF8);
+        SetConsoleCP (CP_UTF8);
+
+        if (out != INVALID_HANDLE_VALUE && GetConsoleMode (out, &saved_out_mode))
+            SetConsoleMode (out, saved_out_mode
+                                 | (DWORD) ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
         if (!GetConsoleMode (in, &saved_in_mode)) return 0;
 
         DWORD raw = saved_in_mode;
@@ -124,10 +149,6 @@ static int tty_raw (int on)
 
         if (!SetConsoleMode (in, raw)) return 0;
 
-        if (out != INVALID_HANDLE_VALUE && GetConsoleMode (out, &saved_out_mode))
-            SetConsoleMode (out, saved_out_mode
-                                 | (DWORD) ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-
         return 1;
     }
 
@@ -135,6 +156,9 @@ static int tty_raw (int on)
 
     if (out != INVALID_HANDLE_VALUE && saved_out_mode != 0)
         SetConsoleMode (out, saved_out_mode);
+
+    if (saved_out_cp != 0) SetConsoleOutputCP (saved_out_cp);
+    if (saved_in_cp  != 0) SetConsoleCP (saved_in_cp);
 
     return 1;
 }

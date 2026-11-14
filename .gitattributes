@@ -1,0 +1,8 @@
+# ⚠️ Fixtures are byte-exact, and git's end-of-line conversion rewrites them.
+#
+# Git for Windows checks out with core.autocrlf=true, which turns every LF in
+# a text file into CRLF -- so a test reading testdata/日本 ✓.txt back would see
+# a '\r' nobody wrote, and fail on Windows only, for a reason having nothing to
+# do with what it tests. The compiler repository holds its corpora the same
+# way, for the same reason.
+testdata/** -text

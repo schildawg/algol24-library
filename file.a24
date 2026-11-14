@@ -2429,6 +2429,65 @@ begin
     RmDir (Dir);
 end
 
+/// A name is the language's text, UTF-8, and has to mean the same file on
+/// every host. Windows' narrow calls decode a path by the ANSI code page, so
+/// before the shims went wide `café ✓.txt` named some other file there and a
+/// listing answered its name mangled. Every routine that takes a path is
+/// asked here, and the listing is asked to give the names back exactly.
+test 'A Non-ASCII Name Means The Same File Throughout';
+begin
+    var Dir   := 'alg-dir-names';
+    var First := Dir + '/café ✓.txt';
+    var Other := Dir + '/naïve — 日本.txt';
+
+    MkDir (Dir);
+
+    WriteAll (First, 'one');
+    AppendAll (First, ' two');
+
+    AssertTrue (Exists (First));
+    AssertTrue (not IsDirectory (First));
+    AssertEqual (7, FileSize (First));
+    AssertEqual ('one two', ReadAll (First));
+
+    CopyFile (First, Other);
+    AssertEqual ('one two', ReadAll (Other));
+
+    var Names := Entries (Dir);
+
+    AssertEqual (2, Names.Length);
+    AssertTrue ('café ✓.txt' in Names);
+    AssertTrue ('naïve — 日本.txt' in Names);
+
+    Erase (Other);
+    Rename (First, Other);
+
+    AssertTrue (not Exists (First));
+    AssertEqual ('one two', ReadAll (Other));
+
+    Erase (Other);
+    AssertTrue (not Exists (Other));
+
+    RmDir (Dir);
+end
+
+/// The test above cannot fail on its own: a library that mangled every name
+/// the same way would find, read and list its own mangled files perfectly.
+/// What catches it is a name made by SOMEONE ELSE -- here git, which checks
+/// `testdata/日本 ✓.txt` out under its real name. Before the shims went wide,
+/// Windows looked for `æ—¥æœ¬ âœ“.txt` and listed `?? ?.txt`.
+///
+/// Ideographs and a check mark, because neither has a decomposed form for a
+/// filesystem's normalization to change.
+test 'A Non-ASCII Name Made Elsewhere Is Found And Listed';
+begin
+    var Name := 'testdata/日本 ✓.txt';
+
+    AssertTrue (Exists (Name));
+    AssertEqual ('written by git, not by this library' + #10, ReadAll (Name));
+    AssertTrue ('日本 ✓.txt' in Entries ('testdata'));
+end
+
 /// # Examples cites this by name from `Entries`.
 test 'Entries Answers The Same Names As Directory';
 begin

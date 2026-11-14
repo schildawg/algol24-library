@@ -53,3 +53,15 @@ for SRC in ./*ffi.c; do
     $CC $CFLAGS $SHARED -o "lib$NAME.so" "$SRC" $LINK
     echo "lib$NAME.so"
 done
+
+# The child dos's Exec test runs on Windows, where an argument travels as one
+# command line and only a program that reports Windows' own split of it can
+# say whether it survived. Built there and nowhere else: a POSIX Exec passes a
+# real vector, and its test needs nothing but /bin/sh. See dosargs.c.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # shellcheck disable=SC2086
+        $CC $CFLAGS -o dosargs.exe dosargs.c -lshell32
+        echo "dosargs.exe"
+        ;;
+esac

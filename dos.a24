@@ -386,6 +386,18 @@ begin
     AssertEqual ('', EnvValue ('bare'));
 end
 
+/// A variable's value is text, and comes back as the UTF-8 it was set as.
+/// Windows' narrow getenv and environ decode by the ANSI code page, which is
+/// what this was written to catch; `./test.sh` sets the variable, and a run
+/// without it skips the test rather than failing.
+test 'GetEnv And Environment Answer Non-ASCII Text Exactly';
+begin
+    if not HasEnv ('ALGOL24_TEST_TEXT') then Exit;
+
+    AssertEqual ('café ✓', GetEnv ('ALGOL24_TEST_TEXT'));
+    AssertTrue ('ALGOL24_TEST_TEXT=café ✓' in Environment ());
+end
+
 /// And what Environment answers must agree with what GetEnv answers for the
 /// same name, or one of the two is reading the wrong block.
 test 'Environment Agrees With GetEnv';
@@ -432,12 +444,38 @@ end
 
 /// The arguments have to arrive, which a program that reports them can show.
 ///
-/// Not checked on Windows, where no program the system ships reports its
-/// arguments as `CommandLineToArgvW` splits them -- `cmd` reparses its own
-/// line -- so the quoting `dosffi.c` does there is unexercised by this suite.
+/// On Windows there is no vector to pass: `dosffi.c` builds one command line
+/// and the child splits it again, so the hard cases are the quoting's --
+/// spaces, quotes, runs of backslashes, the empty string, non-ASCII text.
+/// No program Windows ships reports its arguments as `CommandLineToArgvW`
+/// splits them, so `./build.sh` compiles one there: `dosargs.exe` answers 0
+/// only if it received exactly these, and 100 plus the position of the first
+/// that did not survive otherwise.
 test 'Exec Passes Its Arguments To The Program';
 begin
-    if OnWindows () then Exit;
+    if OnWindows () then
+    begin
+        var Hard := List ();
+
+        Hard.Add ('plain');
+        Hard.Add ('a b');
+        Hard.Add ('c;d');
+        Hard.Add ('');
+        Hard.Add ('tab' + #9 + 'inside');
+        Hard.Add ('say "hi"');
+        Hard.Add ('"');
+        Hard.Add ('C:\dir\');
+        Hard.Add ('C:\a dir\');
+        Hard.Add ('back\\"slash');
+        Hard.Add ('\\server\share');
+        Hard.Add ('%PATH%');
+        Hard.Add ('a&b|c<d>e^f');
+        Hard.Add ('café ✓');
+
+        AssertEqual (0, Exec ('dosargs.exe', Hard));
+
+        Exit;
+    end
 
     var Args := List ();
 

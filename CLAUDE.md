@@ -228,13 +228,44 @@ claim about this library should be compiled rather than reasoned about.
   library's own were `trunc`/`llrint` moving into `mathffi.c`, `FullPath`
   learning drive letters, `DiskFree` refusing a missing path, UTF-8 in
   `check-reference.py`, and `--export-all-symbols` for the static example.
-- ⚠️ **What that run did NOT exercise.** `crt`'s tests run with no terminal
-  attached, so its virtual-terminal flags and non-blocking console poll —
-  the parts most likely to need work on real hardware — have still never
-  driven a real console. `Exec`'s Windows quoting is untested: Windows ships
-  no program that reports its argv as `CommandLineToArgvW` splits it, so that
-  test skips there, as does the signal test, Windows having no signals. And
-  `graph` and `sound` ran under SDL's dummy drivers only.
+- ⚠️ **`crt` has painted a real console, and its keys are half-checked.**
+  Its tests run with no terminal attached, so the first real run was
+  `examples/ide-crt.a24` in a Windows 11 console — and every frame drew as
+  mojibake, `╔═══` as `â•”â•â•`. Not ANSI, which was on: the CODE PAGE, the
+  console decoding crt's UTF-8 as OEM 437. `tty_raw` now switches both code
+  pages to UTF-8 and restores them on leaving. Verified by attaching to the
+  running program's console from outside and reading modes, code pages and
+  the painted rows back. The key reader has received an injected Esc and
+  nothing harder; arrows and resizes want a person.
+- ⚠️ **`Exec`'s Windows quoting is TESTED now, by a child built for it.**
+  No program Windows ships reports its argv as `CommandLineToArgvW` splits
+  it, so `./build.sh` compiles `dosargs.c` there into one that does, and
+  `Exec Passes Its Arguments To The Program` hands it fourteen hard cases —
+  spaces, an empty string, a lone quote, backslash runs before quotes and at
+  the end, cmd's metacharacters, `%PATH%`, and `café ✓`. Every ASCII case
+  survived the existing quoting; the non-ASCII one did not, because
+  `CreateProcessA` decodes by the ANSI code page, and `dosffi.c` now widens
+  the line and calls `CreateProcessW`. A deliberately wrong argument answers
+  `114`, so the test cannot pass vacuously. The signal test still skips on
+  Windows, which has no signals. And `graph` and `sound` ran under SDL's
+  dummy drivers only.
+- ⚠️ **Every Windows call that takes or answers text is WIDE now.** The
+  narrow ones — `fopen`, `stat`, `remove`, `rename`, `opendir`, `getenv`,
+  `_environ` and the `A` entry points — decode by the ANSI code page under
+  msvcrt, so a non-ASCII path or variable meant something else. `fileffi.c`
+  routes every path through seven wrappers (`path_stat`, `path_fopen`, …) that
+  widen once and call the `_w` form; `dosffi.c` does the same for the disk,
+  the environment and `Exec`. The compiler's runtime had the identical fault
+  in `TextFile`, `MkDir`/`ChDir`/`GetDir`, `Entries`, `FileExists`,
+  `LoadLibrary` and `main`'s `argv`, fixed on the same branch.
+- ⚠️ **A round trip CANNOT catch this, which is the lesson.** Mangling every
+  name the same way, the narrow `file` found, read, renamed and listed its own
+  files perfectly — `A Non-ASCII Name Means The Same File Throughout` passed
+  against the broken shims. Only a name made by someone else shows it: git
+  checks `testdata/日本 ✓.txt` out under its real name, and the narrow calls
+  looked for `æ—¥æœ¬ âœ“.txt`. That fixture is what holds the fix, and it is why
+  `testdata/**` is byte-exact in `.gitattributes`. Likewise `GetEnv` is held by
+  a value `test.sh` exports, and `Exec` by `dosargs.exe`.
 - ⚠️ **The run went through Git for Windows' default `core.autocrlf=true`**,
   so every source was CRLF on disk. Nothing here minded, but a Windows
   result is a result for that checkout.
@@ -262,7 +293,9 @@ Three things in that port are worth knowing:
   takes a command *line* and offers no vector form, which is the exact hazard
   `Exec` exists to avoid — so `dosffi.c` rebuilds the line with
   `CommandLineToArgvW`'s quoting rules, doubling backslash runs before a quote
-  so the child reconstructs the arguments that went in. And Windows has no
+  so the child reconstructs the arguments that went in — measured exact by
+  `dosargs.exe`, and passed through `CreateProcessW` so UTF-8 text survives
+  too. And Windows has no
   signals, so the documented "128 plus the signal number" has no meaning
   there: a faulting process answers its NTSTATUS, a large number rather than a
   small one.
