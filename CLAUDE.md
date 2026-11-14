@@ -235,8 +235,10 @@ claim about this library should be compiled rather than reasoned about.
   console decoding crt's UTF-8 as OEM 437. `tty_raw` now switches both code
   pages to UTF-8 and restores them on leaving. Verified by attaching to the
   running program's console from outside and reading modes, code pages and
-  the painted rows back. The key reader has received an injected Esc and
-  nothing harder; arrows and resizes want a person.
+  the painted rows back. The key reader was then checked by hand on
+  2026-11-14 — arrows dragging Watch over Notes, Tab, Home, a resized window
+  and Esc — and behaved, so `crt` has now driven a real Windows console end
+  to end.
 - ⚠️ **`Exec`'s Windows quoting is TESTED now, by a child built for it.**
   No program Windows ships reports its argv as `CommandLineToArgvW` splits
   it, so `./build.sh` compiles `dosargs.c` there into one that does, and

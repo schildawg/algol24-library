@@ -54,9 +54,9 @@
  * needed one fix to be right: tty_raw now sets the console's code pages to
  * UTF-8, without which every frame drew as mojibake. Verified by reading the
  * screen back from outside the process: modes, code pages and the painted
- * rows. The key reader -- tty_read_byte's non-blocking poll -- has received
- * an injected Esc and nothing harder, so arrows and resizes still want a
- * person at the keyboard. See CLAUDE.md.
+ * rows. The key reader -- tty_read_byte's non-blocking poll -- was checked by
+ * hand: arrows, Tab, Home, a resized window and Esc all behaved. See
+ * CLAUDE.md.
  */
 
 #ifdef _WIN32
